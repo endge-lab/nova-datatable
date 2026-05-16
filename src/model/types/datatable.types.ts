@@ -1,6 +1,5 @@
-import type { NovaSchema } from '@endge/nova'
+import type { NovaSchema, RendererType } from '@endge/nova'
 import type { NovaUiCommonProps, NovaUiCommonResolvedProps } from '@endge/nova-ui-kit'
-import type { RendererType } from '@endge/nova'
 
 export const DATATABLE_ROOT_SCHEMA_TYPE = 'NovaDataTable.Root'
 

@@ -26,8 +26,8 @@ const primitiveProps = [
 function createDataTableDslMarker(name: string, props: ComponentObjectPropsOptions = {}) {
   return defineComponent({
     name,
-    props,
     inheritAttrs: false,
+    props,
     setup(_props, { slots }) {
       return () => slots.default?.() ?? null
     },

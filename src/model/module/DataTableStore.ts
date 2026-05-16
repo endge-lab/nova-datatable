@@ -215,6 +215,7 @@ implements DataTableStoreApi<Row> {
     const promise = Promise.resolve(this.source.loadRange({ start, end }))
       .then(rows => {
         if (Array.isArray(rows)) this.replaceRange(start, rows)
+        return undefined
       })
       .finally(() => {
         this.pendingRanges.delete(key)

@@ -52,6 +52,10 @@ interface DataTableVueProps {
 }
 
 const props = withDefaults(defineProps<DataTableVueProps>(), {
+  store: undefined,
+  rows: undefined,
+  data: undefined,
+  rowKey: undefined,
   width: '100%',
   height: '100%',
   maxDpr: 2,
@@ -61,6 +65,11 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   headerHeight: 40,
   overscanRows: 16,
   overscanColumns: 4,
+  cellTemplate: undefined,
+  headerTemplate: undefined,
+  onViewportChange: undefined,
+  onColumnResize: undefined,
+  devtools: undefined,
   columns: () => [],
   pinnedColumns: () => ({}),
   pinnedRows: () => ({}),

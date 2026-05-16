@@ -153,6 +153,7 @@ export class DataTableRootNode<
     this.viewport = this.createViewport()
     void this.store.ensureRange(this.viewport.rowRange).then(() => {
       this.refresh(['data'])
+      return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
   }
