@@ -27,6 +27,8 @@ interface Row {
 
 type TestEvents = Record<string, any>
 
+let canvasContextStub: Record<PropertyKey, any> | null = null
+
 function rows(count: number, start = 0): Array<Row> {
   return Array.from({ length: count }, (_item, index) => {
     const id = start + index
@@ -44,6 +46,7 @@ function create2DContextStub(): CanvasRenderingContext2D {
     measureText: vi.fn((text: string) => ({ width: text.length * 8 })),
     createPattern: vi.fn(() => ({})),
   }
+  canvasContextStub = state
   return new Proxy(state, {
     get(target, prop) {
       if (!(prop in target)) target[prop] = vi.fn()
@@ -57,6 +60,7 @@ function create2DContextStub(): CanvasRenderingContext2D {
 }
 
 function installCanvasMocks(): void {
+  canvasContextStub = null
   Object.defineProperty(window, 'devicePixelRatio', {
     value: 1,
     configurable: true,
@@ -217,6 +221,39 @@ describe('DataTable layout and columns', () => {
     expect(viewport.centerColumnRange).toEqual({ start: 0, end: 1 })
   })
 
+  it('virtualizes horizontally across wide center columns', () => {
+    const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(200) })
+    const centerColumns = Array.from({ length: 20 }, (_item, index) => ({
+      id: `metric-${index}`,
+      width: 100,
+    }))
+    const columns = resolveDataTableColumns<Row>([
+      { id: 'name', field: 'name', width: 160, pinned: 'left' },
+      ...centerColumns,
+      { id: 'amount', field: 'amount', width: 120, pinned: 'right' },
+    ], { left: ['name'], right: ['amount'] }, new Map(), store)
+
+    const viewport = createDataTableViewport({
+      width: 620,
+      height: 220,
+      rowHeight: 20,
+      headerHeight: 30,
+      overscanRows: 2,
+      overscanColumns: 1,
+      rowCount: store.rowCount,
+      columns,
+      pinnedTopCount: 0,
+      pinnedBottomCount: 0,
+      scrollX: 750,
+      scrollY: 0,
+    })
+
+    expect(viewport.maxScrollX).toBeGreaterThan(0)
+    expect(viewport.centerColumnRange.start).toBeGreaterThan(0)
+    expect(viewport.centerColumnRange.end).toBeLessThan(centerColumns.length)
+    expect(viewport.centerColumnRange.end - viewport.centerColumnRange.start).toBeLessThan(centerColumns.length)
+  })
+
   it('autosizes default text columns and respects clamps and manual overrides', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(4) })
     const column = {
@@ -341,6 +378,61 @@ describe('DataTable Root runtime', () => {
     expect(columnCellTemplate).toHaveBeenCalled()
     expect(tableCellTemplate).toHaveBeenCalled()
     expect(columnCellTemplate.mock.calls.length).toBe(tableCellTemplate.mock.calls.length)
+
+    app.destroy()
+  })
+
+  it('clips header and pinned rows by horizontal column regions', () => {
+    const app = createApp(620, 220)
+    const surface = app.createSurface('datatable-horizontal-clip-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 620, height: 220 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(80),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            overscanColumns: 1,
+            columns: [
+              { id: 'name', field: 'name', width: 160, pinned: 'left' },
+              ...Array.from({ length: 20 }, (_item, index) => ({
+                id: `metric-${index}`,
+                width: 100,
+              })),
+              { id: 'amount', field: 'amount', width: 120, pinned: 'right' },
+            ],
+            pinnedRows: {
+              top: [{ id: 'summary', name: 'Summary', status: 'all', amount: 1000 }],
+              bottom: [{ id: 'total', name: 'Total', status: 'all', amount: 2000 }],
+            },
+          },
+          layout: {
+            width: '100%',
+            height: '100%',
+          },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+    const rectSpy = canvasContextStub?.rect
+    rectSpy?.mockClear()
+
+    root.getApi().scrollTo(750, 120)
+    app.raph.run()
+
+    const rectCalls = rectSpy?.mock.calls ?? []
+    expect(rectCalls).toContainEqual([160, 0, 340, 30])
+    expect(rectCalls).toContainEqual([0, 0, 160, 30])
+    expect(rectCalls).toContainEqual([500, 0, 120, 30])
+    expect(rectCalls).toContainEqual([160, 30, 340, 20])
+    expect(rectCalls).toContainEqual([160, 50, 340, 150])
+    expect(rectCalls).toContainEqual([500, 200, 120, 20])
 
     app.destroy()
   })

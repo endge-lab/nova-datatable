@@ -394,16 +394,16 @@ export class DataTableRootNode<
     const headerY = 0
     const topRows = this.props.pinnedRows.top ?? []
     const bottomRows = this.props.pinnedRows.bottom ?? []
-    this.renderRowZone('header', [{} as Row], headerY, this.props.headerHeight, false)
+    this.renderPartitionedRowZone('header', [{} as Row], headerY, this.props.headerHeight, false)
 
     if (topRows.length > 0) {
-      this.renderRowZone('pinned-top', topRows, this.props.headerHeight, this.props.rowHeight, false)
+      this.renderPartitionedRowZone('pinned-top', topRows, this.props.headerHeight, this.props.rowHeight, false)
     }
 
     this.renderBodyRows()
 
     if (bottomRows.length > 0) {
-      this.renderRowZone(
+      this.renderPartitionedRowZone(
         'pinned-bottom',
         bottomRows,
         this.height - bottomRows.length * this.props.rowHeight,
@@ -415,6 +415,64 @@ export class DataTableRootNode<
     this.renderScrollbars()
   }
 
+  private renderPartitionedRowZone(
+    zone: DataTableCellContext<Row>['zone'],
+    rows: Array<Row>,
+    yStart: number,
+    rowHeight: number,
+    useBodyIndex: boolean,
+  ): void {
+    const clipHeight = zone === 'body'
+      ? this.viewport.bodyHeight
+      : rows.length * rowHeight
+    const clipY = zone === 'body'
+      ? this.viewport.bodyY
+      : yStart
+
+    this.renderClippedRowZone(
+      zone,
+      rows,
+      yStart,
+      rowHeight,
+      useBodyIndex,
+      'center',
+      this.viewport.bodyX,
+      clipY,
+      this.viewport.bodyWidth,
+      clipHeight,
+    )
+
+    if (this.viewport.pinnedLeftWidth > 0) {
+      this.renderClippedRowZone(
+        zone,
+        rows,
+        yStart,
+        rowHeight,
+        useBodyIndex,
+        'left',
+        0,
+        clipY,
+        this.viewport.pinnedLeftWidth,
+        clipHeight,
+      )
+    }
+
+    if (this.viewport.pinnedRightWidth > 0) {
+      this.renderClippedRowZone(
+        zone,
+        rows,
+        yStart,
+        rowHeight,
+        useBodyIndex,
+        'right',
+        this.width - this.viewport.pinnedRightWidth,
+        clipY,
+        this.viewport.pinnedRightWidth,
+        clipHeight,
+      )
+    }
+  }
+
   private renderBodyRows(): void {
     const rows: Array<Row> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
@@ -424,24 +482,26 @@ export class DataTableRootNode<
     }
     if (rows.length === 0) return
 
-    this.renderer.save()
-    this.renderer.clip(this.viewport.bodyX, this.viewport.bodyY, this.viewport.bodyWidth, this.viewport.bodyHeight)
-    this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'center')
-    this.renderer.restore()
+    this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true)
+  }
 
-    if (this.viewport.pinnedLeftWidth > 0) {
-      this.renderer.save()
-      this.renderer.clip(0, this.viewport.bodyY, this.viewport.pinnedLeftWidth, this.viewport.bodyHeight)
-      this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'left')
-      this.renderer.restore()
-    }
+  private renderClippedRowZone(
+    zone: DataTableCellContext<Row>['zone'],
+    rows: Array<Row>,
+    yStart: number,
+    rowHeight: number,
+    useBodyIndex: boolean,
+    columnRegion: VisibleColumnRegion,
+    clipX: number,
+    clipY: number,
+    clipWidth: number,
+    clipHeight: number,
+  ): void {
+    if (clipWidth <= 0 || clipHeight <= 0) return
 
-    if (this.viewport.pinnedRightWidth > 0) {
-      this.renderer.save()
-      this.renderer.clip(this.width - this.viewport.pinnedRightWidth, this.viewport.bodyY, this.viewport.pinnedRightWidth, this.viewport.bodyHeight)
-      this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'right')
-      this.renderer.restore()
-    }
+    this.renderer.clip(clipX, clipY, clipWidth, clipHeight)
+    this.renderRowZone(zone, rows, yStart, rowHeight, useBodyIndex, columnRegion)
+    this.renderer.clearClip()
   }
 
   private renderRowZone(
