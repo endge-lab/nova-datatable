@@ -47,6 +47,8 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
   width: number
 }
 
+type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
+
 /**
  * Корневой Nova-node таблицы, который владеет store, viewport, column widths и render pass.
  */
@@ -151,8 +153,9 @@ export class DataTableRootNode<
   override update(): void {
     this.resolvedColumns = this.resolveColumns()
     this.viewport = this.createViewport()
+    const revisionBeforeRangeLoad = this.store.takeRevision()
     void this.store.ensureRange(this.viewport.rowRange).then(() => {
-      this.refresh(['data'])
+      if (this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
       return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
@@ -397,10 +400,7 @@ export class DataTableRootNode<
       this.renderRowZone('pinned-top', topRows, this.props.headerHeight, this.props.rowHeight, false)
     }
 
-    this.renderer.save()
-    this.renderer.clip(this.viewport.bodyX, this.viewport.bodyY, this.viewport.bodyWidth, this.viewport.bodyHeight)
     this.renderBodyRows()
-    this.renderer.restore()
 
     if (bottomRows.length > 0) {
       this.renderRowZone(
@@ -422,7 +422,26 @@ export class DataTableRootNode<
       if (!row) continue
       rows.push(row)
     }
-    this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true)
+    if (rows.length === 0) return
+
+    this.renderer.save()
+    this.renderer.clip(this.viewport.bodyX, this.viewport.bodyY, this.viewport.bodyWidth, this.viewport.bodyHeight)
+    this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'center')
+    this.renderer.restore()
+
+    if (this.viewport.pinnedLeftWidth > 0) {
+      this.renderer.save()
+      this.renderer.clip(0, this.viewport.bodyY, this.viewport.pinnedLeftWidth, this.viewport.bodyHeight)
+      this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'left')
+      this.renderer.restore()
+    }
+
+    if (this.viewport.pinnedRightWidth > 0) {
+      this.renderer.save()
+      this.renderer.clip(this.width - this.viewport.pinnedRightWidth, this.viewport.bodyY, this.viewport.pinnedRightWidth, this.viewport.bodyHeight)
+      this.renderRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true, 'right')
+      this.renderer.restore()
+    }
   }
 
   private renderRowZone(
@@ -431,9 +450,10 @@ export class DataTableRootNode<
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
+    columnRegion: VisibleColumnRegion = 'all',
   ): void {
     const schema: NovaSchema = []
-    const columnRects = this.visibleColumnRects()
+    const columnRects = this.visibleColumnRects(columnRegion)
 
     rows.forEach((row, localIndex) => {
       const rowIndex = zone === 'body' && useBodyIndex
@@ -547,35 +567,41 @@ export class DataTableRootNode<
     )
   }
 
-  private visibleColumnRects(): Array<VisibleColumnRect<Row>> {
+  private visibleColumnRects(region: VisibleColumnRegion = 'all'): Array<VisibleColumnRect<Row>> {
     const left = this.resolvedColumns.filter(column => column.pinned === 'left')
     const center = this.resolvedColumns.filter(column => !column.pinned)
     const right = this.resolvedColumns.filter(column => column.pinned === 'right')
     const rects: Array<VisibleColumnRect<Row>> = []
 
-    let x = 0
-    for (const column of left) {
-      rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
-      x += column.resolvedWidth
+    if (region === 'all' || region === 'left') {
+      let x = 0
+      for (const column of left) {
+        rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
+        x += column.resolvedWidth
+      }
     }
 
-    let centerOffset = sumColumns(center.slice(0, this.viewport.centerColumnRange.start))
-    for (let index = this.viewport.centerColumnRange.start; index < this.viewport.centerColumnRange.end; index += 1) {
-      const column = center[index]
-      if (!column) continue
-      rects.push({
-        column,
-        columnIndex: this.resolvedColumns.indexOf(column),
-        x: this.viewport.bodyX + centerOffset - this.scrollX,
-        width: column.resolvedWidth,
-      })
-      centerOffset += column.resolvedWidth
+    if (region === 'all' || region === 'center') {
+      let centerOffset = sumColumns(center.slice(0, this.viewport.centerColumnRange.start))
+      for (let index = this.viewport.centerColumnRange.start; index < this.viewport.centerColumnRange.end; index += 1) {
+        const column = center[index]
+        if (!column) continue
+        rects.push({
+          column,
+          columnIndex: this.resolvedColumns.indexOf(column),
+          x: this.viewport.bodyX + centerOffset - this.scrollX,
+          width: column.resolvedWidth,
+        })
+        centerOffset += column.resolvedWidth
+      }
     }
 
-    x = this.width - this.viewport.pinnedRightWidth
-    for (const column of right) {
-      rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
-      x += column.resolvedWidth
+    if (region === 'all' || region === 'right') {
+      let x = this.width - this.viewport.pinnedRightWidth
+      for (const column of right) {
+        rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
+        x += column.resolvedWidth
+      }
     }
 
     return rects
