@@ -1,6 +1,8 @@
 import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps } from '@endge/nova-ui-kit'
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
+  DataTableInteractionOptions,
+  DataTableResolvedInteractionOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
 } from '@/model/types/datatable.types'
@@ -25,10 +27,18 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   headerHeight: { type: 'number' },
   overscanRows: { type: 'number' },
   overscanColumns: { type: 'number' },
+  interaction: { type: 'object' },
+  hoverAlpha: { type: 'number' },
+  selectionAlpha: { type: 'number' },
   cellTemplate: { type: 'function' },
   headerTemplate: { type: 'function' },
+  interactionLayerTemplate: { type: 'function' },
   onViewportChange: { type: 'function' },
   onColumnResize: { type: 'function' },
+  onCellEnter: { type: 'function' },
+  onCellLeave: { type: 'function' },
+  onCellClick: { type: 'function' },
+  onSelectionChange: { type: 'function' },
 } as const
 
 /**
@@ -61,10 +71,67 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     headerHeight: Math.max(24, props.headerHeight ?? 40),
     overscanRows: Math.max(0, props.overscanRows ?? 12),
     overscanColumns: Math.max(0, props.overscanColumns ?? 3),
+    interaction: normalizeDataTableInteraction(props.interaction),
+    hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
+    selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
     cellTemplate: props.cellTemplate,
     headerTemplate: props.headerTemplate,
+    interactionLayerTemplate: props.interactionLayerTemplate,
     onViewportChange: props.onViewportChange,
     onColumnResize: props.onColumnResize,
+    onCellEnter: props.onCellEnter,
+    onCellLeave: props.onCellLeave,
+    onCellClick: props.onCellClick,
+    onSelectionChange: props.onSelectionChange,
+  }
+}
+
+export function normalizeDataTableInteraction(
+  interaction: DataTableInteractionOptions | undefined,
+): DataTableResolvedInteractionOptions {
+  const hover = interaction?.hover === false
+    ? false
+    : {
+        mode: interaction?.hover?.mode ?? 'row-column',
+        rowColor: interaction?.hover?.rowColor ?? 'rgba(37, 99, 235, 0.08)',
+        columnColor: interaction?.hover?.columnColor ?? 'rgba(14, 165, 233, 0.07)',
+        cellColor: interaction?.hover?.cellColor ?? 'rgba(250, 204, 21, 0.16)',
+        pinned: interaction?.hover?.pinned ?? true,
+      } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['hover'], false>>>
+  const selection = interaction?.selection === false
+    ? false
+    : {
+        mode: interaction?.selection?.mode ?? 'cell',
+        color: interaction?.selection?.color ?? 'rgba(37, 99, 235, 0.18)',
+        borderColor: interaction?.selection?.borderColor ?? '#2563eb',
+      } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['selection'], false>>>
+  const motion = interaction?.motion === false
+    ? false
+    : {
+        hover: {
+          duration: 120,
+          easing: 'outCubic' as const,
+          ...(interaction?.motion?.hover ?? {}),
+        },
+        selection: {
+          duration: 140,
+          easing: 'outCubic' as const,
+          ...(interaction?.motion?.selection ?? {}),
+        },
+        cells: interaction?.motion?.cells === false || interaction?.motion?.cells === undefined
+          ? false
+          : {
+              enter: interaction.motion.cells.enter ?? 'fade',
+              duration: interaction.motion.cells.duration ?? 90,
+              stagger: interaction.motion.cells.stagger ?? 4,
+              maxAnimatedCells: interaction.motion.cells.maxAnimatedCells ?? 120,
+            },
+      } satisfies DataTableResolvedInteractionOptions['motion']
+
+  return {
+    hover,
+    selection,
+    motion,
   }
 }
 
@@ -93,8 +160,19 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'headerHeight',
         'overscanRows',
         'overscanColumns',
+        'interaction',
       ],
-      render: ['style', 'background', 'border', 'clip', 'cellTemplate', 'headerTemplate'],
+      render: [
+        'style',
+        'background',
+        'border',
+        'clip',
+        'hoverAlpha',
+        'selectionAlpha',
+        'cellTemplate',
+        'headerTemplate',
+        'interactionLayerTemplate',
+      ],
     },
     fields: DATATABLE_ROOT_FIELD_DEFINITIONS,
     normalize: schema => normalizeDataTableRootProps(schema.props),
@@ -114,3 +192,9 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
 }
 
 export const DATATABLE_ROOT_NODE_DESCRIPTOR = createDataTableRootDescriptor()
+
+function finiteUnit(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : fallback
+}

@@ -10,12 +10,15 @@ import {
 import { NovaCanvas, type NovaCanvasReadyPayload } from '@endge/nova-vue'
 import { registerNovaUIKit } from '@endge/nova-ui-kit'
 import {
+  type DataTableCellContext,
   type DataTableColumnResizePayload,
   type DataTableColumnInput,
+  type DataTableInteractionOptions,
   type DataTablePinnedColumns,
   type DataTablePinnedRows,
   type DataTableRowKey,
   type DataTableRootOptions,
+  type DataTableSelectionState,
   type DataTableStoreApi,
   type DataTableTemplate,
   type DataTableViewport,
@@ -39,10 +42,15 @@ interface DataTableVueProps {
   headerHeight?: number
   overscanRows?: number
   overscanColumns?: number
+  interaction?: DataTableInteractionOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<BaseRow>) => void
+  onCellEnter?: (context: DataTableCellContext<BaseRow>) => void
+  onCellLeave?: (context: DataTableCellContext<BaseRow>) => void
+  onCellClick?: (context: DataTableCellContext<BaseRow>) => void
+  onSelectionChange?: (selection: DataTableSelectionState | null) => void
   width?: number | string
   height?: number | string
   maxDpr?: number
@@ -65,10 +73,15 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   headerHeight: 40,
   overscanRows: 16,
   overscanColumns: 4,
+  interaction: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
   onViewportChange: undefined,
   onColumnResize: undefined,
+  onCellEnter: undefined,
+  onCellLeave: undefined,
+  onCellClick: undefined,
+  onSelectionChange: undefined,
   devtools: undefined,
   columns: () => [],
   pinnedColumns: () => ({}),
@@ -80,6 +93,10 @@ const emit = defineEmits<{
   (event: 'destroy'): void
   (event: 'viewport-change', viewport: DataTableViewport): void
   (event: 'column-resize', payload: DataTableColumnResizePayload<BaseRow>): void
+  (event: 'cell-enter', context: DataTableCellContext<BaseRow>): void
+  (event: 'cell-leave', context: DataTableCellContext<BaseRow>): void
+  (event: 'cell-click', context: DataTableCellContext<BaseRow>): void
+  (event: 'selection-change', selection: DataTableSelectionState | null): void
 }>()
 
 const slots = useSlots()
@@ -113,6 +130,7 @@ const rootHeaderTemplate = computed<DataTableTemplate<BaseRow> | undefined>(() =
     slots.header as ((context: Parameters<DataTableTemplate<BaseRow>>[0]) => Array<any>) | undefined,
   )
 ))
+const rootInteractionLayerTemplate = computed(() => compiledDsl.value.interactionLayerTemplate)
 const devtools = computed(() => props.devtools)
 
 const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
@@ -163,6 +181,26 @@ function handleColumnResize(payload: DataTableColumnResizePayload<BaseRow>): voi
   emit('column-resize', payload)
 }
 
+function handleCellEnter(context: DataTableCellContext<BaseRow>): void {
+  props.onCellEnter?.(context)
+  emit('cell-enter', context)
+}
+
+function handleCellLeave(context: DataTableCellContext<BaseRow>): void {
+  props.onCellLeave?.(context)
+  emit('cell-leave', context)
+}
+
+function handleCellClick(context: DataTableCellContext<BaseRow>): void {
+  props.onCellClick?.(context)
+  emit('cell-click', context)
+}
+
+function handleSelectionChange(selection: DataTableSelectionState | null): void {
+  props.onSelectionChange?.(selection)
+  emit('selection-change', selection)
+}
+
 function getRootApi(): NovaDataTableRef<BaseRow> {
   return dataTableRoot
 }
@@ -184,6 +222,10 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   refresh: () => getRootApi().refresh(),
   batch: callback => getRootApi().batch(callback),
   getViewport: () => getRootApi().getViewport(),
+  getInteraction: () => getRootApi().getInteraction(),
+  clearHover: () => getRootApi().clearHover(),
+  selectCell: (rowId, columnId) => getRootApi().selectCell(rowId, columnId),
+  clearSelection: () => getRootApi().clearSelection(),
   setChildren: children => getRootApi().setChildren(children),
 })
 </script>
@@ -212,10 +254,16 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :header-height="headerHeight"
       :overscan-rows="overscanRows"
       :overscan-columns="overscanColumns"
+      :interaction="interaction"
       :cell-template="rootCellTemplate"
       :header-template="rootHeaderTemplate"
+      :interaction-layer-template="rootInteractionLayerTemplate"
       :on-viewport-change="handleViewportChange"
       :on-column-resize="handleColumnResize"
+      :on-cell-enter="handleCellEnter"
+      :on-cell-leave="handleCellLeave"
+      :on-cell-click="handleCellClick"
+      :on-selection-change="handleSelectionChange"
       :layout="{ width: '100%', height: '100%' }"
     />
   </NovaCanvas>

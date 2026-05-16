@@ -91,6 +91,8 @@ export const DataTablePinnedRows = createDataTableDslMarker('DataTablePinnedRows
   },
 })
 
+export const DataTableInteractionLayer = createDataTableDslMarker('DataTableInteractionLayer')
+
 export const Rect = createDataTableDslMarker('Rect', commonPrimitiveProps)
 export const Surface = createDataTableDslMarker('Surface', commonPrimitiveProps)
 export const Text = createDataTableDslMarker('Text', commonPrimitiveProps)

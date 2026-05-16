@@ -23,6 +23,9 @@ import {
 import type {
   DataTableCellContext,
   DataTableCellRect,
+  DataTableHoverMode,
+  DataTableInteractionState,
+  DataTableInteractionTarget,
   DataTablePinnedRowPosition,
   DataTableResolvedColumn,
   DataTableRootApi,
@@ -30,6 +33,7 @@ import type {
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableRowId,
+  DataTableSelectionState,
   DataTableStoreApi,
   DataTableViewport,
 } from '@/model/types/datatable.types'
@@ -48,6 +52,13 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
+
+interface RenderedRow<Row extends Record<string, any>> {
+  row: Row
+  rowId: DataTableRowId
+  rowIndex: number
+  zone: DataTableCellContext<Row>['zone']
+}
 
 /**
  * Корневой Nova-node таблицы, который владеет store, viewport, column widths и render pass.
@@ -71,6 +82,15 @@ export class DataTableRootNode<
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
   private resizeState: ResizeState<Row> | null = null
+  private hoverTarget: DataTableInteractionTarget<Row> | null = null
+  private hoverActive = false
+  private selection: DataTableSelectionState | null = null
+  private selectionActive = false
+  private visibleCellKeys = new Set<string>()
+  private nextVisibleCellKeys = new Set<string>()
+  private cellEnterStartedAt = new Map<string, number>()
+  private cellEnterRenderCount = 0
+  private suppressCellEnterUntil = 0
 
   scrollX = 0
   scrollY = 0
@@ -116,8 +136,40 @@ export class DataTableRootNode<
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
+      getInteraction: () => this.getInteractionState(),
+      clearHover: () => this.clearHover(),
+      selectCell: (rowId, columnId) => this.selectCell(rowId, columnId),
+      clearSelection: () => this.clearSelection(),
       setChildren: children => this.setChildren(children),
     }
+  }
+
+  /**
+   * Возвращает текущую alpha hover overlay.
+   */
+  get hoverAlpha(): number {
+    return this.props.hoverAlpha
+  }
+
+  /**
+   * Обновляет alpha hover overlay.
+   */
+  set hoverAlpha(value: number) {
+    this.setProps({ hoverAlpha: clampUnit(value) } as Partial<DataTableRootResolvedProps<Row>>)
+  }
+
+  /**
+   * Возвращает текущую alpha selection overlay.
+   */
+  get selectionAlpha(): number {
+    return this.props.selectionAlpha
+  }
+
+  /**
+   * Обновляет alpha selection overlay.
+   */
+  set selectionAlpha(value: number) {
+    this.setProps({ selectionAlpha: clampUnit(value) } as Partial<DataTableRootResolvedProps<Row>>)
   }
 
   /**
@@ -184,11 +236,13 @@ export class DataTableRootNode<
    * Обновляет scroll с clamping.
    */
   setScroll(x: number, y: number): void {
+    const delta = Math.abs(x - this.scrollX) + Math.abs(y - this.scrollY)
     this.scrollX = x
     this.scrollY = y
     this.viewport = this.createViewport()
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
+    if (delta > this.props.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
     this.refresh(['viewport'])
   }
 
@@ -275,6 +329,7 @@ export class DataTableRootNode<
         headerHeight: this.props.headerHeight,
         overscanRows: this.props.overscanRows,
         overscanColumns: this.props.overscanColumns,
+        interaction: this.props.interaction,
       }
     }
 
@@ -361,17 +416,37 @@ export class DataTableRootNode<
       event.cancelBubble = true
     })
 
-    this.on('mousedown', event => {
-      const position = this.events.getCanvasMousePosition(event)
-      const resizeColumn = this.hitResizeHandle(position.x, position.y)
-      if (!resizeColumn) return
+    this.on('mousemove', event => {
+      if (this.resizeState) return
+      const [x, y] = this.toLocalPosition(event)
+      const nextHover = this.resolveInteractionTargetAt(x, y)
+      this.updateHover(nextHover)
+    })
 
-      this.resizeState = {
-        column: resizeColumn.column,
-        startX: position.x,
-        startWidth: resizeColumn.column.resolvedWidth,
+    this.on('mouseleave', () => {
+      this.clearHover()
+    })
+
+    this.on('mousedown', event => {
+      const [x, y] = this.toLocalPosition(event)
+      const resizeColumn = this.hitResizeHandle(x, y)
+      if (resizeColumn) {
+        this.resizeState = {
+          column: resizeColumn.column,
+          startX: x,
+          startWidth: resizeColumn.column.resolvedWidth,
+        }
+        this.capturePointer(event)
+        event.cancelBubble = true
+        return
       }
-      this.capturePointer(event)
+
+      const target = this.resolveInteractionTargetAt(x, y)
+      if (target) {
+        this.updateSelection(target)
+        const context = this.createCellContext(target)
+        if (context) this.props.onCellClick?.(context)
+      }
       event.cancelBubble = true
     })
 
@@ -394,6 +469,8 @@ export class DataTableRootNode<
     const headerY = 0
     const topRows = this.props.pinnedRows.top ?? []
     const bottomRows = this.props.pinnedRows.bottom ?? []
+    this.nextVisibleCellKeys = new Set()
+    this.cellEnterRenderCount = 0
     this.renderPartitionedRowZone('header', [{} as Row], headerY, this.props.headerHeight, false)
 
     if (topRows.length > 0) {
@@ -412,12 +489,15 @@ export class DataTableRootNode<
       )
     }
 
+    this.renderInteractionOverlay()
+    this.renderInteractionLayer()
     this.renderScrollbars()
+    this.finalizeVisibleCellKeys()
   }
 
   private renderPartitionedRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row>,
+    rows: Array<Row> | Array<RenderedRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -474,11 +554,16 @@ export class DataTableRootNode<
   }
 
   private renderBodyRows(): void {
-    const rows: Array<Row> = []
+    const rows: Array<RenderedRow<Row>> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
       const row = this.store.getRowAt(rowIndex)
       if (!row) continue
-      rows.push(row)
+      rows.push({
+        row,
+        rowId: this.resolveRenderedRowId('body', row, rowIndex),
+        rowIndex,
+        zone: 'body',
+      })
     }
     if (rows.length === 0) return
 
@@ -487,7 +572,7 @@ export class DataTableRootNode<
 
   private renderClippedRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row>,
+    rows: Array<Row> | Array<RenderedRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -506,7 +591,7 @@ export class DataTableRootNode<
 
   private renderRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row>,
+    rows: Array<Row> | Array<RenderedRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -515,13 +600,9 @@ export class DataTableRootNode<
     const schema: NovaSchema = []
     const columnRects = this.visibleColumnRects(columnRegion)
 
-    rows.forEach((row, localIndex) => {
-      const rowIndex = zone === 'body' && useBodyIndex
-        ? this.viewport.rowRange.start + localIndex
-        : localIndex
-      const rowId = zone === 'header'
-        ? '__header__'
-        : this.resolveRenderedRowId(row, rowIndex)
+    rows.forEach((rowInput, localIndex) => {
+      const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
+      const { row, rowId, rowIndex } = renderedRow
       const y = zone === 'body'
         ? this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
         : yStart + localIndex * rowHeight
@@ -543,15 +624,7 @@ export class DataTableRootNode<
             ? columnRect.column.title ?? columnRect.column.id
             : resolveDataTableValue(row, rowIndex, columnRect.column),
           rect,
-          state: {
-            rect,
-            rowIndex,
-            columnIndex: columnRect.columnIndex,
-            selected: false,
-            hovered: false,
-            pinnedColumn: columnRect.column.pinned,
-            pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
-          },
+          state: this.createCellState(rect, rowId, rowIndex, columnRect, zone),
           zone,
           store: this.store,
           api: this.api,
@@ -562,17 +635,130 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  private normalizeRenderedRow(
+    zone: DataTableCellContext<Row>['zone'],
+    rowInput: Row | RenderedRow<Row>,
+    localIndex: number,
+    useBodyIndex: boolean,
+  ): RenderedRow<Row> {
+    if (isRenderedRow(rowInput)) return rowInput
+
+    const rowIndex = zone === 'body' && useBodyIndex
+      ? this.viewport.rowRange.start + localIndex
+      : localIndex
+    const rowId = zone === 'header'
+      ? '__header__'
+      : this.resolveRenderedRowId(zone, rowInput, rowIndex)
+    return {
+      row: rowInput,
+      rowId,
+      rowIndex,
+      zone,
+    }
+  }
+
+  private createCellState(
+    rect: DataTableCellRect,
+    rowId: DataTableRowId,
+    rowIndex: number,
+    columnRect: VisibleColumnRect<Row>,
+    zone: DataTableCellContext<Row>['zone'],
+  ): DataTableCellContext<Row>['state'] {
+    const hover = this.hoverActive ? this.hoverTarget : null
+    const selection = this.selectionActive ? this.selection : null
+    const hovered = !!hover && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
+    const rowHovered = !!hover && hover.zone === zone && hover.rowId === rowId
+    const columnHovered = !!hover && hover.column.id === columnRect.column.id
+    const selected = !!selection
+      && selection.mode === 'cell'
+      && selection.rowId === rowId
+      && selection.columnId === columnRect.column.id
+    const rowSelected = !!selection
+      && (selection.mode === 'row' || selection.mode === 'cell')
+      && selection.rowId === rowId
+    const columnSelected = !!selection
+      && (selection.mode === 'column' || selection.mode === 'cell')
+      && selection.columnId === columnRect.column.id
+
+    return {
+      rect,
+      rowIndex,
+      columnIndex: columnRect.columnIndex,
+      selected,
+      hovered,
+      cellHovered: hovered,
+      rowHovered,
+      columnHovered,
+      cellSelected: selected,
+      rowSelected,
+      columnSelected,
+      hoverAlpha: this.props.hoverAlpha,
+      selectionAlpha: this.props.selectionAlpha,
+      pinnedColumn: columnRect.column.pinned,
+      pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
+    }
+  }
+
   private renderCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
+    const startIndex = schema.length
     const template = context.zone === 'header'
       ? context.column.headerTemplate ?? this.props.headerTemplate
       : context.column.cellTemplate ?? this.props.cellTemplate
 
     if (template) {
       schema.push(...template(context))
+      this.applyCellEnterOpacity(schema, context, startIndex)
       return
     }
 
     this.renderDefaultCell(schema, context)
+    this.applyCellEnterOpacity(schema, context, startIndex)
+  }
+
+  private applyCellEnterOpacity(
+    schema: NovaSchema,
+    context: DataTableCellContext<Row>,
+    startIndex: number,
+  ): void {
+    const alpha = this.resolveCellEnterAlpha(context)
+    if (alpha >= 1) return
+
+    for (let index = startIndex; index < schema.length; index += 1) {
+      const item = schema[index]
+      if (!item?.styles) continue
+      const currentOpacity = typeof item.styles.opacity === 'number' ? item.styles.opacity : 1
+      item.styles.opacity = currentOpacity * alpha
+    }
+  }
+
+  private resolveCellEnterAlpha(context: DataTableCellContext<Row>): number {
+    const cellsMotion = this.props.interaction.motion && this.props.interaction.motion.cells
+    if (!cellsMotion || cellsMotion.enter === 'none' || context.zone === 'header') return 1
+
+    const key = this.createCellKey(context)
+    this.nextVisibleCellKeys.add(key)
+    if (this.visibleCellKeys.has(key) || performance.now() < this.suppressCellEnterUntil) return 1
+    if (!this.cellEnterStartedAt.has(key)) {
+      if (this.cellEnterRenderCount >= cellsMotion.maxAnimatedCells) return 1
+      this.cellEnterStartedAt.set(key, performance.now() + this.cellEnterRenderCount * cellsMotion.stagger)
+      this.cellEnterRenderCount += 1
+    }
+
+    const startedAt = this.cellEnterStartedAt.get(key) ?? performance.now()
+    const progress = Math.max(0, Math.min(1, (performance.now() - startedAt) / Math.max(1, cellsMotion.duration)))
+    if (progress < 1) this.nova.invalidate()
+    return progress
+  }
+
+  private finalizeVisibleCellKeys(): void {
+    this.visibleCellKeys = this.nextVisibleCellKeys
+    for (const key of [...this.cellEnterStartedAt.keys()]) {
+      if (!this.visibleCellKeys.has(key)) this.cellEnterStartedAt.delete(key)
+    }
+  }
+
+  private createCellKey(context: DataTableCellContext<Row>): string {
+    return `${context.zone}:${String(context.rowId)}:${context.column.id}`
   }
 
   private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
@@ -667,6 +853,438 @@ export class DataTableRootNode<
     return rects
   }
 
+  private renderInteractionOverlay(): void {
+    this.renderHoverOverlay()
+    this.renderSelectionOverlay()
+  }
+
+  private renderHoverOverlay(): void {
+    const hover = this.hoverTarget
+    const options = this.props.interaction.hover
+    if (!hover || !options || options.mode === 'none' || this.props.hoverAlpha <= 0) return
+
+    const alpha = this.props.hoverAlpha
+    const schema: NovaSchema = []
+    if (modeHasRow(options.mode)) {
+      schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
+    }
+    if (modeHasColumn(options.mode)) {
+      schema.push(...this.createColumnOverlayRects(hover, options.columnColor, alpha, options.pinned))
+    }
+    if (modeHasCell(options.mode) && options.cellColor) {
+      const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column)
+      if (cellRect) schema.push(this.createOverlayRect(cellRect, options.cellColor, alpha))
+    }
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private renderSelectionOverlay(): void {
+    const selection = this.selection
+    const options = this.props.interaction.selection
+    if (!selection || !options || options.mode === 'none' || this.props.selectionAlpha <= 0) return
+
+    const target = this.resolveSelectionTarget(selection)
+    if (!target) return
+
+    const alpha = this.props.selectionAlpha
+    const schema: NovaSchema = []
+    if (selection.mode === 'row') schema.push(...this.createRowOverlayRects(target, options.color, alpha, true))
+    else if (selection.mode === 'column') schema.push(...this.createColumnOverlayRects(target, options.color, alpha, true))
+    else {
+      const cellRect = this.clipRectToColumnRegion(target.rect, target.column)
+      if (cellRect) schema.push(this.createOverlayRect(cellRect, options.color, alpha, options.borderColor))
+    }
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private renderInteractionLayer(): void {
+    const template = this.props.interactionLayerTemplate
+    if (!template) return
+
+    const state = this.getInteractionState()
+    const hoverRects = this.hoverTarget
+      ? [...this.createRowRects(this.hoverTarget, true), this.hoverTarget.rect]
+      : []
+    const schema = template({
+      hover: state.hover,
+      selection: state.selection,
+      viewport: this.viewport,
+      rects: hoverRects,
+      state,
+    })
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private createRowOverlayRects(
+    target: DataTableInteractionTarget<Row>,
+    color: string,
+    opacity: number,
+    includePinned: boolean,
+  ): NovaSchema {
+    return this.createRowRects(target, includePinned).map(rect => this.createOverlayRect(rect, color, opacity))
+  }
+
+  private createColumnOverlayRects(
+    target: DataTableInteractionTarget<Row>,
+    color: string,
+    opacity: number,
+    includePinned: boolean,
+  ): NovaSchema {
+    const columnPinned = target.column.pinned
+    if (columnPinned && !includePinned) return []
+
+    const visibleRect = this.clipRectToColumnRegion(target.rect, target.column)
+    if (!visibleRect) return []
+    const top = 0
+    const height = this.height
+    const rect = {
+      x: visibleRect.x,
+      y: top,
+      width: visibleRect.width,
+      height,
+    }
+    return [this.createOverlayRect(rect, color, opacity)]
+  }
+
+  private createRowRects(target: DataTableInteractionTarget<Row>, includePinned: boolean): Array<DataTableCellRect> {
+    const segments: Array<DataTableCellRect> = []
+    if (includePinned && this.viewport.pinnedLeftWidth > 0) {
+      segments.push({ x: 0, y: target.rect.y, width: this.viewport.pinnedLeftWidth, height: target.rect.height })
+    }
+    segments.push({
+      x: this.viewport.bodyX,
+      y: target.rect.y,
+      width: this.viewport.bodyWidth,
+      height: target.rect.height,
+    })
+    if (includePinned && this.viewport.pinnedRightWidth > 0) {
+      segments.push({
+        x: this.width - this.viewport.pinnedRightWidth,
+        y: target.rect.y,
+        width: this.viewport.pinnedRightWidth,
+        height: target.rect.height,
+      })
+    }
+    return segments
+  }
+
+  private clipRectToColumnRegion(
+    rect: DataTableCellRect,
+    column: DataTableResolvedColumn<Row>,
+  ): DataTableCellRect | null {
+    const minX = column.pinned === 'left'
+      ? 0
+      : column.pinned === 'right'
+        ? this.width - this.viewport.pinnedRightWidth
+        : this.viewport.bodyX
+    const maxX = column.pinned === 'left'
+      ? this.viewport.pinnedLeftWidth
+      : column.pinned === 'right'
+        ? this.width
+        : this.viewport.bodyX + this.viewport.bodyWidth
+    const x = Math.max(minX, rect.x)
+    const right = Math.min(maxX, rect.x + rect.width)
+    if (right <= x) return null
+    return {
+      x,
+      y: rect.y,
+      width: right - x,
+      height: rect.height,
+    }
+  }
+
+  private createOverlayRect(
+    rect: DataTableCellRect,
+    background: string,
+    opacity: number,
+    borderColor?: string,
+  ): NovaSchema[number] {
+    return {
+      type: 'rect',
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      styles: {
+        background,
+        opacity,
+        border: borderColor ? { color: borderColor, width: 1 } : undefined,
+      },
+    }
+  }
+
+  private updateHover(target: DataTableInteractionTarget<Row> | null): void {
+    const previous = this.hoverActive ? this.hoverTarget : null
+    if (sameInteractionTarget(previous, target)) return
+
+    if (previous) {
+      const previousContext = this.createCellContext(previous)
+      if (previousContext) this.props.onCellLeave?.(previousContext)
+    }
+
+    this.hoverTarget = target
+    this.hoverActive = target !== null
+    if (target) {
+      const context = this.createCellContext(target)
+      if (context) this.props.onCellEnter?.(context)
+      this.animateInteractionAlpha('hoverAlpha', 1)
+    } else {
+      this.animateInteractionAlpha('hoverAlpha', 0)
+    }
+    this.refresh(['interaction'])
+  }
+
+  private clearHover(): void {
+    this.updateHover(null)
+  }
+
+  private updateSelection(target: DataTableInteractionTarget<Row>): void {
+    if (target.zone === 'header') return
+    const options = this.props.interaction.selection
+    if (!options || options.mode === 'none') return
+
+    this.selection = {
+      mode: options.mode,
+      rowId: target.rowId,
+      rowIndex: target.rowIndex,
+      columnId: target.column.id,
+      columnIndex: target.columnIndex,
+    }
+    this.selectionActive = true
+    this.animateInteractionAlpha('selectionAlpha', 1)
+    this.props.onSelectionChange?.(this.selection)
+    this.refresh(['interaction'])
+  }
+
+  private selectCell(rowId: DataTableRowId, columnId: string): void {
+    const column = this.resolvedColumns.find(item => item.id === columnId)
+    if (!column) return
+
+    this.selection = {
+      mode: 'cell',
+      rowId,
+      columnId,
+      columnIndex: this.resolvedColumns.indexOf(column),
+    }
+    this.selectionActive = true
+    this.animateInteractionAlpha('selectionAlpha', 1)
+    this.props.onSelectionChange?.(this.selection)
+    this.refresh(['interaction'])
+  }
+
+  private clearSelection(): void {
+    if (!this.selectionActive && !this.selection) return
+    this.selectionActive = false
+    this.animateInteractionAlpha('selectionAlpha', 0)
+    this.props.onSelectionChange?.(null)
+    this.refresh(['interaction'])
+  }
+
+  private getInteractionState(): DataTableInteractionState<Row> {
+    return {
+      hover: this.hoverActive ? this.hoverTarget : null,
+      selection: this.selectionActive ? this.selection : null,
+      hoverAlpha: this.props.hoverAlpha,
+      selectionAlpha: this.props.selectionAlpha,
+    }
+  }
+
+  private animateInteractionAlpha(key: 'hoverAlpha' | 'selectionAlpha', value: number): void {
+    const motion = this.props.interaction.motion
+    if (motion === false) {
+      this.setProps({ [key]: value } as Partial<DataTableRootResolvedProps<Row>>)
+      return
+    }
+
+    this.nova.motion.to(this, { [key]: value }, {
+      ...(key === 'hoverAlpha' ? motion.hover : motion.selection),
+      overwrite: true,
+    })
+  }
+
+  private resolveInteractionTargetAt(x: number, y: number): DataTableInteractionTarget<Row> | null {
+    if (x < 0 || y < 0 || x > this.width || y > this.height) return null
+
+    const columnRect = this.resolveColumnAt(x)
+    if (!columnRect) return null
+
+    const rowTarget = this.resolveRowAt(y)
+    if (!rowTarget) return null
+
+    const rect: DataTableCellRect = {
+      x: columnRect.x,
+      y: rowTarget.rect.y,
+      width: columnRect.width,
+      height: rowTarget.rect.height,
+    }
+    return {
+      row: rowTarget.row,
+      rowId: rowTarget.rowId,
+      rowIndex: rowTarget.rowIndex,
+      column: columnRect.column,
+      columnIndex: columnRect.columnIndex,
+      rect,
+      zone: rowTarget.zone,
+      value: rowTarget.zone === 'header'
+        ? columnRect.column.title ?? columnRect.column.id
+        : rowTarget.row
+          ? resolveDataTableValue(rowTarget.row, rowTarget.rowIndex, columnRect.column)
+          : undefined,
+    }
+  }
+
+  private resolveRowAt(y: number): {
+    row?: Row
+    rowId?: DataTableRowId
+    rowIndex: number
+    zone: DataTableCellContext<Row>['zone']
+    rect: DataTableCellRect
+  } | null {
+    if (y < this.props.headerHeight) {
+      return {
+        row: {} as Row,
+        rowId: '__header__',
+        rowIndex: 0,
+        zone: 'header',
+        rect: { x: 0, y: 0, width: this.width, height: this.props.headerHeight },
+      }
+    }
+
+    const topRows = this.props.pinnedRows.top ?? []
+    if (y >= this.props.headerHeight && y < this.viewport.bodyY) {
+      const localIndex = Math.floor((y - this.props.headerHeight) / this.props.rowHeight)
+      const row = topRows[localIndex]
+      if (!row) return null
+      return {
+        row,
+        rowId: this.resolveRenderedRowId('pinned-top', row, localIndex),
+        rowIndex: localIndex,
+        zone: 'pinned-top',
+        rect: {
+          x: 0,
+          y: this.props.headerHeight + localIndex * this.props.rowHeight,
+          width: this.width,
+          height: this.props.rowHeight,
+        },
+      }
+    }
+
+    const bottomRows = this.props.pinnedRows.bottom ?? []
+    const bottomStart = this.height - bottomRows.length * this.props.rowHeight
+    if (bottomRows.length > 0 && y >= bottomStart && y <= this.height) {
+      const localIndex = Math.floor((y - bottomStart) / this.props.rowHeight)
+      const row = bottomRows[localIndex]
+      if (!row) return null
+      return {
+        row,
+        rowId: this.resolveRenderedRowId('pinned-bottom', row, localIndex),
+        rowIndex: localIndex,
+        zone: 'pinned-bottom',
+        rect: {
+          x: 0,
+          y: bottomStart + localIndex * this.props.rowHeight,
+          width: this.width,
+          height: this.props.rowHeight,
+        },
+      }
+    }
+
+    if (y < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight) return null
+    const rowIndex = Math.floor((this.scrollY + y - this.viewport.bodyY) / this.props.rowHeight)
+    if (rowIndex < 0 || rowIndex >= this.store.rowCount) return null
+    const row = this.store.getRowAt(rowIndex)
+    const rowId = this.store.getRowIdAt(rowIndex)
+    return {
+      row,
+      rowId,
+      rowIndex,
+      zone: 'body',
+      rect: {
+        x: 0,
+        y: this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY,
+        width: this.width,
+        height: this.props.rowHeight,
+      },
+    }
+  }
+
+  private resolveColumnAt(x: number): VisibleColumnRect<Row> | null {
+    for (const rect of this.visibleColumnRects('left')) {
+      if (x >= rect.x && x <= rect.x + rect.width) return rect
+    }
+    for (const rect of this.visibleColumnRects('right')) {
+      if (x >= rect.x && x <= rect.x + rect.width) return rect
+    }
+    if (x < this.viewport.bodyX || x > this.viewport.bodyX + this.viewport.bodyWidth) return null
+    for (const rect of this.visibleColumnRects('center')) {
+      if (x >= rect.x && x <= rect.x + rect.width) return rect
+    }
+    return null
+  }
+
+  private resolveSelectionTarget(selection: DataTableSelectionState): DataTableInteractionTarget<Row> | null {
+    const column = this.resolvedColumns.find(item => item.id === selection.columnId)
+    if (!column) return null
+    const columnRect = this.visibleColumnRects().find(item => item.column.id === column.id)
+    if (!columnRect) return null
+    const rowIndex = selection.rowIndex ?? this.findVisibleRowIndex(selection.rowId)
+    if (rowIndex === undefined) return null
+    const row = selection.rowId !== undefined ? this.store.getRow(selection.rowId) : undefined
+    const y = this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
+    if (selection.rowId !== undefined && (y + this.props.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight)) {
+      return null
+    }
+    return {
+      row,
+      rowId: selection.rowId,
+      rowIndex,
+      column,
+      columnIndex: columnRect.columnIndex,
+      rect: {
+        x: columnRect.x,
+        y,
+        width: columnRect.width,
+        height: this.props.rowHeight,
+      },
+      zone: 'body',
+    }
+  }
+
+  private findVisibleRowIndex(rowId: DataTableRowId | undefined): number | undefined {
+    if (rowId === undefined) return undefined
+    for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
+      if (this.store.getRowIdAt(rowIndex) === rowId) return rowIndex
+    }
+    return undefined
+  }
+
+  private createCellContext(target: DataTableInteractionTarget<Row>): DataTableCellContext<Row> | null {
+    if (!target.row || target.rowId === undefined) return null
+    return {
+      row: target.row,
+      rowId: target.rowId,
+      rowIndex: target.rowIndex,
+      column: target.column,
+      columnIndex: target.columnIndex,
+      value: target.value,
+      rect: target.rect,
+      state: this.createCellState(target.rect, target.rowId, target.rowIndex, {
+        column: target.column,
+        columnIndex: target.columnIndex,
+        x: target.rect.x,
+        width: target.rect.width,
+      }, target.zone),
+      zone: target.zone,
+      store: this.store,
+      api: this.api,
+    }
+  }
+
+  private toLocalPosition(event: MouseEvent): [number, number] {
+    const position = this.events.getCanvasMousePosition(event)
+    return this.toLocal(position.x, position.y)
+  }
+
   private hitResizeHandle(x: number, y: number): VisibleColumnRect<Row> | null {
     if (y < 0 || y > this.height) return null
 
@@ -731,7 +1349,39 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
-  private resolveRenderedRowId(row: Row, rowIndex: number): DataTableRowId {
-    return this.store.getRowIdAt(rowIndex) ?? row.id ?? rowIndex
+  private resolveRenderedRowId(zone: DataTableCellContext<Row>['zone'], row: Row, rowIndex: number): DataTableRowId {
+    if (zone === 'body') return this.store.getRowIdAt(rowIndex) ?? row.id ?? rowIndex
+    return row.id ?? `${zone}:${rowIndex}`
   }
+}
+
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+}
+
+function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedRow<Row>): value is RenderedRow<Row> {
+  return 'zone' in value && 'row' in value && 'rowIndex' in value
+}
+
+function sameInteractionTarget<Row extends Record<string, any>>(
+  left: DataTableInteractionTarget<Row> | null,
+  right: DataTableInteractionTarget<Row> | null,
+): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  return left.rowId === right.rowId
+    && left.column.id === right.column.id
+    && left.zone === right.zone
+}
+
+function modeHasRow(mode: DataTableHoverMode): boolean {
+  return mode === 'row' || mode === 'row-column' || mode === 'row-cell'
+}
+
+function modeHasColumn(mode: DataTableHoverMode): boolean {
+  return mode === 'column' || mode === 'row-column' || mode === 'column-cell'
+}
+
+function modeHasCell(mode: DataTableHoverMode): boolean {
+  return mode === 'cell' || mode === 'row-cell' || mode === 'column-cell' || mode === 'row-column'
 }

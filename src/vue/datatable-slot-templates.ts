@@ -4,6 +4,8 @@ import type {
   DataTableCellContext,
   DataTableCellRect,
   DataTableColumnInput,
+  DataTableInteractionLayerContext,
+  DataTableInteractionLayerTemplate,
   DataTablePinnedRows,
   DataTableTemplate,
 } from '@/model/types/datatable.types'
@@ -11,6 +13,7 @@ import type {
 export interface DataTableDslNodes<Row extends Record<string, any>> {
   columns: Array<DataTableColumnInput<Row>>
   pinnedRows: DataTablePinnedRows<Row>
+  interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
 }
 
 type SlotMap = Record<string, (...args: Array<any>) => Array<VNode>>
@@ -20,6 +23,7 @@ const PRIMITIVE_TAGS = new Set(['Rect', 'Surface', 'Text', 'TextBlock'])
 export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes: Array<VNode>): DataTableDslNodes<Row> {
   const columns: Array<DataTableColumnInput<Row>> = []
   const pinnedRows: DataTablePinnedRows<Row> = {}
+  let interactionLayerTemplate: DataTableInteractionLayerTemplate<Row> | undefined
 
   for (const node of flattenVNodes(nodes)) {
     const tag = getVNodeTag(node)
@@ -33,9 +37,15 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
       if (position === 'top') pinnedRows.top = rows
       if (position === 'bottom') pinnedRows.bottom = rows
     }
+    if (tag === 'DataTableInteractionLayer') {
+      const slots = readSlots(node)
+      interactionLayerTemplate = createInteractionLayerTemplate<Row>(
+        slots.hover as ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
+      )
+    }
   }
 
-  return { columns, pinnedRows }
+  return { columns, pinnedRows, interactionLayerTemplate }
 }
 
 export function createSlotTemplate<Row extends Record<string, any>>(
@@ -47,6 +57,26 @@ export function createSlotTemplate<Row extends Record<string, any>>(
     const schema: NovaSchema = []
     for (const node of flattenVNodes(slot(context))) {
       appendPrimitiveNode(schema, node, context.rect)
+    }
+    return schema
+  }
+}
+
+export function createInteractionLayerTemplate<Row extends Record<string, any>>(
+  slot: ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
+): DataTableInteractionLayerTemplate<Row> | undefined {
+  if (!slot) return undefined
+
+  return context => {
+    const schema: NovaSchema = []
+    const rootRect = {
+      x: 0,
+      y: 0,
+      width: context.viewport.width,
+      height: context.viewport.height,
+    }
+    for (const node of flattenVNodes(slot(context))) {
+      appendPrimitiveNode(schema, node, rootRect)
     }
     return schema
   }

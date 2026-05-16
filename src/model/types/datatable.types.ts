@@ -1,4 +1,4 @@
-import type { NovaSchema, RendererType } from '@endge/nova'
+import type { NovaMotionOptions, NovaSchema, RendererType } from '@endge/nova'
 import type { NovaUiCommonProps, NovaUiCommonResolvedProps } from '@endge/nova-ui-kit'
 
 export const DATATABLE_ROOT_SCHEMA_TYPE = 'NovaDataTable.Root'
@@ -7,6 +7,9 @@ export type DataTableRowId = string | number
 export type DataTablePinnedColumnSide = 'left' | 'right'
 export type DataTablePinnedRowPosition = 'top' | 'bottom'
 export type DataTableColumnAlign = 'left' | 'center' | 'right'
+export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
+export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
+export type DataTableCellEnterMotion = 'none' | 'fade'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -49,6 +52,14 @@ export interface DataTableCellState {
   columnIndex: number
   selected: boolean
   hovered: boolean
+  cellHovered: boolean
+  rowHovered: boolean
+  columnHovered: boolean
+  cellSelected: boolean
+  rowSelected: boolean
+  columnSelected: boolean
+  hoverAlpha: number
+  selectionAlpha: number
   pinnedColumn?: DataTablePinnedColumnSide
   pinnedRow?: DataTablePinnedRowPosition
 }
@@ -76,6 +87,87 @@ export interface DataTableCellContext<Row extends Record<string, any> = Record<s
 
 export type DataTableTemplate<Row extends Record<string, any> = Record<string, any>> = (
   context: DataTableCellContext<Row>,
+) => NovaSchema
+
+export interface DataTableInteractionHoverOptions {
+  mode?: DataTableHoverMode
+  rowColor?: string
+  columnColor?: string
+  cellColor?: string
+  pinned?: boolean
+}
+
+export interface DataTableInteractionSelectionOptions {
+  mode?: DataTableSelectionMode
+  color?: string
+  borderColor?: string
+}
+
+export interface DataTableInteractionCellMotionOptions {
+  enter?: DataTableCellEnterMotion
+  duration?: number
+  stagger?: number
+  maxAnimatedCells?: number
+}
+
+export interface DataTableInteractionMotionOptions {
+  hover?: NovaMotionOptions
+  selection?: NovaMotionOptions
+  cells?: false | DataTableInteractionCellMotionOptions
+}
+
+export interface DataTableInteractionOptions {
+  hover?: false | DataTableInteractionHoverOptions
+  selection?: false | DataTableInteractionSelectionOptions
+  motion?: false | DataTableInteractionMotionOptions
+}
+
+export interface DataTableResolvedInteractionOptions {
+  hover: false | Required<DataTableInteractionHoverOptions>
+  selection: false | Required<DataTableInteractionSelectionOptions>
+  motion: false | {
+    hover: NovaMotionOptions
+    selection: NovaMotionOptions
+    cells: false | Required<DataTableInteractionCellMotionOptions>
+  }
+}
+
+export interface DataTableInteractionTarget<Row extends Record<string, any> = Record<string, any>> {
+  row?: Row
+  rowId?: DataTableRowId
+  rowIndex: number
+  column: DataTableResolvedColumn<Row>
+  columnIndex: number
+  rect: DataTableCellRect
+  zone: DataTableCellContext<Row>['zone']
+  value?: unknown
+}
+
+export interface DataTableSelectionState {
+  mode: DataTableSelectionMode
+  rowId?: DataTableRowId
+  rowIndex?: number
+  columnId?: string
+  columnIndex?: number
+}
+
+export interface DataTableInteractionState<Row extends Record<string, any> = Record<string, any>> {
+  hover: DataTableInteractionTarget<Row> | null
+  selection: DataTableSelectionState | null
+  hoverAlpha: number
+  selectionAlpha: number
+}
+
+export interface DataTableInteractionLayerContext<Row extends Record<string, any> = Record<string, any>> {
+  hover: DataTableInteractionTarget<Row> | null
+  selection: DataTableSelectionState | null
+  viewport: DataTableViewport
+  rects: Array<DataTableCellRect>
+  state: DataTableInteractionState<Row>
+}
+
+export type DataTableInteractionLayerTemplate<Row extends Record<string, any> = Record<string, any>> = (
+  context: DataTableInteractionLayerContext<Row>,
 ) => NovaSchema
 
 export interface DataTableColumnInput<Row extends Record<string, any> = Record<string, any>> {
@@ -151,6 +243,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   headerHeight?: number
   overscanRows?: number
   overscanColumns?: number
+  interaction?: DataTableInteractionOptions
 }
 
 export interface DataTableRootProps<Row extends Record<string, any> = Record<string, any>>
@@ -160,8 +253,13 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   rowKey?: DataTableRowKey<Row>
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
+  interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
+  onCellEnter?: (context: DataTableCellContext<Row>) => void
+  onCellLeave?: (context: DataTableCellContext<Row>) => void
+  onCellClick?: (context: DataTableCellContext<Row>) => void
+  onSelectionChange?: (selection: DataTableSelectionState | null) => void
 }
 
 export interface DataTableRootResolvedProps<Row extends Record<string, any> = Record<string, any>>
@@ -172,10 +270,18 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   columns: Array<DataTableColumnInput<Row>>
   pinnedColumns: DataTablePinnedColumns
   pinnedRows: DataTablePinnedRows<Row>
+  interaction: DataTableResolvedInteractionOptions
+  hoverAlpha: number
+  selectionAlpha: number
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
+  interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
+  onCellEnter?: (context: DataTableCellContext<Row>) => void
+  onCellLeave?: (context: DataTableCellContext<Row>) => void
+  onCellClick?: (context: DataTableCellContext<Row>) => void
+  onSelectionChange?: (selection: DataTableSelectionState | null) => void
 }
 
 export interface DataTableColumnResizePayload<Row extends Record<string, any> = Record<string, any>> {
@@ -201,6 +307,10 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   refresh: () => void
   batch: (callback: (api: DataTableRootApi<Row>) => void) => void
   getViewport: () => DataTableViewport
+  getInteraction: () => DataTableInteractionState<Row>
+  clearHover: () => void
+  selectCell: (rowId: DataTableRowId, columnId: string) => void
+  clearSelection: () => void
   setChildren: (children: Array<unknown>) => void
 }
 

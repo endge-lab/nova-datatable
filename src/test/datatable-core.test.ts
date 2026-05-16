@@ -15,7 +15,7 @@ import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
-import { DataTableColumn, Surface, TextBlock } from '@/vue/data-table-dsl'
+import { DataTableColumn, DataTableInteractionLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
 interface Row {
@@ -43,6 +43,7 @@ function rows(count: number, start = 0): Array<Row> {
 
 function create2DContextStub(): CanvasRenderingContext2D {
   const state: Record<PropertyKey, any> = {
+    __sets: [],
     measureText: vi.fn((text: string) => ({ width: text.length * 8 })),
     createPattern: vi.fn(() => ({})),
   }
@@ -54,6 +55,7 @@ function create2DContextStub(): CanvasRenderingContext2D {
     },
     set(target, prop, value) {
       target[prop] = value
+      ;(target.__sets as Array<[PropertyKey, unknown]>).push([prop, value])
       return true
     },
   }) as CanvasRenderingContext2D
@@ -309,6 +311,14 @@ describe('DataTable DSL templates', () => {
         columnIndex: 0,
         selected: false,
         hovered: false,
+        cellHovered: false,
+        rowHovered: false,
+        columnHovered: false,
+        cellSelected: false,
+        rowSelected: false,
+        columnSelected: false,
+        hoverAlpha: 0,
+        selectionAlpha: 0,
       },
       zone: 'body',
       store: createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) }),
@@ -319,6 +329,55 @@ describe('DataTable DSL templates', () => {
     expect(schema?.[1].type).toBe('text')
     expect(schema?.[1].x).toBe(18)
     expect(schema?.[1].styles?.ellipsis).toBe(true)
+  })
+
+  it('compiles interaction layer marker nodes', () => {
+    const dsl = compileDataTableDslNodes<Row>([
+      h(DataTableInteractionLayer, {}, {
+        hover: () => [
+          h(Rect, {
+            x: 4,
+            y: 6,
+            width: 20,
+            height: 10,
+            background: '#2563eb',
+          }),
+        ],
+      }),
+    ])
+    const schema = dsl.interactionLayerTemplate?.({
+      hover: null,
+      selection: null,
+      viewport: createDataTableViewport({
+        width: 200,
+        height: 100,
+        rowHeight: 20,
+        headerHeight: 30,
+        overscanRows: 0,
+        overscanColumns: 0,
+        rowCount: 0,
+        columns: [],
+        pinnedTopCount: 0,
+        pinnedBottomCount: 0,
+        scrollX: 0,
+        scrollY: 0,
+      }),
+      rects: [],
+      state: {
+        hover: null,
+        selection: null,
+        hoverAlpha: 0,
+        selectionAlpha: 0,
+      },
+    })
+
+    expect(schema?.[0]).toMatchObject({
+      type: 'rect',
+      x: 4,
+      y: 6,
+      width: 20,
+      height: 10,
+    })
   })
 })
 
@@ -378,6 +437,112 @@ describe('DataTable Root runtime', () => {
     expect(columnCellTemplate).toHaveBeenCalled()
     expect(tableCellTemplate).toHaveBeenCalled()
     expect(columnCellTemplate.mock.calls.length).toBe(tableCellTemplate.mock.calls.length)
+
+    app.destroy()
+  })
+
+  it('updates hover state flags for row-column mode and emits enter/leave', () => {
+    const app = createApp()
+    const cellTemplate = vi.fn(() => [])
+    const onCellEnter = vi.fn()
+    const onCellLeave = vi.fn()
+    const surface = app.createSurface('datatable-hover-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 640, height: 240 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(20),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            interaction: { motion: false },
+            columns: [
+              { id: 'name', field: 'name', width: 160, pinned: 'left', cellTemplate },
+              { id: 'status', field: 'status', width: 120, cellTemplate },
+              { id: 'amount', field: 'amount', width: 120, pinned: 'right', cellTemplate },
+            ],
+            onCellEnter,
+            onCellLeave,
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 210, clientY: 56 }))
+    app.raph.run()
+
+    expect(root.getApi().getInteraction().hover?.rowId).toBe('row-1')
+    expect(root.getApi().getInteraction().hover?.column.id).toBe('status')
+    expect(onCellEnter).toHaveBeenCalledTimes(1)
+    const statusContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'status' && call[0].rowId === 'row-1')?.[0]
+    const nameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowId === 'row-1')?.[0]
+    expect(statusContext.state.hovered).toBe(true)
+    expect(statusContext.state.cellHovered).toBe(true)
+    expect(statusContext.state.rowHovered).toBe(true)
+    expect(statusContext.state.columnHovered).toBe(true)
+    expect(statusContext.state.hoverAlpha).toBe(1)
+    expect(nameContext.state.rowHovered).toBe(true)
+    expect(nameContext.state.columnHovered).toBe(false)
+
+    root.eventHandlers.mouseleave?.(new MouseEvent('mouseleave'))
+    expect(onCellLeave).toHaveBeenCalledTimes(1)
+    expect(root.getApi().getInteraction().hover).toBeNull()
+
+    app.destroy()
+  })
+
+  it('selects cells without hijacking resize handles', () => {
+    const app = createApp()
+    const onSelectionChange = vi.fn()
+    const root = mountRoot(app)
+    root.setProps({
+      interaction: { motion: false },
+      onSelectionChange,
+    } as never)
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 230, clientY: 122 }))
+    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'cell',
+      rowId: 'row-1',
+      columnId: 'status',
+    }))
+    expect(root.getApi().getInteraction().selection?.columnId).toBe('status')
+
+    onSelectionChange.mockClear()
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 180, clientY: 122 }))
+    expect(onSelectionChange).not.toHaveBeenCalled()
+
+    app.destroy()
+  })
+
+  it('renders clipped row-column hover overlay without crossing pinned boundaries', () => {
+    const app = createApp(620, 220)
+    const root = mountRoot(app)
+    root.setProps({
+      interaction: { motion: false },
+    } as never)
+    if (canvasContextStub) canvasContextStub.__sets = []
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 220, clientY: 84 }))
+    app.raph.run()
+
+    const styleSets = canvasContextStub?.__sets as Array<[PropertyKey, unknown]>
+    expect(root.getApi().getInteraction().hover?.rect).toMatchObject({
+      x: 180,
+      y: 76,
+      width: 120,
+      height: 36,
+    })
+    expect(styleSets).toContainEqual(['fillStyle', 'rgba(37, 99, 235, 0.08)'])
+    expect(styleSets).toContainEqual(['fillStyle', 'rgba(14, 165, 233, 0.07)'])
+    expect(styleSets).toContainEqual(['fillStyle', 'rgba(250, 204, 21, 0.16)'])
 
     app.destroy()
   })
