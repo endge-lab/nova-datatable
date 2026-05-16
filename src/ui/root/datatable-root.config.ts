@@ -3,8 +3,10 @@ import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
   DataTableResolvedInteractionOptions,
+  DataTableResolvedViewOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
+  DataTableViewOptions,
 } from '@/model/types/datatable.types'
 import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
 
@@ -28,6 +30,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   overscanRows: { type: 'number' },
   overscanColumns: { type: 'number' },
   interaction: { type: 'object' },
+  view: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
   cellTemplate: { type: 'function' },
@@ -35,6 +38,11 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   interactionLayerTemplate: { type: 'function' },
   onViewportChange: { type: 'function' },
   onColumnResize: { type: 'function' },
+  onSortChange: { type: 'function' },
+  onFilterChange: { type: 'function' },
+  onQueryChange: { type: 'function' },
+  onRowOrderChange: { type: 'function' },
+  onColumnOrderChange: { type: 'function' },
   onCellEnter: { type: 'function' },
   onCellLeave: { type: 'function' },
   onCellClick: { type: 'function' },
@@ -72,6 +80,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     overscanRows: Math.max(0, props.overscanRows ?? 12),
     overscanColumns: Math.max(0, props.overscanColumns ?? 3),
     interaction: normalizeDataTableInteraction(props.interaction),
+    view: normalizeDataTableView(props.view),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
     cellTemplate: props.cellTemplate,
@@ -79,10 +88,55 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     interactionLayerTemplate: props.interactionLayerTemplate,
     onViewportChange: props.onViewportChange,
     onColumnResize: props.onColumnResize,
+    onSortChange: props.onSortChange,
+    onFilterChange: props.onFilterChange,
+    onQueryChange: props.onQueryChange,
+    onRowOrderChange: props.onRowOrderChange,
+    onColumnOrderChange: props.onColumnOrderChange,
     onCellEnter: props.onCellEnter,
     onCellLeave: props.onCellLeave,
     onCellClick: props.onCellClick,
     onSelectionChange: props.onSelectionChange,
+  }
+}
+
+export function normalizeDataTableView(view: DataTableViewOptions | undefined): DataTableResolvedViewOptions {
+  return {
+    sorting: view?.sorting === false
+      ? false
+      : {
+          mode: view?.sorting?.mode ?? 'hybrid',
+          multi: view?.sorting?.multi ?? true,
+          controlled: view?.sorting?.controlled ?? false,
+          initial: view?.sorting?.initial ?? [],
+        },
+    filtering: view?.filtering === false
+      ? false
+      : {
+          mode: view?.filtering?.mode ?? 'hybrid',
+          controlled: view?.filtering?.controlled ?? false,
+          initial: view?.filtering?.initial ?? [],
+        },
+    rowOrdering: view?.rowOrdering === false
+      ? false
+      : {
+          enabled: view?.rowOrdering?.enabled ?? false,
+          mode: view?.rowOrdering?.mode ?? 'view',
+          manualLayer: view?.rowOrdering?.manualLayer ?? true,
+        },
+    columnOrdering: view?.columnOrdering === false
+      ? false
+      : {
+          enabled: view?.columnOrdering?.enabled ?? false,
+          allowCrossPinned: view?.columnOrdering?.allowCrossPinned ?? false,
+          order: view?.columnOrdering?.order ?? [],
+        },
+    filterUi: view?.filterUi === false
+      ? false
+      : {
+          headerMenu: view?.filterUi?.headerMenu ?? false,
+          filterRow: view?.filterUi?.filterRow ?? false,
+        },
   }
 }
 
@@ -161,6 +215,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'overscanRows',
         'overscanColumns',
         'interaction',
+        'view',
       ],
       render: [
         'style',

@@ -13,6 +13,7 @@ import {
   resolveDataTableValue,
 } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport, sumColumns } from '@/model/runtime/datatable-layout'
+import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidationScope'
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
 import {
@@ -27,6 +28,7 @@ import type {
   DataTableInteractionState,
   DataTableInteractionTarget,
   DataTablePinnedRowPosition,
+  DataTableQueryState,
   DataTableResolvedColumn,
   DataTableRootApi,
   DataTableRootOptions,
@@ -36,6 +38,7 @@ import type {
   DataTableSelectionState,
   DataTableStoreApi,
   DataTableViewport,
+  DataTableViewState,
 } from '@/model/types/datatable.types'
 
 interface ResizeState<Row extends Record<string, any>> {
@@ -57,6 +60,7 @@ interface RenderedRow<Row extends Record<string, any>> {
   row: Row
   rowId: DataTableRowId
   rowIndex: number
+  storeIndex?: number
   zone: DataTableCellContext<Row>['zone']
 }
 
@@ -78,6 +82,7 @@ export class DataTableRootNode<
   readonly store: DataTableStoreApi<Row>
 
   private readonly api: DataTableRootApi<Row>
+  private readonly viewPipeline: DataTableViewPipeline<Row>
   private readonly widthOverrides = new Map<string, number>()
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
@@ -111,7 +116,9 @@ export class DataTableRootNode<
       rowKey: props.rowKey ?? ('id' as keyof Row),
       rows: props.rows ?? [],
     })
+    this.viewPipeline = new DataTableViewPipeline(this.store)
     this.resolvedColumns = this.resolveColumns()
+    this.syncViewPipeline()
     this.viewport = this.createViewport()
     this.options({
       interactive: true,
@@ -140,6 +147,14 @@ export class DataTableRootNode<
       clearHover: () => this.clearHover(),
       selectCell: (rowId, columnId) => this.selectCell(rowId, columnId),
       clearSelection: () => this.clearSelection(),
+      getViewState: () => this.getViewState(),
+      setSort: sort => this.setSort(sort),
+      clearSort: columnId => this.clearSort(columnId),
+      setFilter: (columnId, filter) => this.setFilter(columnId, filter),
+      clearFilter: columnId => this.clearFilter(columnId),
+      reorderRows: payload => this.reorderRows(payload),
+      reorderColumns: payload => this.reorderColumns(payload),
+      resetView: () => this.resetView(),
       setChildren: children => this.setChildren(children),
     }
   }
@@ -204,9 +219,10 @@ export class DataTableRootNode<
    */
   override update(): void {
     this.resolvedColumns = this.resolveColumns()
+    this.syncViewPipeline()
     this.viewport = this.createViewport()
     const revisionBeforeRangeLoad = this.store.takeRevision()
-    void this.store.ensureRange(this.viewport.rowRange).then(() => {
+    void this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => {
       if (this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
       return undefined
     })
@@ -330,6 +346,7 @@ export class DataTableRootNode<
         overscanRows: this.props.overscanRows,
         overscanColumns: this.props.overscanColumns,
         interaction: this.props.interaction,
+        view: this.props.view,
       }
     }
 
@@ -378,16 +395,95 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  private getViewState(): DataTableViewState {
+    return this.viewPipeline.getState()
+  }
+
+  private setSort(sort: Parameters<DataTableRootApi<Row>['setSort']>[0]): void {
+    this.viewPipeline.setSort(sort)
+    this.emitViewQuery('sort')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private clearSort(columnId?: string): void {
+    this.viewPipeline.clearSort(columnId)
+    this.emitViewQuery('sort')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private setFilter(columnId: string, filter: Parameters<DataTableRootApi<Row>['setFilter']>[1]): void {
+    this.viewPipeline.setFilter(columnId, filter)
+    this.emitViewQuery('filter')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private clearFilter(columnId?: string): void {
+    this.viewPipeline.clearFilter(columnId)
+    this.emitViewQuery('filter')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private reorderRows(payload: Parameters<DataTableRootApi<Row>['reorderRows']>[0]): void {
+    const mode = payload.mode ?? ((this.props.view.rowOrdering && this.props.view.rowOrdering.mode) || 'view')
+    if (mode === 'store') {
+      const rows = this.store.getRows()
+      const [row] = rows.splice(payload.fromIndex, 1)
+      if (row) rows.splice(payload.toIndex, 0, row)
+      this.store.setRows(rows)
+    }
+    const next = this.viewPipeline.reorderRows({ ...payload, mode })
+    this.props.onRowOrderChange?.(next)
+    this.emitViewQuery('row')
+    this.refresh(['data', 'layout'])
+  }
+
+  private reorderColumns(payload: Parameters<DataTableRootApi<Row>['reorderColumns']>[0]): void {
+    const next = this.viewPipeline.reorderColumns(payload, this.props.columns)
+    this.props.onColumnOrderChange?.(next)
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  private resetView(): void {
+    this.viewPipeline.reset()
+    this.emitViewQuery('all')
+    this.setScroll(0, 0)
+    this.refresh(['data', 'columns', 'layout'])
+  }
+
+  private emitViewQuery(kind: 'sort' | 'filter' | 'row' | 'column' | 'all'): void {
+    const state = this.viewPipeline.getState()
+    if (kind === 'sort' || kind === 'all') this.props.onSortChange?.(state.sort)
+    if (kind === 'filter' || kind === 'all') this.props.onFilterChange?.(state.filters)
+    this.props.onQueryChange?.(state.query)
+  }
+
+  private resolveSourceQuery(): DataTableQueryState | undefined {
+    return this.viewPipeline.isServerControlled() ? undefined : this.viewPipeline.getQuery()
+  }
+
   private refresh(kinds: Array<string> = ['data', 'layout', 'viewport']): void {
     this.invalidation.bumpMany(kinds)
     this.resolvedColumns = this.resolveColumns()
+    this.syncViewPipeline()
     this.viewport = this.createViewport()
     this.dirty({ update: true, render: true })
     this.nova.invalidate()
   }
 
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
-    return resolveDataTableColumns(this.props.columns, this.props.pinnedColumns, this.widthOverrides, this.store)
+    return resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
+  }
+
+  private syncViewPipeline(): void {
+    this.viewPipeline.sync({
+      columns: this.resolvedColumns,
+      view: this.props.view,
+    })
   }
 
   private createViewport(): DataTableViewport {
@@ -398,7 +494,7 @@ export class DataTableRootNode<
       headerHeight: this.props.headerHeight,
       overscanRows: this.props.overscanRows,
       overscanColumns: this.props.overscanColumns,
-      rowCount: this.store.rowCount,
+      rowCount: this.viewPipeline.rowCount,
       columns: this.resolvedColumns,
       pinnedTopCount: this.props.pinnedRows.top?.length ?? 0,
       pinnedBottomCount: this.props.pinnedRows.bottom?.length ?? 0,
@@ -443,6 +539,11 @@ export class DataTableRootNode<
 
       const target = this.resolveInteractionTargetAt(x, y)
       if (target) {
+        if (target.zone === 'header') {
+          this.handleHeaderAction(target, event)
+          event.cancelBubble = true
+          return
+        }
         this.updateSelection(target)
         const context = this.createCellContext(target)
         if (context) this.props.onCellClick?.(context)
@@ -463,6 +564,14 @@ export class DataTableRootNode<
       this.releasePointerCapture(event)
       event.cancelBubble = true
     })
+  }
+
+  private handleHeaderAction(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
+    if (!target.column.sortable || !this.props.view.sorting) return
+    this.viewPipeline.cycleSort(target.column.id, event.shiftKey)
+    this.emitViewQuery('sort')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
   }
 
   private renderGrid(): void {
@@ -556,12 +665,13 @@ export class DataTableRootNode<
   private renderBodyRows(): void {
     const rows: Array<RenderedRow<Row>> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
-      const row = this.store.getRowAt(rowIndex)
+      const row = this.viewPipeline.getRowAt(rowIndex)
       if (!row) continue
       rows.push({
         row,
-        rowId: this.resolveRenderedRowId('body', row, rowIndex),
+        rowId: this.viewPipeline.getRowIdAt(rowIndex) ?? this.resolveRenderedRowId('body', row, rowIndex),
         rowIndex,
+        storeIndex: this.viewPipeline.getStoreIndexAt(rowIndex),
         zone: 'body',
       })
     }
@@ -602,7 +712,7 @@ export class DataTableRootNode<
 
     rows.forEach((rowInput, localIndex) => {
       const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
-      const { row, rowId, rowIndex } = renderedRow
+      const { row, rowId, rowIndex, storeIndex } = renderedRow
       const y = zone === 'body'
         ? this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
         : yStart + localIndex * rowHeight
@@ -618,13 +728,15 @@ export class DataTableRootNode<
           row,
           rowId,
           rowIndex,
+          viewRowIndex: rowIndex,
+          storeIndex,
           column: columnRect.column,
           columnIndex: columnRect.columnIndex,
           value: zone === 'header'
             ? columnRect.column.title ?? columnRect.column.id
-            : resolveDataTableValue(row, rowIndex, columnRect.column),
+            : resolveDataTableValue(row, storeIndex ?? rowIndex, columnRect.column),
           rect,
-          state: this.createCellState(rect, rowId, rowIndex, columnRect, zone),
+          state: this.createCellState(rect, rowId, rowIndex, storeIndex, columnRect, zone),
           zone,
           store: this.store,
           api: this.api,
@@ -653,6 +765,7 @@ export class DataTableRootNode<
       row: rowInput,
       rowId,
       rowIndex,
+      storeIndex: rowIndex,
       zone,
     }
   }
@@ -661,11 +774,14 @@ export class DataTableRootNode<
     rect: DataTableCellRect,
     rowId: DataTableRowId,
     rowIndex: number,
+    storeIndex: number | undefined,
     columnRect: VisibleColumnRect<Row>,
     zone: DataTableCellContext<Row>['zone'],
   ): DataTableCellContext<Row>['state'] {
     const hover = this.hoverActive ? this.hoverTarget : null
     const selection = this.selectionActive ? this.selection : null
+    const viewState = this.viewPipeline.getState()
+    const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
     const hovered = !!hover && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
     const rowHovered = !!hover && hover.zone === zone && hover.rowId === rowId
     const columnHovered = !!hover && hover.column.id === columnRect.column.id
@@ -683,6 +799,8 @@ export class DataTableRootNode<
     return {
       rect,
       rowIndex,
+      viewRowIndex: rowIndex,
+      storeIndex,
       columnIndex: columnRect.columnIndex,
       selected,
       hovered,
@@ -696,6 +814,9 @@ export class DataTableRootNode<
       selectionAlpha: this.props.selectionAlpha,
       pinnedColumn: columnRect.column.pinned,
       pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
+      sorted: sortIndex >= 0 ? viewState.sort[sortIndex]?.direction : undefined,
+      sortPriority: sortIndex >= 0 ? sortIndex : undefined,
+      filtered: viewState.filters.some(rule => rule.columnId === columnRect.column.id),
     }
   }
 
@@ -811,6 +932,29 @@ export class DataTableRootNode<
         },
       },
     )
+
+    if (isHeader && (context.state.sorted || context.state.filtered)) {
+      schema.push({
+        type: 'text',
+        text: `${context.state.sorted === 'asc' ? '↑' : context.state.sorted === 'desc' ? '↓' : ''}${context.state.filtered ? '•' : ''}`,
+        x: rect.x + rect.width - 22,
+        y: rect.y,
+        width: 18,
+        height: rect.height,
+        styles: {
+          color: context.state.filtered ? '#2563eb' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: 12,
+            weight: '800',
+          },
+          align: {
+            horizontal: 'right',
+            vertical: 'middle',
+          },
+        },
+      })
+    }
   }
 
   private visibleColumnRects(region: VisibleColumnRegion = 'all'): Array<VisibleColumnRect<Row>> {
@@ -1121,6 +1265,7 @@ export class DataTableRootNode<
       row: rowTarget.row,
       rowId: rowTarget.rowId,
       rowIndex: rowTarget.rowIndex,
+      storeIndex: rowTarget.storeIndex,
       column: columnRect.column,
       columnIndex: columnRect.columnIndex,
       rect,
@@ -1128,7 +1273,7 @@ export class DataTableRootNode<
       value: rowTarget.zone === 'header'
         ? columnRect.column.title ?? columnRect.column.id
         : rowTarget.row
-          ? resolveDataTableValue(rowTarget.row, rowTarget.rowIndex, columnRect.column)
+          ? resolveDataTableValue(rowTarget.row, rowTarget.storeIndex ?? rowTarget.rowIndex, columnRect.column)
           : undefined,
     }
   }
@@ -1137,6 +1282,7 @@ export class DataTableRootNode<
     row?: Row
     rowId?: DataTableRowId
     rowIndex: number
+    storeIndex?: number
     zone: DataTableCellContext<Row>['zone']
     rect: DataTableCellRect
   } | null {
@@ -1191,13 +1337,15 @@ export class DataTableRootNode<
 
     if (y < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight) return null
     const rowIndex = Math.floor((this.scrollY + y - this.viewport.bodyY) / this.props.rowHeight)
-    if (rowIndex < 0 || rowIndex >= this.store.rowCount) return null
-    const row = this.store.getRowAt(rowIndex)
-    const rowId = this.store.getRowIdAt(rowIndex)
+    if (rowIndex < 0 || rowIndex >= this.viewPipeline.rowCount) return null
+    const row = this.viewPipeline.getRowAt(rowIndex)
+    const rowId = this.viewPipeline.getRowIdAt(rowIndex)
+    const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
     return {
       row,
       rowId,
       rowIndex,
+      storeIndex,
       zone: 'body',
       rect: {
         x: 0,
@@ -1229,7 +1377,8 @@ export class DataTableRootNode<
     if (!columnRect) return null
     const rowIndex = selection.rowIndex ?? this.findVisibleRowIndex(selection.rowId)
     if (rowIndex === undefined) return null
-    const row = selection.rowId !== undefined ? this.store.getRow(selection.rowId) : undefined
+    const row = this.viewPipeline.getRowAt(rowIndex) ?? (selection.rowId !== undefined ? this.store.getRow(selection.rowId) : undefined)
+    const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
     const y = this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
     if (selection.rowId !== undefined && (y + this.props.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight)) {
       return null
@@ -1238,6 +1387,7 @@ export class DataTableRootNode<
       row,
       rowId: selection.rowId,
       rowIndex,
+      storeIndex,
       column,
       columnIndex: columnRect.columnIndex,
       rect: {
@@ -1253,7 +1403,7 @@ export class DataTableRootNode<
   private findVisibleRowIndex(rowId: DataTableRowId | undefined): number | undefined {
     if (rowId === undefined) return undefined
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
-      if (this.store.getRowIdAt(rowIndex) === rowId) return rowIndex
+      if (this.viewPipeline.getRowIdAt(rowIndex) === rowId) return rowIndex
     }
     return undefined
   }
@@ -1264,11 +1414,13 @@ export class DataTableRootNode<
       row: target.row,
       rowId: target.rowId,
       rowIndex: target.rowIndex,
+      viewRowIndex: target.rowIndex,
+      storeIndex: target.storeIndex,
       column: target.column,
       columnIndex: target.columnIndex,
       value: target.value,
       rect: target.rect,
-      state: this.createCellState(target.rect, target.rowId, target.rowIndex, {
+      state: this.createCellState(target.rect, target.rowId, target.rowIndex, target.storeIndex, {
         column: target.column,
         columnIndex: target.columnIndex,
         x: target.rect.x,
@@ -1350,7 +1502,7 @@ export class DataTableRootNode<
   }
 
   private resolveRenderedRowId(zone: DataTableCellContext<Row>['zone'], row: Row, rowIndex: number): DataTableRowId {
-    if (zone === 'body') return this.store.getRowIdAt(rowIndex) ?? row.id ?? rowIndex
+    if (zone === 'body') return this.viewPipeline.getRowIdAt(rowIndex) ?? row.id ?? rowIndex
     return row.id ?? `${zone}:${rowIndex}`
   }
 }

@@ -1,5 +1,6 @@
 import type {
   DataTableLazySource,
+  DataTableQueryState,
   DataTableRange,
   DataTableRowId,
   DataTableRowKey,
@@ -96,6 +97,13 @@ implements DataTableStoreApi<Row> {
     if (id !== undefined) return id
     const row = this.getRowAt(index)
     return row ? this.resolveRowId(row, index) : undefined
+  }
+
+  /**
+   * Возвращает текущий физический индекс строки по id.
+   */
+  getRowIndex(id: DataTableRowId): number | undefined {
+    return this.indexById.get(id)
   }
 
   /**
@@ -201,18 +209,22 @@ implements DataTableStoreApi<Row> {
   /**
    * Гарантирует загрузку lazy range.
    */
-  async ensureRange(range: DataTableRange): Promise<void> {
+  async ensureRange(range: DataTableRange, query?: DataTableQueryState): Promise<void> {
     if (!this.source?.loadRange) return
 
     const start = clampInteger(range.start, 0, this.rowCount)
     const end = clampInteger(range.end, start, this.rowCount)
     if (this.isRangeLoaded(start, end)) return
 
-    const key = `${start}:${end}`
+    const key = `${start}:${end}:${JSON.stringify(query ?? {})}`
     const pending = this.pendingRanges.get(key)
     if (pending) return pending
 
-    const promise = Promise.resolve(this.source.loadRange({ start, end }))
+    const promise = Promise.resolve(
+      query === undefined
+        ? this.source.loadRange({ start, end })
+        : this.source.loadRange({ start, end }, query),
+    )
       .then(rows => {
         if (Array.isArray(rows)) this.replaceRange(start, rows)
         return undefined

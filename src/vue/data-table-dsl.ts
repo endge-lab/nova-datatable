@@ -78,6 +78,20 @@ export const DataTableColumn = createDataTableDslMarker('DataTableColumn', {
     type: String,
     required: false,
   },
+  sortable: {
+    type: [Boolean, Object],
+    required: false,
+    default: false,
+  },
+  filter: {
+    type: [String, Object],
+    required: false,
+  },
+  reorderable: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 export const DataTablePinnedRows = createDataTableDslMarker('DataTablePinnedRows', {

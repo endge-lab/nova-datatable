@@ -12,6 +12,7 @@ import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
+import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
@@ -176,6 +177,27 @@ describe('DataTableStore', () => {
     expect(loadRange).toHaveBeenCalledWith({ start: 1_000, end: 1_004 })
   })
 
+  it('passes query state into lazy range adapters', async () => {
+    const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 100,
+        loadRange,
+      },
+    })
+    const query = {
+      sort: [{ columnId: 'amount', direction: 'desc' as const }],
+      filters: [{ columnId: 'status', operator: 'equals' as const, value: 'active' }],
+      rowOrder: [],
+      columnOrder: [],
+    }
+
+    await store.ensureRange({ start: 0, end: 5 }, query)
+
+    expect(loadRange).toHaveBeenCalledWith({ start: 0, end: 5 }, query)
+  })
+
   it('coalesces transaction revisions', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) })
     const initialRevision = store.takeRevision()
@@ -274,6 +296,78 @@ describe('DataTable layout and columns', () => {
   })
 })
 
+describe('DataTableViewPipeline', () => {
+  function createPipelineStore(): ReturnType<typeof createDataTableStore<Row>> {
+    return createDataTableStore<Row>({
+      rowKey: 'id',
+      rows: [
+        { id: 'row-a', name: 'Zulu', status: 'draft', amount: 30 },
+        { id: 'row-b', name: 'Alpha', status: 'active', amount: 10 },
+        { id: 'row-c', name: 'Beta', status: 'active', amount: 20 },
+      ],
+    })
+  }
+
+  function syncPipeline(pipeline: DataTableViewPipeline<Row>, store: ReturnType<typeof createPipelineStore>): void {
+    const columns = resolveDataTableColumns<Row>([
+      { id: 'name', field: 'name', sortable: true },
+      { id: 'status', field: 'status', filter: 'set' },
+      { id: 'amount', field: 'amount', sortable: { accessor: row => row.amount } },
+    ], {}, new Map(), store)
+    pipeline.sync({
+      columns,
+      view: {
+        sorting: { mode: 'client', multi: true, controlled: false, initial: [] },
+        filtering: { mode: 'client', controlled: false, initial: [] },
+        rowOrdering: { enabled: true, mode: 'view', manualLayer: true },
+        columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
+        filterUi: { headerMenu: false, filterRow: false },
+      },
+    })
+  }
+
+  it('sorts, filters and applies manual row order over the current view', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    syncPipeline(pipeline, store)
+
+    pipeline.setFilter('status', { operator: 'equals', value: 'active' })
+    pipeline.setSort({ columnId: 'amount', direction: 'desc' })
+
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-c', 'row-b'])
+
+    pipeline.reorderRows({ rowId: 'row-b', fromIndex: 1, toIndex: 0 })
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-b', 'row-c'])
+
+    pipeline.reset()
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
+  })
+
+  it('keeps server mode as identity view while preserving query state', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    const columns = resolveDataTableColumns<Row>([
+      { id: 'amount', field: 'amount', sortable: true },
+    ], {}, new Map(), store)
+
+    pipeline.sync({
+      columns,
+      view: {
+        sorting: { mode: 'server', multi: true, controlled: true, initial: [] },
+        filtering: { mode: 'server', controlled: true, initial: [] },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+      },
+    })
+    pipeline.setSort({ columnId: 'amount', direction: 'desc' })
+
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
+    expect(pipeline.getQuery().sort).toEqual([{ columnId: 'amount', direction: 'desc' }])
+    expect(pipeline.isServerControlled()).toBe(true)
+  })
+})
+
 describe('DataTable DSL templates', () => {
   it('compiles column and pinned row marker nodes', () => {
     const cellSlot = (context: DataTableCellContext<Row>) => [
@@ -282,12 +376,15 @@ describe('DataTable DSL templates', () => {
       ]),
     ]
     const dsl = compileDataTableDslNodes<Row>([
-      h(DataTableColumn, { id: 'name', title: 'Name', field: 'name', resizable: true }, { cell: cellSlot }),
+      h(DataTableColumn, { id: 'name', title: 'Name', field: 'name', resizable: true, sortable: true, filter: 'text', reorderable: true }, { cell: cellSlot }),
     ])
 
     expect(dsl.columns).toHaveLength(1)
     expect(dsl.columns[0].id).toBe('name')
     expect(dsl.columns[0].resizable).toBe(true)
+    expect(dsl.columns[0].sortable).toBe(true)
+    expect(dsl.columns[0].filter).toBe('text')
+    expect(dsl.columns[0].reorderable).toBe(true)
     expect(dsl.columns[0].cellTemplate).toBeTypeOf('function')
   })
 
@@ -543,6 +640,81 @@ describe('DataTable Root runtime', () => {
     expect(styleSets).toContainEqual(['fillStyle', 'rgba(37, 99, 235, 0.08)'])
     expect(styleSets).toContainEqual(['fillStyle', 'rgba(14, 165, 233, 0.07)'])
     expect(styleSets).toContainEqual(['fillStyle', 'rgba(250, 204, 21, 0.16)'])
+
+    app.destroy()
+  })
+
+  it('sorts from header clicks and maps rendered rows through the view pipeline', () => {
+    const app = createApp()
+    const cellTemplate = vi.fn(() => [])
+    const onSortChange = vi.fn()
+    const surface = app.createSurface('datatable-sort-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 420, height: 180 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: [
+              { id: 'row-a', name: 'Zulu', status: 'draft', amount: 30 },
+              { id: 'row-b', name: 'Alpha', status: 'active', amount: 10 },
+              { id: 'row-c', name: 'Beta', status: 'active', amount: 20 },
+            ],
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            view: { sorting: { mode: 'client' } },
+            columns: [
+              { id: 'name', field: 'name', width: 160, sortable: true, cellTemplate },
+              { id: 'amount', field: 'amount', width: 120 },
+            ],
+            onSortChange,
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 40, clientY: 12 }))
+    app.raph.run()
+
+    expect(onSortChange).toHaveBeenCalledWith([{ columnId: 'name', direction: 'asc' }])
+    expect(root.getApi().getViewState().sort).toEqual([{ columnId: 'name', direction: 'asc' }])
+    const firstNameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowIndex === 0)?.[0]
+    expect(firstNameContext.rowId).toBe('row-b')
+    expect(firstNameContext.storeIndex).toBe(1)
+
+    app.destroy()
+  })
+
+  it('filters rows and reorders columns through the public API', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const onFilterChange = vi.fn()
+    const onColumnOrderChange = vi.fn()
+    root.setProps({
+      view: {
+        filtering: { mode: 'client' },
+        columnOrdering: { enabled: true },
+      },
+      onFilterChange,
+      onColumnOrderChange,
+    } as never)
+
+    root.getApi().setFilter('status', { operator: 'equals', value: 'active' })
+    expect(onFilterChange).toHaveBeenCalledWith([{ columnId: 'status', operator: 'equals', value: 'active' }])
+    expect(root.getApi().getViewState().rowCount).toBe(50)
+
+    root.getApi().reorderColumns({ columnId: 'amount', fromIndex: 2, toIndex: 0 })
+    expect(onColumnOrderChange).toHaveBeenCalledWith(expect.objectContaining({
+      columnId: 'amount',
+      order: ['amount', 'name', 'status'],
+    }))
+    expect(root.getApi().getViewState().columnOrder).toEqual(['amount', 'name', 'status'])
 
     app.destroy()
   })
