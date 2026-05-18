@@ -357,12 +357,14 @@ export interface DataTableResolvedTooltipOptions<Row extends Record<string, any>
 export interface DataTableZoomWheelOptions {
   enabled?: boolean
   modifier?: TooltipModifier | Array<TooltipModifier> | false
+  pinch?: boolean
   step?: number
 }
 
 export interface DataTableResolvedZoomWheelOptions {
   enabled: boolean
   modifier: TooltipModifier | Array<TooltipModifier> | false
+  pinch: boolean
   step: number
 }
 

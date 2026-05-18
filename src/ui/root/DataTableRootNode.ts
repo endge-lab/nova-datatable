@@ -41,6 +41,7 @@ import type {
   DataTableQueryState,
   DataTableResolvedColumn,
   DataTableResolvedScrollbarAxisOptions,
+  DataTableResolvedZoomWheelOptions,
   DataTableRootApi,
   DataTableRootOptions,
   DataTableRootProps,
@@ -81,6 +82,13 @@ interface ScrollbarDragState {
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
+
+interface DataTableGestureEvent extends Event {
+  scale?: number
+  clientX?: number
+  clientY?: number
+  preventDefault: () => void
+}
 
 interface RenderedRow<Row extends Record<string, any>> {
   kind: 'data'
@@ -148,6 +156,11 @@ export class DataTableRootNode<
   private tooltipTarget: DataTableInteractionTarget<Row> | null = null
   private tooltipOpenTimer: ReturnType<typeof setTimeout> | null = null
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+  private gestureStartZoomValue = 1
+  private gestureActive = false
+  private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
+  private readonly handleGestureChange = (event: Event) => this.handleTrackpadGestureChange(event as DataTableGestureEvent)
+  private readonly handleGestureEnd = (event: Event) => this.handleTrackpadGestureEnd(event as DataTableGestureEvent)
   private readonly tooltipModifiers = {
     ctrl: false,
     meta: false,
@@ -186,6 +199,7 @@ export class DataTableRootNode<
     this.setupTooltipKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
+      this.teardownTrackpadGestureEvents()
       this.clearScrollbarHideTimer()
       this.clearTooltipTimers()
     })
@@ -232,6 +246,16 @@ export class DataTableRootNode<
       resetView: () => this.resetView(),
       setChildren: children => this.setChildren(children),
     }
+  }
+
+  protected override onMount(): void {
+    super.onMount()
+    this.setupTrackpadGestureEvents()
+  }
+
+  protected override onUnmount(): void {
+    this.teardownTrackpadGestureEvents()
+    super.onUnmount()
   }
 
   /**
@@ -880,13 +904,71 @@ export class DataTableRootNode<
   private handleZoomWheel(event: WheelEvent): boolean {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled) return false
+    const pinchWheel = this.isTrackpadPinchWheel(event, zoom.wheel)
     const modifier = zoom.wheel.modifier
-    if (modifier && !this.isWheelModifierActive(event, modifier)) return false
+    if (!pinchWheel && modifier && !this.isWheelModifierActive(event, modifier)) return false
 
-    const direction = event.deltaY > 0 ? -1 : 1
-    const nextValue = zoom.value + direction * zoom.wheel.step
+    const nextValue = pinchWheel
+      ? zoom.value * Math.exp(-event.deltaY * zoom.wheel.step * 0.04)
+      : zoom.value + (event.deltaY > 0 ? -1 : 1) * zoom.wheel.step
+    this.applyZoomValue(nextValue)
+    return true
+  }
+
+  private isTrackpadPinchWheel(event: WheelEvent, options: DataTableResolvedZoomWheelOptions): boolean {
+    return options.pinch && event.ctrlKey && Number.isFinite(event.deltaY) && event.deltaY !== 0
+  }
+
+  private setupTrackpadGestureEvents(): void {
+    const element = this.canvas.element
+    element.removeEventListener('gesturestart', this.handleGestureStart)
+    element.removeEventListener('gesturechange', this.handleGestureChange)
+    element.removeEventListener('gestureend', this.handleGestureEnd)
+    element.addEventListener('gesturestart', this.handleGestureStart, { passive: false })
+    element.addEventListener('gesturechange', this.handleGestureChange, { passive: false })
+    element.addEventListener('gestureend', this.handleGestureEnd)
+  }
+
+  private teardownTrackpadGestureEvents(): void {
+    const element = this.canvas.element
+    element.removeEventListener('gesturestart', this.handleGestureStart)
+    element.removeEventListener('gesturechange', this.handleGestureChange)
+    element.removeEventListener('gestureend', this.handleGestureEnd)
+    this.gestureActive = false
+  }
+
+  private handleTrackpadGestureStart(event: DataTableGestureEvent): void {
+    const zoom = this.props.zoom
+    if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !zoom.wheel.pinch) return
+    this.gestureStartZoomValue = zoom.value
+    this.gestureActive = true
+    this.trackGesturePointerPosition(event)
+    event.preventDefault()
+    event.cancelBubble = true
+  }
+
+  private handleTrackpadGestureChange(event: DataTableGestureEvent): void {
+    const zoom = this.props.zoom
+    if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !zoom.wheel.pinch || !this.gestureActive) return
+    const scale = typeof event.scale === 'number' && Number.isFinite(event.scale) ? event.scale : 1
+    this.trackGesturePointerPosition(event)
+    this.applyZoomValue(this.gestureStartZoomValue * scale)
+    event.preventDefault()
+    event.cancelBubble = true
+  }
+
+  private handleTrackpadGestureEnd(event: DataTableGestureEvent): void {
+    if (!this.gestureActive) return
+    this.gestureActive = false
+    event.preventDefault()
+    event.cancelBubble = true
+  }
+
+  private applyZoomValue(value: number): void {
+    const zoom = this.props.zoom
+    if (!zoom || !zoom.wheel) return
     this.applyZoom({
-      value: Math.max(zoom.min, Math.min(zoom.max, nextValue)),
+      value: Math.max(zoom.min, Math.min(zoom.max, value)),
       min: zoom.min,
       max: zoom.max,
       mode: zoom.mode,
@@ -894,7 +976,6 @@ export class DataTableRootNode<
       preserveAnchor: zoom.preserveAnchor,
       wheel: zoom.wheel,
     })
-    return true
   }
 
   private isWheelModifierActive(event: WheelEvent, modifier: TooltipModifier | Array<TooltipModifier>): boolean {
@@ -904,6 +985,15 @@ export class DataTableRootNode<
     if (modifier === 'shift') return event.shiftKey
     if (modifier === 'alt') return event.altKey
     return false
+  }
+
+  private trackGesturePointerPosition(event: DataTableGestureEvent): void {
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
+    const rect = this.canvas.element.getBoundingClientRect()
+    const x = (event.clientX ?? rect.left + rect.width / 2) - rect.left
+    const y = (event.clientY ?? rect.top + rect.height / 2) - rect.top
+    const position = this.toLocal(x, y)
+    this.lastPointerPosition = { x: position[0], y: position[1] }
   }
 
   private setupTooltipKeyboardEvents(): void {

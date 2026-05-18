@@ -286,10 +286,11 @@ export function normalizeDataTableZoom(
     iconScale,
     preserveAnchor: zoom?.preserveAnchor ?? 'pointer',
     wheel: zoom?.wheel === false
-      ? false
-      : {
+        ? false
+        : {
           enabled: zoom?.wheel?.enabled ?? true,
           modifier: zoom?.wheel?.modifier ?? 'ctrl',
+          pinch: zoom?.wheel?.pinch ?? true,
           step: finiteClamp(zoom?.wheel?.step, 0.01, 0.5, 0.08),
         },
   }
