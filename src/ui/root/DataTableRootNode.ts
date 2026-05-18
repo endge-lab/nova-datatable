@@ -1423,11 +1423,7 @@ export class DataTableRootNode<
     const { rect, value, column, zone, rowIndex } = context
     const isHeader = zone === 'header'
     const isPinned = zone === 'pinned-top' || zone === 'pinned-bottom'
-    const background = isHeader
-      ? '#eef3f8'
-      : isPinned
-        ? '#f7f9fc'
-        : rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
+    const background = this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
     const color = isHeader ? '#172033' : '#263142'
 
     schema.push(
@@ -1492,6 +1488,21 @@ export class DataTableRootNode<
         },
       })
     }
+  }
+
+  private resolveDefaultCellBackground(
+    context: DataTableCellContext<Row>,
+    isHeader: boolean,
+    isPinnedRow: boolean,
+    rowIndex: number,
+  ): string {
+    const pinnedColumn = !!context.state.pinnedColumn
+    if (pinnedColumn && isPinnedRow) return '#fff2c4'
+    if (pinnedColumn && isHeader) return '#fff6d8'
+    if (pinnedColumn) return '#fffbea'
+    if (isPinnedRow) return '#fff8df'
+    if (isHeader) return '#eef3f8'
+    return rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
   }
 
   private visibleColumnRects(region: VisibleColumnRegion = 'all'): Array<VisibleColumnRect<Row>> {
