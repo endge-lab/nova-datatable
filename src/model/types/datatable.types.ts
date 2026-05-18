@@ -43,7 +43,7 @@ export type DataTableFilterOperator =
   | 'isNot'
 export type DataTableSearchScope = 'rows' | 'cells'
 export type DataTableSearchMatchMode = 'contains' | 'startsWith' | 'equals' | 'regex'
-export type DataTableSearchHighlightMode = 'none' | 'cell' | 'text' | 'cell-text'
+export type DataTableSearchHighlightMode = 'none' | 'row' | 'cell' | 'text' | 'cell-text' | 'row-cell' | 'row-cell-text'
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
 export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
 export type DataTableCellEnterMotion = 'none' | 'fade'
@@ -94,6 +94,7 @@ export interface DataTableSearchQuery {
   caseSensitive?: boolean
   columns?: Array<string>
   highlight?: DataTableSearchHighlightMode
+  filter?: boolean
   highlightColor?: string
   activeHighlightColor?: string
 }
@@ -287,6 +288,8 @@ export interface DataTableCellState {
   filtered?: boolean
   searchMatched: boolean
   searchActive: boolean
+  searchRowMatched: boolean
+  searchRowActive: boolean
   searchMatchIndex?: number
   searchRanges?: Array<DataTableSearchRange>
   dragging?: boolean

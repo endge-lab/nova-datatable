@@ -49,6 +49,7 @@ import type {
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableRowId,
+  DataTableSearchHighlightMode,
   DataTableScrollbarAxis,
   DataTableScrollbarGeometry,
   DataTableScrollbarLayerContext,
@@ -1235,6 +1236,7 @@ export class DataTableRootNode<
     }
 
     this.renderPinnedBottomGroupPanel()
+    this.renderSearchOverlay()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
     this.renderTooltipLayer()
@@ -1564,6 +1566,7 @@ export class DataTableRootNode<
     const viewState = this.viewPipeline.getState()
     const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
     const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
+    const searchRowHit = this.viewPipeline.getSearchMatchForRow(rowId)
     const hoverAffectsCells = !!hover && !isGroupInteractionZone(hover.zone)
     const hovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
     const rowHovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId
@@ -1608,6 +1611,8 @@ export class DataTableRootNode<
       filtered: filterStateHasColumn(viewState.filters, columnRect.column.id),
       searchMatched: !!searchHit,
       searchActive: !!searchHit && viewState.search.activeIndex === searchHit.index,
+      searchRowMatched: !!searchRowHit,
+      searchRowActive: !!searchRowHit && viewState.search.activeIndex === searchRowHit.index,
       searchMatchIndex: searchHit?.index,
       searchRanges: searchHit?.match.ranges,
     }
@@ -1714,7 +1719,7 @@ export class DataTableRootNode<
     const searchHighlight = searchState.query.highlight ?? 'cell-text'
     const cellSearchHighlighted = !isHeader
       && context.state.searchMatched
-      && (searchHighlight === 'cell' || searchHighlight === 'cell-text')
+      && searchHighlightHasCell(searchHighlight)
     const background = cellSearchHighlighted
       ? context.state.searchActive ? '#fff1f2' : '#fef3c7'
       : this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
@@ -1766,7 +1771,7 @@ export class DataTableRootNode<
       },
     )
 
-    if (!isHeader && context.state.searchRanges?.length && (searchHighlight === 'text' || searchHighlight === 'cell-text')) {
+    if (!isHeader && context.state.searchRanges?.length && searchHighlightHasText(searchHighlight)) {
       schema.push(...this.renderDefaultCellSearchTextHighlights(
         text,
         textRect,
@@ -1915,6 +1920,52 @@ export class DataTableRootNode<
   private renderInteractionOverlay(): void {
     this.renderHoverOverlay()
     this.renderSelectionOverlay()
+  }
+
+  private renderSearchOverlay(): void {
+    const searchState = this.viewPipeline.getSearchState()
+    const highlight = searchState.query.highlight ?? 'cell-text'
+    if (!searchState.query.text || !searchHighlightHasRow(highlight)) return
+
+    const schema: NovaSchema = []
+    const activeRowIds = new Set<DataTableRowId>()
+    const matchedRowIds = new Set<DataTableRowId>()
+    for (let index = 0; index < searchState.matches.length; index += 1) {
+      const match = searchState.matches[index]!
+      if (match.rowId === undefined) continue
+      matchedRowIds.add(match.rowId)
+      if (index === searchState.activeIndex) activeRowIds.add(match.rowId)
+    }
+
+    for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
+      const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
+      if (!viewRow || viewRow.kind !== 'data' || viewRow.rowId === undefined || !matchedRowIds.has(viewRow.rowId)) continue
+      const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+      const color = activeRowIds.has(viewRow.rowId)
+        ? 'rgba(219, 39, 119, 0.10)'
+        : 'rgba(37, 99, 235, 0.07)'
+      schema.push(...this.createRowOverlayRectsFromRect({ x: this.viewport.bodyX, y, width: this.viewport.bodyWidth, height: this.rowHeight }, color, 1, true))
+    }
+
+    if (searchHighlightHasCell(highlight)) {
+      const allColumnRects = this.visibleColumnRects('all')
+      for (const match of searchState.matches) {
+        if (match.columnId === undefined || match.rowIndex < this.viewport.rowRange.start || match.rowIndex >= this.viewport.rowRange.end) continue
+        const columnRect = allColumnRects.find(candidate => candidate.column.id === match.columnId)
+        if (!columnRect) continue
+        const rect = this.clipRectToColumnRegion({
+          x: columnRect.x,
+          y: this.viewport.bodyY + match.rowIndex * this.rowHeight - this.scrollY,
+          width: columnRect.width,
+          height: this.rowHeight,
+        }, columnRect.column)
+        if (!rect) continue
+        const active = searchState.activeIndex >= 0 && searchState.matches[searchState.activeIndex] === match
+        schema.push(this.createOverlayRect(rect, active ? 'rgba(244, 63, 94, 0.14)' : 'rgba(250, 204, 21, 0.14)', 1))
+      }
+    }
+
+    if (schema.length > 0) this.renderer.schema(schema)
   }
 
   private renderPinnedBottomGroupPanel(): void {
@@ -2109,6 +2160,28 @@ export class DataTableRootNode<
     includePinned: boolean,
   ): NovaSchema {
     return this.createRowRects(target, includePinned).map(rect => this.createOverlayRect(rect, color, opacity))
+  }
+
+  private createRowOverlayRectsFromRect(
+    rect: DataTableCellRect,
+    color: string,
+    opacity: number,
+    includePinned: boolean,
+  ): NovaSchema {
+    const segments: Array<DataTableCellRect> = []
+    if (includePinned && this.viewport.pinnedLeftWidth > 0) {
+      segments.push({ x: 0, y: rect.y, width: this.viewport.pinnedLeftWidth, height: rect.height })
+    }
+    segments.push({ x: this.viewport.bodyX, y: rect.y, width: this.viewport.bodyWidth, height: rect.height })
+    if (includePinned && this.viewport.pinnedRightWidth > 0) {
+      segments.push({
+        x: this.width - this.viewport.pinnedRightWidth,
+        y: rect.y,
+        width: this.viewport.pinnedRightWidth,
+        height: rect.height,
+      })
+    }
+    return segments.map(segment => this.createOverlayRect(segment, color, opacity))
   }
 
   private createColumnOverlayRects(
@@ -2944,4 +3017,16 @@ function modeHasColumn(mode: DataTableHoverMode): boolean {
 
 function modeHasCell(mode: DataTableHoverMode): boolean {
   return mode === 'cell' || mode === 'row-cell' || mode === 'column-cell' || mode === 'row-column'
+}
+
+function searchHighlightHasRow(mode: DataTableSearchHighlightMode): boolean {
+  return mode === 'row' || mode === 'row-cell' || mode === 'row-cell-text'
+}
+
+function searchHighlightHasCell(mode: DataTableSearchHighlightMode): boolean {
+  return mode === 'cell' || mode === 'cell-text' || mode === 'row-cell' || mode === 'row-cell-text'
+}
+
+function searchHighlightHasText(mode: DataTableSearchHighlightMode): boolean {
+  return mode === 'text' || mode === 'cell-text' || mode === 'row-cell-text'
 }

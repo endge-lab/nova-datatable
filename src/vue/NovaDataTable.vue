@@ -333,6 +333,8 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   remove: ids => getRootApi().remove(ids),
   setRows: rows => getRootApi().setRows(rows),
   replaceRange: (start, rows) => getRootApi().replaceRange(start, rows),
+  applyDeltas: deltas => getRootApi().applyDeltas(deltas),
+  flushDeltas: () => getRootApi().flushDeltas(),
   setColumnWidth: (columnId, width) => getRootApi().setColumnWidth(columnId, width),
   autosizeColumn: columnId => getRootApi().autosizeColumn(columnId),
   autosizeColumns: columnIds => getRootApi().autosizeColumns(columnIds),

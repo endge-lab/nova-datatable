@@ -270,6 +270,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.search = this.createSearchQuery('')
     this.searchMatches = []
     this.searchActiveIndex = -1
+    this.rebuild()
   }
 
   findNext(): DataTableSearchMatch | null {
@@ -315,6 +316,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       if (match.rowId === rowId && (match.columnId === columnId || this.search.scope === 'rows')) {
         return { match, index }
       }
+    }
+    return null
+  }
+
+  getSearchMatchForRow(rowId: DataTableRowId): { match: DataTableSearchMatch; index: number } | null {
+    for (let index = 0; index < this.searchMatches.length; index += 1) {
+      const match = this.searchMatches[index]!
+      if (match.rowId === rowId) return { match, index }
     }
     return null
   }
@@ -476,9 +485,12 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const filtered = this.localFilter ? rows.filter(item => this.matchesFilters(item)) : rows
     const sorted = this.localSort && this.sort.length > 0 ? [...filtered].sort((a, b) => this.compareRows(a, b)) : filtered
     const ordered = this.applyManualOrder(sorted)
-    const grouped = this.localGrouping && this.view.grouping
-      ? this.flattenGroupedRows(ordered, this.view.grouping.groups as Array<DataTableGroupRule<Row>>)
+    const searched = this.localSearch && this.search.filter
+      ? ordered.filter(item => this.matchSearchRow(item).length > 0)
       : ordered
+    const grouped = this.localGrouping && this.view.grouping
+      ? this.flattenGroupedRows(searched, this.view.grouping.groups as Array<DataTableGroupRule<Row>>)
+      : searched
     this.rows = grouped.map((item, viewIndex) => ({ ...item, viewIndex }))
     this.rebuildSearchMatches()
   }
@@ -561,6 +573,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       caseSensitive: raw.caseSensitive ?? options?.caseSensitive ?? false,
       columns: raw.columns ?? options?.columns ?? [],
       highlight: raw.highlight ?? options?.highlight ?? 'cell-text',
+      filter: raw.filter ?? options?.filter ?? false,
       highlightColor: raw.highlightColor ?? options?.highlightColor ?? '#b45309',
       activeHighlightColor: raw.activeHighlightColor ?? options?.activeHighlightColor ?? '#be123c',
     }
@@ -970,6 +983,7 @@ function createViewSignature(view: DataTableResolvedViewOptions, expanded: 'all'
       caseSensitive: view.search.caseSensitive,
       columns: view.search.columns,
       highlight: view.search.highlight,
+      filter: view.search.filter,
       highlightColor: view.search.highlightColor,
       activeHighlightColor: view.search.activeHighlightColor,
       controlled: view.search.controlled,

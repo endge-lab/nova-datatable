@@ -15,7 +15,7 @@ import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
-import { normalizeDataTablePerformance, normalizeDataTableScrollbars } from '@/ui/root/datatable-root.config'
+import { normalizeDataTablePerformance, normalizeDataTableScrollbars, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, DataTableScrollbarLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
@@ -263,6 +263,7 @@ describe('DataTableStore', () => {
           caseSensitive: false,
           columns: [],
           highlight: 'cell-text',
+          filter: false,
           highlightColor: '#b45309',
           activeHighlightColor: '#be123c',
           controlled: false,
@@ -543,6 +544,7 @@ describe('DataTableViewPipeline', () => {
           caseSensitive: false,
           columns: [],
           highlight: 'cell-text',
+          filter: false,
           highlightColor: '#b45309',
           activeHighlightColor: '#be123c',
           controlled: false,
@@ -576,6 +578,13 @@ describe('DataTableViewPipeline', () => {
       },
     }
   }
+
+  it('enables append multi-sort by default in view options', () => {
+    const view = normalizeDataTableView({})
+
+    expect(view.sorting && view.sorting.multi).toBe(true)
+    expect(view.sorting && view.sorting.headerClick).toBe('append')
+  })
 
   it('sorts, filters and applies manual row order over the current view', () => {
     const store = createPipelineStore()
@@ -651,6 +660,13 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.findNext()).toMatchObject({ rowId: 'row-c', columnId: 'name' })
     expect(pipeline.findPrevious()).toMatchObject({ rowId: 'row-b', columnId: 'name' })
     expect(pipeline.getSearchMatchForCell('row-b', 'name')?.match.ranges[0]).toEqual({ start: 0, end: 1 })
+    expect(pipeline.getSearchMatchForRow('row-b')?.match.rowId).toBe('row-b')
+
+    pipeline.setSearch({ text: 'Alpha', scope: 'cells', columns: ['name'], match: 'contains', highlight: 'row-cell', filter: true })
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-b'])
+    expect(pipeline.getQuery().search?.filter).toBe(true)
+    pipeline.clearSearch()
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
 
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const lazyStore = createDataTableStore<Row>({
@@ -671,6 +687,7 @@ describe('DataTableViewPipeline', () => {
           caseSensitive: false,
           columns: ['name'],
           highlight: 'cell-text',
+          filter: false,
           highlightColor: '#b45309',
           activeHighlightColor: '#be123c',
           controlled: false,
@@ -928,6 +945,8 @@ describe('DataTable DSL templates', () => {
         iconScale: 1,
         searchMatched: false,
         searchActive: false,
+        searchRowMatched: false,
+        searchRowActive: false,
       },
       zone: 'body',
       store: createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) }),
@@ -1341,6 +1360,7 @@ describe('DataTable Root runtime', () => {
   it('sorts from header clicks and maps rendered rows through the view pipeline', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
+    const headerTemplate = vi.fn(() => [])
     const onSortChange = vi.fn()
     const surface = app.createSurface('datatable-sort-test')
     const uiRoot = app.schema.createNode(surface, {
@@ -1360,7 +1380,7 @@ describe('DataTable Root runtime', () => {
             headerHeight: 30,
             view: { sorting: { mode: 'client' } },
             columns: [
-              { id: 'name', field: 'name', width: 160, sortable: true, cellTemplate },
+              { id: 'name', field: 'name', width: 160, sortable: true, cellTemplate, headerTemplate },
               { id: 'amount', field: 'amount', width: 120 },
             ],
             onSortChange,
@@ -1381,6 +1401,9 @@ describe('DataTable Root runtime', () => {
     const firstNameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowIndex === 0)?.[0]
     expect(firstNameContext.rowId).toBe('row-b')
     expect(firstNameContext.storeIndex).toBe(1)
+    const sortedHeaderContext = [...headerTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name')?.[0]
+    expect(sortedHeaderContext.state.sorted).toBe('asc')
+    expect(sortedHeaderContext.state.sortPriority).toBe(0)
 
     app.destroy()
   })
