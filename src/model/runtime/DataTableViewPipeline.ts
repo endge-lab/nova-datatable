@@ -48,6 +48,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private revision = -1
   private viewSignature = ''
   private expandedInputSignature = ''
+  private passthrough = false
   private localSort = false
   private localFilter = false
   private localGrouping = false
@@ -108,7 +109,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   get rowCount(): number {
-    return this.rows.length
+    return this.passthrough ? this.store.rowCount : this.rows.length
   }
 
   getRowAt(viewIndex: number): Row | undefined {
@@ -126,10 +127,25 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   getViewRowAt(viewIndex: number): DataTableViewRow<Row> | undefined {
+    if (this.passthrough) {
+      if (viewIndex < 0 || viewIndex >= this.store.rowCount) return undefined
+      const row = this.store.getRowAt(viewIndex)
+      return {
+        kind: 'data',
+        row,
+        rowId: this.store.getRowIdAt(viewIndex),
+        storeIndex: viewIndex,
+        viewIndex,
+        depth: 0,
+      }
+    }
     return this.rows[viewIndex]
   }
 
   getViewRows(): Array<DataTableViewRow<Row>> {
+    if (this.passthrough) {
+      return Array.from({ length: this.store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
+    }
     return [...this.rows]
   }
 
@@ -344,18 +360,13 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 
     const needsMaterializedRows = this.localSort || this.localFilter || this.localGrouping || this.rowOrder.length > 0
     if (!needsMaterializedRows) {
+      this.passthrough = true
       this.groupNodes.clear()
-      this.rows = Array.from({ length: this.store.rowCount }, (_item, viewIndex) => ({
-        kind: 'data',
-        row: this.store.getRowAt(viewIndex),
-        rowId: this.store.getRowIdAt(viewIndex),
-        storeIndex: viewIndex,
-        viewIndex,
-        depth: 0,
-      }))
+      this.rows = []
       return
     }
 
+    this.passthrough = false
     const rows: Array<DataTableDataViewRow<Row>> = []
     for (let storeIndex = 0; storeIndex < this.store.rowCount; storeIndex += 1) {
       const row = this.store.getRowAt(storeIndex)

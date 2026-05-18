@@ -201,7 +201,7 @@ const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
     main: resolveRendererType(props.renderer),
   },
   scheduler: {
-    type: props.loop ? RaphSchedulerType.AnimationFrame : RaphSchedulerType.Sync,
+    type: RaphSchedulerType.AnimationFrame,
     loop: props.loop,
   },
   debug: {

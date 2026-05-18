@@ -153,6 +153,7 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
     sortable: readProp(node, 'sortable') as DataTableColumnInput<Row>['sortable'],
     filter: readProp(node, 'filter') as DataTableColumnInput<Row>['filter'],
     reorderable: readBooleanProp(node, 'reorderable'),
+    animated: readBooleanProp(node, 'animated'),
     cellTemplate: createSlotTemplate<Row>(slots.cell as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     headerTemplate: createSlotTemplate<Row>(slots.header as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     filterTemplate: createSlotTemplate<Row>(slots.filter as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),

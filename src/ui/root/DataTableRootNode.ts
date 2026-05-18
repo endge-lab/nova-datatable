@@ -113,6 +113,9 @@ export class DataTableRootNode<
   private cellEnterStartedAt = new Map<string, number>()
   private cellEnterRenderCount = 0
   private suppressCellEnterUntil = 0
+  private visibleAnimatedCells = false
+  private animationLoopLease: { release: () => void } | null = null
+  private animationLoopSyncQueued = false
 
   scrollX = 0
   scrollY = 0
@@ -142,6 +145,7 @@ export class DataTableRootNode<
       cursor: { hover: 'default', dragging: 'col-resize' },
     })
     this.setupEvents()
+    this.addDisposer(() => this.releaseAnimationLoop())
 
     this.api = {
       options: next => this.tableOptions(next),
@@ -679,6 +683,7 @@ export class DataTableRootNode<
     this.renderInteractionLayer()
     this.renderScrollbars()
     this.finalizeVisibleCellKeys()
+    this.queueAnimationLoopSync()
   }
 
   private renderPartitionedRowZone(
@@ -1043,6 +1048,7 @@ export class DataTableRootNode<
     const template = context.zone === 'header'
       ? context.column.headerTemplate ?? this.props.headerTemplate
       : context.column.cellTemplate ?? this.props.cellTemplate
+    if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
 
     if (template) {
       schema.push(...template(context))
@@ -1073,6 +1079,7 @@ export class DataTableRootNode<
   private resolveCellEnterAlpha(context: DataTableCellContext<Row>): number {
     const cellsMotion = this.props.interaction.motion && this.props.interaction.motion.cells
     if (!cellsMotion || cellsMotion.enter === 'none' || context.zone === 'header') return 1
+    if (!this.nova.raph.loopEnabled) return 1
 
     const key = this.createCellKey(context)
     this.nextVisibleCellKeys.add(key)
@@ -1098,6 +1105,35 @@ export class DataTableRootNode<
 
   private createCellKey(context: DataTableCellContext<Row>): string {
     return `${context.zone}:${String(context.rowId)}:${context.column.id}`
+  }
+
+  private queueAnimationLoopSync(): void {
+    if (this.animationLoopSyncQueued) return
+    this.animationLoopSyncQueued = true
+    queueMicrotask(() => {
+      this.animationLoopSyncQueued = false
+      this.syncAnimationLoop()
+    })
+  }
+
+  private syncAnimationLoop(): void {
+    if (this.lifecycleState === 'destroyed') return
+
+    if (this.visibleAnimatedCells) {
+      if (!this.animationLoopLease) {
+        this.animationLoopLease = this.nova.raph.acquireLoop('nova-datatable:animated-cells')
+      }
+      this.visibleAnimatedCells = false
+      this.dirty({ render: true })
+      return
+    }
+
+    this.releaseAnimationLoop()
+  }
+
+  private releaseAnimationLoop(): void {
+    this.animationLoopLease?.release()
+    this.animationLoopLease = null
   }
 
   private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {

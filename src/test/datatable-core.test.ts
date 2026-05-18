@@ -701,6 +701,46 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('does not schedule cell enter fade in sync scheduler mode', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const invalidate = vi.spyOn(app, 'invalidate')
+
+    root.setProps({
+      interaction: {
+        motion: {
+          cells: { enter: 'fade', duration: 120, stagger: 4, maxAnimatedCells: 120 },
+        },
+      },
+    } as never)
+    invalidate.mockClear()
+    app.raph.run()
+
+    expect(invalidate).not.toHaveBeenCalled()
+    app.destroy()
+  })
+
+  it('acquires a temporary loop lease while animated columns are visible', async () => {
+    const app = createApp()
+    const release = vi.fn()
+    const acquireLoop = vi.spyOn(app.raph, 'acquireLoop').mockReturnValue({ owner: 'test', release })
+    const root = mountRoot(app)
+
+    root.setProps({
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', resizable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 120, animated: true },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+    await Promise.resolve()
+
+    expect(acquireLoop).toHaveBeenCalledWith('nova-datatable:animated-cells')
+    app.destroy()
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
   it('selects cells without hijacking resize handles', () => {
     const app = createApp()
     const onSelectionChange = vi.fn()

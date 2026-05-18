@@ -470,6 +470,7 @@ export interface DataTableColumnInput<Row extends Record<string, any> = Record<s
   sortable?: boolean | DataTableSortConfig<Row>
   filter?: string | DataTableFilterConfig<Row>
   reorderable?: boolean
+  animated?: boolean
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   filterTemplate?: DataTableTemplate<Row>
