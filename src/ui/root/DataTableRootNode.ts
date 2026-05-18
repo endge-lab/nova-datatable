@@ -32,11 +32,16 @@ import type {
   DataTablePinnedRowPosition,
   DataTableQueryState,
   DataTableResolvedColumn,
+  DataTableResolvedScrollbarAxisOptions,
   DataTableRootApi,
   DataTableRootOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableRowId,
+  DataTableScrollbarAxis,
+  DataTableScrollbarGeometry,
+  DataTableScrollbarLayerContext,
+  DataTableScrollbarState,
   DataTableSelectionState,
   DataTableStoreApi,
   DataTableViewport,
@@ -55,6 +60,15 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
   columnIndex: number
   x: number
   width: number
+}
+
+interface ScrollbarDragState {
+  axis: DataTableScrollbarAxis
+  startX: number
+  startY: number
+  startScrollX: number
+  startScrollY: number
+  trackTravel: number
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
@@ -117,6 +131,11 @@ export class DataTableRootNode<
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
   private lastPointerPosition: { x: number; y: number } | null = null
+  private pointerInside = false
+  private hoveredScrollbarAxis: DataTableScrollbarAxis | null = null
+  private scrollbarDragState: ScrollbarDragState | null = null
+  private scrollbarAlpha = 1
+  private scrollbarHideTimer: ReturnType<typeof setTimeout> | null = null
 
   scrollX = 0
   scrollY = 0
@@ -146,7 +165,10 @@ export class DataTableRootNode<
       cursor: { hover: 'default', dragging: 'col-resize' },
     })
     this.setupEvents()
-    this.addDisposer(() => this.releaseAnimationLoop())
+    this.addDisposer(() => {
+      this.releaseAnimationLoop()
+      this.clearScrollbarHideTimer()
+    })
 
     this.api = {
       options: next => this.tableOptions(next),
@@ -297,6 +319,7 @@ export class DataTableRootNode<
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
     if (delta > this.props.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
+    if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
     this.refresh(['viewport'])
   }
@@ -601,17 +624,30 @@ export class DataTableRootNode<
     this.on('mousemove', event => {
       if (this.resizeState) return
       const [x, y] = this.trackPointerPosition(event)
+      this.pointerInside = true
+      this.updateHoveredScrollbarAxis(x, y)
+      this.revealScrollbars('hover')
       const nextHover = this.resolveInteractionTargetAt(x, y)
       this.updateHover(nextHover)
     })
 
     this.on('mouseleave', () => {
       this.lastPointerPosition = null
+      this.pointerInside = false
+      this.hoveredScrollbarAxis = null
+      this.scheduleScrollbarHide('hover')
       this.clearHover()
     })
 
     this.on('mousedown', event => {
       const [x, y] = this.trackPointerPosition(event)
+      const scrollbarAxis = this.hitScrollbar(x, y)
+      if (scrollbarAxis) {
+        this.startScrollbarDrag(scrollbarAxis, x, y, event)
+        event.cancelBubble = true
+        return
+      }
+
       const resizeColumn = this.hitResizeHandle(x, y)
       if (resizeColumn) {
         this.resizeState = {
@@ -643,7 +679,12 @@ export class DataTableRootNode<
       event.cancelBubble = true
     })
 
-    this.on('dragmove', (event, dx) => {
+    this.on('dragmove', (event, dx, dy) => {
+      if (this.scrollbarDragState) {
+        this.updateScrollbarDrag(dx, dy)
+        event.cancelBubble = true
+        return
+      }
       if (!this.resizeState) return
       const nextWidth = this.resizeState.startWidth + dx
       this.applyColumnWidth(this.resizeState.column.id, nextWidth)
@@ -651,6 +692,13 @@ export class DataTableRootNode<
     })
 
     this.on('dragend', event => {
+      if (this.scrollbarDragState) {
+        this.scrollbarDragState = null
+        this.releasePointerCapture(event)
+        this.scheduleScrollbarHide('scroll')
+        event.cancelBubble = true
+        return
+      }
       if (!this.resizeState) return
       this.resizeState = null
       this.releasePointerCapture(event)
@@ -694,6 +742,7 @@ export class DataTableRootNode<
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
     this.renderScrollbars()
+    this.renderScrollbarLayer()
     this.finalizeVisibleCellKeys()
     this.queueAnimationLoopSync()
   }

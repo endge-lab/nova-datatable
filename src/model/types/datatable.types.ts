@@ -28,6 +28,8 @@ export type DataTableFilterOperator =
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
 export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
 export type DataTableCellEnterMotion = 'none' | 'fade'
+export type DataTableScrollbarVisibility = 'always' | 'hover' | 'scroll'
+export type DataTableScrollbarAxis = 'horizontal' | 'vertical'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -271,6 +273,73 @@ export interface DataTableInteractionLayerContext<Row extends Record<string, any
 
 export type DataTableInteractionLayerTemplate<Row extends Record<string, any> = Record<string, any>> = (
   context: DataTableInteractionLayerContext<Row>,
+) => NovaSchema
+
+export interface DataTableScrollbarAxisOptions {
+  visibility?: DataTableScrollbarVisibility
+  thickness?: number
+  minThumbSize?: number
+  radius?: number
+  trackColor?: string
+  thumbColor?: string
+  thumbHoverColor?: string
+  className?: string
+}
+
+export interface DataTableScrollbarOptions extends DataTableScrollbarAxisOptions {
+  hideDelay?: number
+  horizontal?: false | DataTableScrollbarAxisOptions
+  vertical?: false | DataTableScrollbarAxisOptions
+  nativeRenderer?: boolean
+}
+
+export interface DataTableResolvedScrollbarAxisOptions extends Required<Omit<DataTableScrollbarAxisOptions, 'className'>> {
+  className?: string
+}
+
+export interface DataTableResolvedScrollbarOptions extends DataTableResolvedScrollbarAxisOptions {
+  hideDelay: number
+  horizontal: false | DataTableResolvedScrollbarAxisOptions
+  vertical: false | DataTableResolvedScrollbarAxisOptions
+  nativeRenderer: boolean
+}
+
+export interface DataTableScrollbarGeometry {
+  axis: DataTableScrollbarAxis
+  track: DataTableCellRect
+  thumb: DataTableCellRect
+  value: number
+  max: number
+  viewportSize: number
+  contentSize: number
+  visibleStart: number
+  visibleEnd: number
+  options: DataTableResolvedScrollbarAxisOptions
+}
+
+export interface DataTableScrollbarState {
+  alpha: number
+  hoveredAxis: DataTableScrollbarAxis | null
+  draggingAxis: DataTableScrollbarAxis | null
+  pointerInside: boolean
+}
+
+export interface DataTableScrollbarLayerContext<Row extends Record<string, any> = Record<string, any>> {
+  horizontal: DataTableScrollbarGeometry | null
+  vertical: DataTableScrollbarGeometry | null
+  viewport: DataTableViewport
+  state: DataTableScrollbarState
+  actions: {
+    scrollTo: (x: number, y: number) => void
+    scrollBy: (dx: number, dy: number) => void
+    startDrag: (axis: DataTableScrollbarAxis, event?: MouseEvent) => void
+  }
+  store: DataTableStoreApi<Row>
+  api: DataTableRootApi<Row>
+}
+
+export type DataTableScrollbarLayerTemplate<Row extends Record<string, any> = Record<string, any>> = (
+  context: DataTableScrollbarLayerContext<Row>,
 ) => NovaSchema
 
 export interface DataTableGroupTemplateState {
@@ -536,6 +605,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   overscanColumns?: number
   interaction?: DataTableInteractionOptions
   view?: DataTableViewOptions
+  scrollbars?: false | DataTableScrollbarOptions
 }
 
 export interface DataTableRootProps<Row extends Record<string, any> = Record<string, any>>
@@ -546,6 +616,7 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<Row>
   groupRowTemplate?: DataTableGroupTemplate<Row>
   groupFooterTemplate?: DataTableGroupTemplate<Row>
   grandFooterTemplate?: DataTableGroupTemplate<Row>
@@ -575,11 +646,13 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   pinnedRows: DataTablePinnedRows<Row>
   interaction: DataTableResolvedInteractionOptions
   view: DataTableResolvedViewOptions
+  scrollbars: false | DataTableResolvedScrollbarOptions
   hoverAlpha: number
   selectionAlpha: number
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<Row>
   groupRowTemplate?: DataTableGroupTemplate<Row>
   groupFooterTemplate?: DataTableGroupTemplate<Row>
   grandFooterTemplate?: DataTableGroupTemplate<Row>

@@ -3,9 +3,12 @@ import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
   DataTableResolvedInteractionOptions,
+  DataTableResolvedScrollbarAxisOptions,
+  DataTableResolvedScrollbarOptions,
   DataTableResolvedViewOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
+  DataTableScrollbarOptions,
   DataTableViewOptions,
 } from '@/model/types/datatable.types'
 import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
@@ -31,11 +34,13 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   overscanColumns: { type: 'number' },
   interaction: { type: 'object' },
   view: { type: 'object' },
+  scrollbars: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
   cellTemplate: { type: 'function' },
   headerTemplate: { type: 'function' },
   interactionLayerTemplate: { type: 'function' },
+  scrollbarLayerTemplate: { type: 'function' },
   groupRowTemplate: { type: 'function' },
   groupFooterTemplate: { type: 'function' },
   grandFooterTemplate: { type: 'function' },
@@ -87,11 +92,13 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     overscanColumns: Math.max(0, props.overscanColumns ?? 3),
     interaction: normalizeDataTableInteraction(props.interaction),
     view: normalizeDataTableView(props.view),
+    scrollbars: normalizeDataTableScrollbars(props.scrollbars),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
     cellTemplate: props.cellTemplate,
     headerTemplate: props.headerTemplate,
     interactionLayerTemplate: props.interactionLayerTemplate,
+    scrollbarLayerTemplate: props.scrollbarLayerTemplate,
     groupRowTemplate: props.groupRowTemplate,
     groupFooterTemplate: props.groupFooterTemplate,
     grandFooterTemplate: props.grandFooterTemplate,
@@ -162,6 +169,46 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           footerPlacement: view?.grouping?.footerPlacement ?? 'scroll',
           controlled: view?.grouping?.controlled ?? false,
         },
+  }
+}
+
+export function normalizeDataTableScrollbars(
+  scrollbars: false | DataTableScrollbarOptions | undefined,
+): false | DataTableResolvedScrollbarOptions {
+  if (scrollbars === false) return false
+
+  const base = normalizeDataTableScrollbarAxis(scrollbars)
+  return {
+    ...base,
+    hideDelay: Math.max(0, finiteNumber(scrollbars?.hideDelay, 650)),
+    horizontal: scrollbars?.horizontal === false
+      ? false
+      : normalizeDataTableScrollbarAxis({
+          ...scrollbars,
+          ...(scrollbars?.horizontal ?? {}),
+        }),
+    vertical: scrollbars?.vertical === false
+      ? false
+      : normalizeDataTableScrollbarAxis({
+          ...scrollbars,
+          ...(scrollbars?.vertical ?? {}),
+        }),
+    nativeRenderer: scrollbars?.nativeRenderer ?? true,
+  }
+}
+
+function normalizeDataTableScrollbarAxis(
+  options: DataTableScrollbarOptions | NonNullable<DataTableScrollbarOptions['horizontal']> | undefined,
+): DataTableResolvedScrollbarAxisOptions {
+  return {
+    visibility: options?.visibility ?? 'always',
+    thickness: Math.max(3, finiteNumber(options?.thickness, 4)),
+    minThumbSize: Math.max(12, finiteNumber(options?.minThumbSize, 28)),
+    radius: Math.max(0, finiteNumber(options?.radius, 3)),
+    trackColor: options?.trackColor ?? 'rgba(23, 32, 51, 0.10)',
+    thumbColor: options?.thumbColor ?? 'rgba(23, 32, 51, 0.38)',
+    thumbHoverColor: options?.thumbHoverColor ?? options?.thumbColor ?? 'rgba(23, 32, 51, 0.55)',
+    className: options?.className,
   }
 }
 
@@ -241,6 +288,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'overscanColumns',
         'interaction',
         'view',
+        'scrollbars',
       ],
       render: [
         'style',
@@ -252,6 +300,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'cellTemplate',
         'headerTemplate',
         'interactionLayerTemplate',
+        'scrollbarLayerTemplate',
         'groupRowTemplate',
         'groupFooterTemplate',
         'grandFooterTemplate',
@@ -281,4 +330,8 @@ function finiteUnit(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : fallback
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
