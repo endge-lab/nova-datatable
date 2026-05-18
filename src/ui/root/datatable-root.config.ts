@@ -1,4 +1,4 @@
-import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps } from '@endge/nova-ui-kit'
+import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps, normalizeNovaScrollbarVisualOptions } from '@endge/nova-ui-kit'
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
@@ -319,16 +319,15 @@ function normalizeDataTableScrollbarAxis(
   options: DataTableScrollbarOptions | DataTableScrollbarAxisOptions | undefined,
   defaults: Pick<DataTableScrollbarOptions, 'trackColor' | 'thumbColor' | 'thumbHoverColor'> = {},
 ): DataTableResolvedScrollbarAxisOptions {
-  return {
-    visibility: options?.visibility ?? 'always',
-    thickness: Math.max(3, finiteNumber(options?.thickness, 4)),
-    minThumbSize: Math.max(12, finiteNumber(options?.minThumbSize, 28)),
-    radius: Math.max(0, finiteNumber(options?.radius, 3)),
-    trackColor: options?.trackColor ?? defaults.trackColor ?? 'rgba(23, 32, 51, 0.10)',
-    thumbColor: options?.thumbColor ?? defaults.thumbColor ?? 'rgba(23, 32, 51, 0.38)',
-    thumbHoverColor: options?.thumbHoverColor ?? defaults.thumbHoverColor ?? options?.thumbColor ?? defaults.thumbColor ?? 'rgba(23, 32, 51, 0.55)',
-    className: options?.className,
-  }
+  return normalizeNovaScrollbarVisualOptions(options, {
+    visibility: 'always',
+    thickness: 4,
+    minThumbSize: 28,
+    radius: 3,
+    trackColor: defaults.trackColor ?? 'rgba(23, 32, 51, 0.10)',
+    thumbColor: defaults.thumbColor ?? 'rgba(23, 32, 51, 0.38)',
+    thumbHoverColor: defaults.thumbHoverColor ?? options?.thumbColor ?? defaults.thumbColor ?? 'rgba(23, 32, 51, 0.55)',
+  }) as DataTableResolvedScrollbarAxisOptions
 }
 
 export function normalizeDataTableInteraction(

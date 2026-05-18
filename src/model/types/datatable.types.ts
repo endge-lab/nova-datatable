@@ -7,6 +7,12 @@ import type {
   TooltipContent,
   TooltipModifier,
   TooltipPlacement,
+  NovaScrollbarAxis,
+  NovaScrollbarGeometry,
+  NovaScrollbarResolvedVisualOptions,
+  NovaScrollbarVisibility,
+  NovaScrollbarVisualOptions,
+  NovaScrollbarVisualState,
 } from '@endge/nova-ui-kit'
 
 export const DATATABLE_ROOT_SCHEMA_TYPE = 'NovaDataTable.Root'
@@ -36,8 +42,8 @@ export type DataTableFilterOperator =
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
 export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
 export type DataTableCellEnterMotion = 'none' | 'fade'
-export type DataTableScrollbarVisibility = 'always' | 'hover' | 'scroll'
-export type DataTableScrollbarAxis = 'horizontal' | 'vertical'
+export type DataTableScrollbarVisibility = Extract<NovaScrollbarVisibility, 'always' | 'hover' | 'scroll'>
+export type DataTableScrollbarAxis = NovaScrollbarAxis
 export type DataTableZoomMode = 'density' | 'layout' | 'text' | 'custom'
 export type DataTableZoomAffect = 'rows' | 'headers' | 'columns' | 'text' | 'icons'
 export type NovaDataTableDevtoolsOption = boolean | {
@@ -401,15 +407,8 @@ export interface DataTableZoomState {
   iconScale: number
 }
 
-export interface DataTableScrollbarAxisOptions {
+export interface DataTableScrollbarAxisOptions extends NovaScrollbarVisualOptions {
   visibility?: DataTableScrollbarVisibility
-  thickness?: number
-  minThumbSize?: number
-  radius?: number
-  trackColor?: string
-  thumbColor?: string
-  thumbHoverColor?: string
-  className?: string
 }
 
 export interface DataTableScrollbarOptions extends DataTableScrollbarAxisOptions {
@@ -419,8 +418,8 @@ export interface DataTableScrollbarOptions extends DataTableScrollbarAxisOptions
   nativeRenderer?: boolean
 }
 
-export interface DataTableResolvedScrollbarAxisOptions extends Required<Omit<DataTableScrollbarAxisOptions, 'className'>> {
-  className?: string
+export interface DataTableResolvedScrollbarAxisOptions extends NovaScrollbarResolvedVisualOptions {
+  visibility: DataTableScrollbarVisibility
 }
 
 export interface DataTableResolvedScrollbarOptions extends DataTableResolvedScrollbarAxisOptions {
@@ -430,21 +429,14 @@ export interface DataTableResolvedScrollbarOptions extends DataTableResolvedScro
   nativeRenderer: boolean
 }
 
-export interface DataTableScrollbarGeometry {
+export interface DataTableScrollbarGeometry extends Omit<NovaScrollbarGeometry, 'axis' | 'track' | 'thumb' | 'options'> {
   axis: DataTableScrollbarAxis
   track: DataTableCellRect
   thumb: DataTableCellRect
-  value: number
-  max: number
-  viewportSize: number
-  contentSize: number
-  visibleStart: number
-  visibleEnd: number
   options: DataTableResolvedScrollbarAxisOptions
 }
 
-export interface DataTableScrollbarState {
-  alpha: number
+export interface DataTableScrollbarState extends NovaScrollbarVisualState {
   hoveredAxis: DataTableScrollbarAxis | null
   draggingAxis: DataTableScrollbarAxis | null
   pointerInside: boolean

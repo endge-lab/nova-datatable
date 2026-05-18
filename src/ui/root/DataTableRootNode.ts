@@ -6,6 +6,10 @@ import {
   type TooltipProps,
   type NovaUiLayoutRect,
   NovaUiComponentNode,
+  createNovaScrollbarGeometry,
+  createNovaScrollbarSchema,
+  hitNovaScrollbarRect,
+  mapNovaScrollbarDragValue,
 } from '@endge/nova-ui-kit'
 import type { NovaApp, NovaSchema, NovaSurface } from '@endge/nova'
 import type { EventList } from '@endge/utils'
@@ -74,7 +78,6 @@ interface ScrollbarDragState {
   axis: DataTableScrollbarAxis
   startScrollX: number
   startScrollY: number
-  trackTravel: number
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
@@ -2303,53 +2306,11 @@ export class DataTableRootNode<
 
     const schema: NovaSchema = []
     if (geometry.vertical) {
-      const item = geometry.vertical
-      const hovered = state.hoveredAxis === 'vertical' || state.draggingAxis === 'vertical'
-      schema.push(
-        {
-          type: 'rect',
-          ...item.track,
-          styles: {
-            background: item.options.trackColor,
-            opacity: state.alpha,
-            border: { radius: item.options.radius },
-          },
-        },
-        {
-          type: 'rect',
-          ...item.thumb,
-          styles: {
-            background: hovered ? item.options.thumbHoverColor : item.options.thumbColor,
-            opacity: state.alpha,
-            border: { radius: item.options.radius },
-          },
-        },
-      )
+      schema.push(...createNovaScrollbarSchema(geometry.vertical, state))
     }
 
     if (geometry.horizontal) {
-      const item = geometry.horizontal
-      const hovered = state.hoveredAxis === 'horizontal' || state.draggingAxis === 'horizontal'
-      schema.push(
-        {
-          type: 'rect',
-          ...item.track,
-          styles: {
-            background: item.options.trackColor,
-            opacity: state.alpha,
-            border: { radius: item.options.radius },
-          },
-        },
-        {
-          type: 'rect',
-          ...item.thumb,
-          styles: {
-            background: hovered ? item.options.thumbHoverColor : item.options.thumbColor,
-            opacity: state.alpha,
-            border: { radius: item.options.radius },
-          },
-        },
-      )
+      schema.push(...createNovaScrollbarSchema(geometry.horizontal, state))
     }
 
     if (schema.length > 0) this.renderer.schema(schema)
@@ -2401,14 +2362,7 @@ export class DataTableRootNode<
     const inset = 4
     const trackHeight = Math.max(1, this.viewport.bodyHeight - inset * 2)
     const thickness = options.thickness
-    const thumbHeight = Math.min(trackHeight, Math.max(
-      options.minThumbSize,
-      trackHeight * (this.viewport.bodyHeight / Math.max(1, this.viewport.contentHeight)),
-    ))
-    const travel = Math.max(0, trackHeight - thumbHeight)
-    const thumbY = this.viewport.bodyY + inset + (this.viewport.maxScrollY > 0 ? travel * (this.scrollY / this.viewport.maxScrollY) : 0)
-
-    return {
+    return createNovaScrollbarGeometry({
       axis: 'vertical',
       track: {
         x: this.width - thickness - inset,
@@ -2416,34 +2370,18 @@ export class DataTableRootNode<
         width: thickness,
         height: trackHeight,
       },
-      thumb: {
-        x: this.width - thickness - inset,
-        y: thumbY,
-        width: thickness,
-        height: thumbHeight,
-      },
       value: this.scrollY,
-      max: this.viewport.maxScrollY,
       viewportSize: this.viewport.bodyHeight,
       contentSize: this.viewport.contentHeight,
-      visibleStart: this.scrollY,
-      visibleEnd: this.scrollY + this.viewport.bodyHeight,
       options,
-    }
+    }) as DataTableScrollbarGeometry
   }
 
   private createHorizontalScrollbarGeometry(options: DataTableResolvedScrollbarAxisOptions): DataTableScrollbarGeometry {
     const inset = 4
     const trackWidth = Math.max(1, this.viewport.bodyWidth - inset * 2)
     const thickness = options.thickness
-    const thumbWidth = Math.min(trackWidth, Math.max(
-      options.minThumbSize,
-      trackWidth * (this.viewport.bodyWidth / Math.max(1, this.viewport.contentWidth)),
-    ))
-    const travel = Math.max(0, trackWidth - thumbWidth)
-    const thumbX = this.viewport.bodyX + inset + (this.viewport.maxScrollX > 0 ? travel * (this.scrollX / this.viewport.maxScrollX) : 0)
-
-    return {
+    return createNovaScrollbarGeometry({
       axis: 'horizontal',
       track: {
         x: this.viewport.bodyX + inset,
@@ -2451,20 +2389,11 @@ export class DataTableRootNode<
         width: trackWidth,
         height: thickness,
       },
-      thumb: {
-        x: thumbX,
-        y: this.height - thickness - inset,
-        width: thumbWidth,
-        height: thickness,
-      },
       value: this.scrollX,
-      max: this.viewport.maxScrollX,
       viewportSize: this.viewport.bodyWidth,
       contentSize: this.viewport.contentWidth,
-      visibleStart: this.scrollX,
-      visibleEnd: this.scrollX + this.viewport.bodyWidth,
       options,
-    }
+    }) as DataTableScrollbarGeometry
   }
 
   private getScrollbarState(): DataTableScrollbarState {
@@ -2497,8 +2426,8 @@ export class DataTableRootNode<
   private hitScrollbar(x: number, y: number): DataTableScrollbarAxis | null {
     if (this.resolveScrollbarAlpha() <= 0) return null
     const geometry = this.createScrollbarGeometry()
-    if (geometry.vertical && pointInRect(x, y, geometry.vertical.track)) return 'vertical'
-    if (geometry.horizontal && pointInRect(x, y, geometry.horizontal.track)) return 'horizontal'
+    if (geometry.vertical && hitNovaScrollbarRect(x, y, geometry.vertical.track)) return 'vertical'
+    if (geometry.horizontal && hitNovaScrollbarRect(x, y, geometry.horizontal.track)) return 'horizontal'
     return null
   }
 
@@ -2518,9 +2447,6 @@ export class DataTableRootNode<
       axis,
       startScrollX: this.scrollX,
       startScrollY: this.scrollY,
-      trackTravel: Math.max(1, axis === 'horizontal'
-        ? item.track.width - item.thumb.width
-        : item.track.height - item.thumb.height),
     }
     this.hoveredScrollbarAxis = axis
     this.revealScrollbars('scroll')
@@ -2534,12 +2460,10 @@ export class DataTableRootNode<
     const item = drag.axis === 'horizontal' ? geometry.horizontal : geometry.vertical
     if (!item || item.max <= 0) return
 
-    const delta = drag.axis === 'horizontal' ? dx : dy
-    const scrollDelta = delta / drag.trackTravel * item.max
     if (drag.axis === 'horizontal') {
-      this.setScroll(drag.startScrollX + scrollDelta, this.scrollY)
+      this.setScroll(mapNovaScrollbarDragValue(item, drag.startScrollX, dx), this.scrollY)
     } else {
-      this.setScroll(this.scrollX, drag.startScrollY + scrollDelta)
+      this.setScroll(this.scrollX, mapNovaScrollbarDragValue(item, drag.startScrollY, dy))
     }
   }
 
@@ -2594,13 +2518,6 @@ export class DataTableRootNode<
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
-}
-
-function pointInRect(x: number, y: number, rect: DataTableCellRect): boolean {
-  return x >= rect.x
-    && x <= rect.x + rect.width
-    && y >= rect.y
-    && y <= rect.y + rect.height
 }
 
 function escapeTooltipMarkdown(value: string): string {
