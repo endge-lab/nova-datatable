@@ -170,6 +170,7 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
   if (!id) return null
 
   const slots = readSlots(node)
+  const tooltip = readProp(node, 'tooltip')
   const column: DataTableColumnInput<Row> = {
     id,
     title: readStringProp(node, 'title'),
@@ -185,6 +186,7 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
     filter: readProp(node, 'filter') as DataTableColumnInput<Row>['filter'],
     reorderable: readBooleanProp(node, 'reorderable'),
     animated: readBooleanProp(node, 'animated'),
+    tooltip: tooltip === true ? undefined : tooltip as DataTableColumnInput<Row>['tooltip'],
     cellTemplate: createSlotTemplate<Row>(slots.cell as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     headerTemplate: createSlotTemplate<Row>(slots.header as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     filterTemplate: createSlotTemplate<Row>(slots.filter as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),

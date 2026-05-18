@@ -32,9 +32,11 @@ import {
   type DataTableSortState,
   type DataTableStoreApi,
   type DataTableTemplate,
+  type DataTableTooltipOptions,
   type DataTableViewOptions,
   type DataTableViewState,
   type DataTableViewport,
+  type DataTableZoomOptions,
   NovaDataTableSchema,
   type NovaDataTableRef,
 } from '@/model/types/datatable.types'
@@ -58,6 +60,8 @@ interface DataTableVueProps {
   interaction?: DataTableInteractionOptions
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
+  tooltip?: false | DataTableTooltipOptions<BaseRow>
+  zoom?: false | DataTableZoomOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
   scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<BaseRow>
@@ -103,6 +107,8 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   interaction: undefined,
   view: undefined,
   scrollbars: undefined,
+  tooltip: undefined,
+  zoom: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
   scrollbarLayerTemplate: undefined,
@@ -314,6 +320,9 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   resetColumnWidth: columnId => getRootApi().resetColumnWidth(columnId),
   scrollTo: (x, y) => getRootApi().scrollTo(x, y),
   scrollToRow: rowIndex => getRootApi().scrollToRow(rowIndex),
+  getZoom: () => getRootApi().getZoom(),
+  setZoom: value => getRootApi().setZoom(value),
+  resetZoom: () => getRootApi().resetZoom(),
   refresh: () => getRootApi().refresh(),
   batch: callback => getRootApi().batch(callback),
   getViewport: () => getRootApi().getViewport(),
@@ -368,6 +377,8 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :interaction="interaction"
       :view="rootView"
       :scrollbars="scrollbars"
+      :tooltip="tooltip"
+      :zoom="zoom"
       :cell-template="rootCellTemplate"
       :header-template="rootHeaderTemplate"
       :interaction-layer-template="rootInteractionLayerTemplate"

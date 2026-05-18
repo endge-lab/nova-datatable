@@ -6,11 +6,16 @@ import type {
   DataTableResolvedInteractionOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
+  DataTableResolvedTooltipOptions,
   DataTableResolvedViewOptions,
+  DataTableResolvedZoomOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableScrollbarOptions,
+  DataTableTooltipOptions,
   DataTableViewOptions,
+  DataTableZoomAffect,
+  DataTableZoomOptions,
 } from '@/model/types/datatable.types'
 import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
 
@@ -36,8 +41,11 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   interaction: { type: 'object' },
   view: { type: 'object' },
   scrollbars: { type: 'any' },
+  tooltip: { type: 'any' },
+  zoom: { type: 'any' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
+  tooltipAlpha: { type: 'number' },
   cellTemplate: { type: 'function' },
   headerTemplate: { type: 'function' },
   interactionLayerTemplate: { type: 'function' },
@@ -99,8 +107,11 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
       thumbColor: common.thumbColor,
       thumbHoverColor: common.hoverBackground,
     }),
+    tooltip: normalizeDataTableTooltip(props.tooltip),
+    zoom: normalizeDataTableZoom(props.zoom),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
+    tooltipAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).tooltipAlpha, 0),
     cellTemplate: props.cellTemplate,
     headerTemplate: props.headerTemplate,
     interactionLayerTemplate: props.interactionLayerTemplate,
@@ -204,6 +215,106 @@ export function normalizeDataTableScrollbars(
   }
 }
 
+export function normalizeDataTableTooltip<Row extends Record<string, any>>(
+  tooltip: false | DataTableTooltipOptions<Row> | undefined,
+): false | DataTableResolvedTooltipOptions<Row> {
+  if (tooltip === false) return false
+
+  return {
+    enabled: tooltip?.enabled ?? true,
+    modifier: tooltip?.modifier ?? 'shift',
+    placement: tooltip?.placement ?? 'cursor',
+    delay: Math.max(0, finiteNumber(tooltip?.delay, 180)),
+    hideDelay: Math.max(0, finiteNumber(tooltip?.hideDelay, 80)),
+    followCursor: tooltip?.followCursor ?? true,
+    collision: {
+      boundary: tooltip?.collision?.boundary ?? 'canvas',
+      padding: Math.max(0, finiteNumber(tooltip?.collision?.padding, 8)),
+      flip: tooltip?.collision?.flip ?? true,
+      shift: tooltip?.collision?.shift ?? true,
+    },
+    animation: tooltip?.animation === false
+      ? false
+      : {
+          type: tooltip?.animation?.type ?? 'fade-scale',
+          duration: Math.max(0, finiteNumber(tooltip?.animation?.duration, 140)),
+          easing: tooltip?.animation?.easing ?? 'outCubic',
+        },
+    className: tooltip?.className ?? 'datatable-cell-tooltip',
+    contentClassName: tooltip?.contentClassName ?? 'datatable-cell-tooltip__content',
+    width: Math.max(80, finiteNumber(tooltip?.width, 220)),
+    height: Math.max(28, finiteNumber(tooltip?.height, 42)),
+    background: tooltip?.background ?? 'rgba(15, 23, 42, 0.94)',
+    color: tooltip?.color ?? '#ffffff',
+    border: tooltip?.border ?? { color: 'rgba(255, 255, 255, 0.14)', width: 1, radius: 8 },
+    padding: tooltip?.padding ?? { left: 10, right: 10, top: 8, bottom: 8 },
+    fontFamily: tooltip?.fontFamily ?? 'Inter, Arial, sans-serif',
+    fontSize: Math.max(10, finiteNumber(tooltip?.fontSize, 12)),
+    fontWeight: tooltip?.fontWeight ?? '500',
+    lineHeight: Math.max(10, finiteNumber(tooltip?.lineHeight, 16)),
+    defaultContent: tooltip?.defaultContent ?? true,
+    content: tooltip?.content,
+  }
+}
+
+export function normalizeDataTableZoom(
+  zoom: false | DataTableZoomOptions | undefined,
+): false | DataTableResolvedZoomOptions {
+  if (zoom === false) return false
+
+  const min = finiteClamp(zoom?.min, 0.4, 2, 0.65)
+  const max = Math.max(min, finiteClamp(zoom?.max, min, 3, 1.5))
+  const value = finiteClamp(zoom?.value, min, max, 1)
+  const mode = zoom?.mode ?? 'density'
+  const affects = normalizeZoomAffects(zoom?.affects, mode)
+  const rowScale = normalizeZoomScale(value, affects.includes('rows'), zoom?.rowScale)
+  const headerScale = normalizeZoomScale(value, affects.includes('headers'), zoom?.headerScale)
+  const columnScale = normalizeZoomScale(value, affects.includes('columns'), zoom?.columnScale)
+  const textScale = normalizeZoomScale(value, affects.includes('text'), zoom?.textScale)
+  const iconScale = normalizeZoomScale(value, affects.includes('icons'), zoom?.iconScale)
+
+  return {
+    value,
+    min,
+    max,
+    mode,
+    affects,
+    rowScale,
+    headerScale,
+    columnScale,
+    textScale,
+    iconScale,
+    preserveAnchor: zoom?.preserveAnchor ?? 'pointer',
+    wheel: zoom?.wheel === false
+      ? false
+      : {
+          enabled: zoom?.wheel?.enabled ?? true,
+          modifier: zoom?.wheel?.modifier ?? 'ctrl',
+          step: finiteClamp(zoom?.wheel?.step, 0.01, 0.5, 0.08),
+        },
+  }
+}
+
+function normalizeZoomAffects(
+  affects: Array<DataTableZoomAffect> | undefined,
+  mode: DataTableResolvedZoomOptions['mode'],
+): Array<DataTableZoomAffect> {
+  const defaults: Record<DataTableResolvedZoomOptions['mode'], Array<DataTableZoomAffect>> = {
+    density: ['rows', 'headers', 'text', 'icons'],
+    layout: ['rows', 'headers', 'columns', 'text', 'icons'],
+    text: ['text'],
+    custom: ['rows', 'headers', 'text', 'icons'],
+  }
+  const source = affects?.length ? affects : defaults[mode]
+  const allowed: Array<DataTableZoomAffect> = ['rows', 'headers', 'columns', 'text', 'icons']
+  return allowed.filter(item => source.includes(item))
+}
+
+function normalizeZoomScale(value: number, affected: boolean, scale: unknown): number {
+  if (typeof scale === 'number' && Number.isFinite(scale)) return finiteClamp(scale, 0.35, 3, 1)
+  return finiteClamp(affected ? value : 1, 0.35, 3, 1)
+}
+
 function normalizeDataTableScrollbarAxis(
   options: DataTableScrollbarOptions | DataTableScrollbarAxisOptions | undefined,
   defaults: Pick<DataTableScrollbarOptions, 'trackColor' | 'thumbColor' | 'thumbHoverColor'> = {},
@@ -297,6 +408,8 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'interaction',
         'view',
         'scrollbars',
+        'tooltip',
+        'zoom',
       ],
       render: [
         'style',
@@ -305,6 +418,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'clip',
         'hoverAlpha',
         'selectionAlpha',
+        'tooltipAlpha',
         'cellTemplate',
         'headerTemplate',
         'interactionLayerTemplate',
@@ -342,4 +456,9 @@ function finiteUnit(value: unknown, fallback: number): number {
 
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+function finiteClamp(value: unknown, min: number, max: number, fallback: number): number {
+  const next = finiteNumber(value, fallback)
+  return Math.max(min, Math.min(max, next))
 }

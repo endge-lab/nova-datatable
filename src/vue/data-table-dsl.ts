@@ -93,6 +93,10 @@ export const DataTableColumn = createDataTableDslMarker('DataTableColumn', {
     required: false,
     default: false,
   },
+  tooltip: {
+    type: [Boolean, String, Object, Function],
+    required: false,
+  },
 })
 
 export const DataTablePinnedRows = createDataTableDslMarker('DataTablePinnedRows', {

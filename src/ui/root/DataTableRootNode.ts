@@ -1,5 +1,9 @@
 import {
   buildBoxSchema,
+  NovaUIKit,
+  type TooltipContent,
+  type TooltipModifier,
+  type TooltipProps,
   type NovaUiLayoutRect,
   NovaUiComponentNode,
 } from '@endge/nova-ui-kit'
@@ -45,9 +49,12 @@ import type {
   DataTableScrollbarVisibility,
   DataTableSelectionState,
   DataTableStoreApi,
+  DataTableTooltipContext,
   DataTableViewport,
   DataTableViewRow,
   DataTableViewState,
+  DataTableZoomOptions,
+  DataTableZoomState,
 } from '@/model/types/datatable.types'
 
 interface ResizeState<Row extends Record<string, any>> {
@@ -135,6 +142,15 @@ export class DataTableRootNode<
   private scrollbarDragState: ScrollbarDragState | null = null
   private scrollbarAlpha = 0
   private scrollbarHideTimer: ReturnType<typeof setTimeout> | null = null
+  private tooltipTarget: DataTableInteractionTarget<Row> | null = null
+  private tooltipOpenTimer: ReturnType<typeof setTimeout> | null = null
+  private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+  private readonly tooltipModifiers = {
+    ctrl: false,
+    meta: false,
+    shift: false,
+    alt: false,
+  }
 
   scrollX = 0
   scrollY = 0
@@ -164,9 +180,11 @@ export class DataTableRootNode<
       cursor: { hover: 'default', dragging: 'col-resize' },
     })
     this.setupEvents()
+    this.setupTooltipKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
       this.clearScrollbarHideTimer()
+      this.clearTooltipTimers()
     })
 
     this.api = {
@@ -183,6 +201,9 @@ export class DataTableRootNode<
       resetColumnWidth: columnId => this.resetColumnWidth(columnId),
       scrollTo: (x, y) => this.setScroll(x, y),
       scrollToRow: rowIndex => this.setScroll(this.scrollX, rowIndex * this.rowHeight),
+      getZoom: () => this.getZoomState(),
+      setZoom: value => this.setZoom(value),
+      resetZoom: () => this.resetZoom(),
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
@@ -239,10 +260,63 @@ export class DataTableRootNode<
   }
 
   /**
+   * Возвращает текущую alpha tooltip overlay.
+   */
+  get tooltipAlpha(): number {
+    return this.props.tooltipAlpha
+  }
+
+  /**
+   * Обновляет alpha tooltip overlay.
+   */
+  set tooltipAlpha(value: number) {
+    this.setProps({ tooltipAlpha: clampUnit(value) } as Partial<DataTableRootResolvedProps<Row>>)
+  }
+
+  /**
    * Возвращает высоту строки.
    */
   get rowHeight(): number {
-    return this.props.rowHeight
+    return Math.max(18, Math.round(this.props.rowHeight * this.zoomRowScale))
+  }
+
+  /**
+   * Возвращает текущую высоту header с учетом zoom.
+   */
+  get headerHeight(): number {
+    return Math.max(24, Math.round(this.props.headerHeight * this.zoomHeaderScale))
+  }
+
+  private get zoomValue(): number {
+    return this.props.zoom ? this.props.zoom.value : 1
+  }
+
+  private get zoomRowScale(): number {
+    return this.props.zoom ? this.props.zoom.rowScale : 1
+  }
+
+  private get zoomHeaderScale(): number {
+    return this.props.zoom ? this.props.zoom.headerScale : 1
+  }
+
+  private get zoomColumnScale(): number {
+    return this.props.zoom ? this.props.zoom.columnScale : 1
+  }
+
+  private get zoomTextScale(): number {
+    return this.props.zoom ? this.props.zoom.textScale : 1
+  }
+
+  private get zoomIconScale(): number {
+    return this.props.zoom ? this.props.zoom.iconScale : 1
+  }
+
+  private get fontSize(): number {
+    return Math.max(9, Math.round((this.props.fontSize ?? 13) * this.zoomTextScale))
+  }
+
+  private get lineHeight(): number {
+    return Math.max(10, Math.round((this.props.lineHeight ?? 18) * this.zoomTextScale))
   }
 
   /**
@@ -309,6 +383,11 @@ export class DataTableRootNode<
       this.scrollbarDragState = null
       this.scrollbarAlpha = 0
     }
+    if (changedKeys.includes('tooltip')) {
+      this.clearTooltipTimers()
+      this.tooltipTarget = null
+      this.tooltipAlpha = 0
+    }
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
   }
@@ -323,7 +402,7 @@ export class DataTableRootNode<
     this.viewport = this.createViewport()
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
-    if (delta > this.props.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
+    if (delta > this.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
     this.refresh(['viewport'])
@@ -341,7 +420,7 @@ export class DataTableRootNode<
     const nextWidth = clampWidth(width, column.minWidth, column.maxWidth)
     if (previousWidth === nextWidth) return false
 
-    this.widthOverrides.set(columnId, nextWidth)
+    this.widthOverrides.set(columnId, nextWidth / this.zoomColumnScale)
     this.resolvedColumns = this.resolveColumns()
     const nextColumn = this.resolvedColumns.find(item => item.id === columnId) ?? column
     this.props.onColumnResize?.({
@@ -414,11 +493,76 @@ export class DataTableRootNode<
         overscanColumns: this.props.overscanColumns,
         interaction: this.props.interaction,
         view: this.props.view,
+        scrollbars: this.props.scrollbars,
+        tooltip: this.props.tooltip,
+        zoom: this.props.zoom,
       }
     }
 
     this.setProps(next as Partial<DataTableRootResolvedProps<Row>>)
     return this.tableOptions()
+  }
+
+  private getZoomState(): DataTableZoomState {
+    return {
+      value: this.zoomValue,
+      mode: this.props.zoom ? this.props.zoom.mode : 'density',
+      affects: this.props.zoom ? [...this.props.zoom.affects] : ['rows', 'headers', 'text', 'icons'],
+      rowScale: this.zoomRowScale,
+      headerScale: this.zoomHeaderScale,
+      columnScale: this.zoomColumnScale,
+      textScale: this.zoomTextScale,
+      iconScale: this.zoomIconScale,
+    }
+  }
+
+  private setZoom(value: number | DataTableZoomOptions): void {
+    const current = this.props.zoom
+    const nextValue = typeof value === 'number' ? value : value.value ?? current?.value ?? 1
+    const nextZoom: DataTableZoomOptions = typeof value === 'number'
+      ? {
+          value: nextValue,
+          min: current ? current.min : undefined,
+          max: current ? current.max : undefined,
+          mode: current ? current.mode : undefined,
+          affects: current ? [...current.affects] : undefined,
+          preserveAnchor: current ? current.preserveAnchor : undefined,
+          wheel: current ? current.wheel : undefined,
+        }
+      : value
+
+    this.applyZoom(nextZoom)
+  }
+
+  private resetZoom(): void {
+    this.applyZoom({ value: 1 })
+  }
+
+  private applyZoom(zoom: DataTableZoomOptions): void {
+    const previousViewport = this.viewport
+    const pointer = this.lastPointerPosition
+    const preservePointer = (zoom.preserveAnchor ?? this.props.zoom?.preserveAnchor ?? 'pointer') === 'pointer' && pointer
+    const relativeX = preservePointer
+      ? Math.max(0, pointer.x - previousViewport.bodyX)
+      : previousViewport.bodyWidth / 2
+    const relativeY = preservePointer
+      ? Math.max(0, pointer.y - previousViewport.bodyY)
+      : previousViewport.bodyHeight / 2
+    const anchorXRatio = previousViewport.contentWidth > 0
+      ? (this.scrollX + relativeX) / previousViewport.contentWidth
+      : 0
+    const anchorYRatio = previousViewport.contentHeight > 0
+      ? (this.scrollY + relativeY) / previousViewport.contentHeight
+      : 0
+
+    this.setProps({ zoom } as Partial<DataTableRootResolvedProps<Row>>)
+    this.resolvedColumns = this.resolveColumns()
+    this.syncViewPipeline()
+    this.viewport = this.createViewport()
+    const nextX = this.viewport.contentWidth * anchorXRatio - relativeX
+    const nextY = this.viewport.contentHeight * anchorYRatio - relativeY
+    this.setScroll(nextX, nextY)
+    this.refresh(['layout', 'viewport'])
   }
 
   private tableData(rows?: Array<Row>): Array<Row> {
@@ -589,7 +733,16 @@ export class DataTableRootNode<
   }
 
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
-    return resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
+    const columns = resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
+    const scale = this.zoomColumnScale
+    if (scale === 1) return columns
+
+    return columns.map(column => ({
+      ...column,
+      minWidth: Math.max(24, Math.round(column.minWidth * scale)),
+      maxWidth: Math.max(24, Math.round(column.maxWidth * scale)),
+      resolvedWidth: Math.max(24, Math.round(column.resolvedWidth * scale)),
+    }))
   }
 
   private syncViewPipeline(): void {
@@ -603,8 +756,8 @@ export class DataTableRootNode<
     return createDataTableViewport({
       width: this.width || this.props.width,
       height: this.height || this.props.height,
-      rowHeight: this.props.rowHeight,
-      headerHeight: this.props.headerHeight,
+      rowHeight: this.rowHeight,
+      headerHeight: this.headerHeight,
       overscanRows: this.props.overscanRows,
       overscanColumns: this.props.overscanColumns,
       rowCount: this.viewPipeline.rowCount,
@@ -618,7 +771,13 @@ export class DataTableRootNode<
 
   private setupEvents(): void {
     this.on('wheel', event => {
+      this.trackTooltipModifiers(event)
       this.lastPointerPosition = this.toLocalPointerPosition(event)
+      if (this.handleZoomWheel(event)) {
+        event.preventDefault()
+        event.cancelBubble = true
+        return
+      }
       const nextX = this.scrollX + event.deltaX + (event.shiftKey ? event.deltaY : 0)
       const nextY = this.scrollY + (event.shiftKey ? 0 : event.deltaY)
       this.setScroll(nextX, nextY)
@@ -628,6 +787,7 @@ export class DataTableRootNode<
 
     this.on('mousemove', event => {
       if (this.resizeState) return
+      this.trackTooltipModifiers(event)
       const [x, y] = this.trackPointerPosition(event)
       this.pointerInside = true
       this.revealScrollbars('hover')
@@ -642,9 +802,11 @@ export class DataTableRootNode<
       this.hoveredScrollbarAxis = null
       this.scheduleScrollbarHide('hover')
       this.clearHover()
+      this.scheduleTooltipClose()
     })
 
     this.on('mousedown', event => {
+      this.trackTooltipModifiers(event)
       const [x, y] = this.trackPointerPosition(event)
       const scrollbarAxis = this.hitScrollbar(x, y)
       if (scrollbarAxis) {
@@ -711,6 +873,53 @@ export class DataTableRootNode<
     })
   }
 
+  private handleZoomWheel(event: WheelEvent): boolean {
+    const zoom = this.props.zoom
+    if (!zoom || !zoom.wheel || !zoom.wheel.enabled) return false
+    const modifier = zoom.wheel.modifier
+    if (modifier && !this.isWheelModifierActive(event, modifier)) return false
+
+    const direction = event.deltaY > 0 ? -1 : 1
+    const nextValue = zoom.value + direction * zoom.wheel.step
+    this.applyZoom({
+      value: Math.max(zoom.min, Math.min(zoom.max, nextValue)),
+      min: zoom.min,
+      max: zoom.max,
+      mode: zoom.mode,
+      affects: [...zoom.affects],
+      preserveAnchor: zoom.preserveAnchor,
+      wheel: zoom.wheel,
+    })
+    return true
+  }
+
+  private isWheelModifierActive(event: WheelEvent, modifier: TooltipModifier): boolean {
+    if (modifier === 'ctrl') return event.ctrlKey
+    if (modifier === 'meta') return event.metaKey
+    if (modifier === 'shift') return event.shiftKey
+    if (modifier === 'alt') return event.altKey
+    return false
+  }
+
+  private setupTooltipKeyboardEvents(): void {
+    if (typeof window === 'undefined') return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!this.updateTooltipModifierFromKey(event, true)) return
+      this.syncTooltipTarget()
+    }
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!this.updateTooltipModifierFromKey(event, false)) return
+      this.syncTooltipTarget()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    this.addDisposer(() => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    })
+  }
+
   private handleHeaderAction(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
     if (!target.column.sortable || !this.props.view.sorting) return
     this.viewPipeline.cycleSort(target.column.id, event.shiftKey)
@@ -725,10 +934,10 @@ export class DataTableRootNode<
     const bottomRows = this.props.pinnedRows.bottom ?? []
     this.nextVisibleCellKeys = new Set()
     this.cellEnterRenderCount = 0
-    this.renderPartitionedRowZone('header', [{} as Row], headerY, this.props.headerHeight, false)
+    this.renderPartitionedRowZone('header', [{} as Row], headerY, this.headerHeight, false)
 
     if (topRows.length > 0) {
-      this.renderPartitionedRowZone('pinned-top', topRows, this.props.headerHeight, this.props.rowHeight, false)
+      this.renderPartitionedRowZone('pinned-top', topRows, this.headerHeight, this.rowHeight, false)
     }
 
     this.renderBodyRows()
@@ -737,8 +946,8 @@ export class DataTableRootNode<
       this.renderPartitionedRowZone(
         'pinned-bottom',
         bottomRows,
-        this.height - bottomRows.length * this.props.rowHeight,
-        this.props.rowHeight,
+        this.height - bottomRows.length * this.rowHeight,
+        this.rowHeight,
         false,
       )
     }
@@ -746,6 +955,7 @@ export class DataTableRootNode<
     this.renderPinnedBottomGroupPanel()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
+    this.renderTooltipLayer()
     this.renderScrollbars()
     this.renderScrollbarLayer()
     this.finalizeVisibleCellKeys()
@@ -820,7 +1030,7 @@ export class DataTableRootNode<
     }
     if (rows.length === 0) return
 
-    this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true)
+    this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.rowHeight, true)
   }
 
   private createRenderedBodyRow(viewRow: DataTableViewRow<Row>, rowIndex: number): RenderedTableRow<Row> | null {
@@ -894,7 +1104,7 @@ export class DataTableRootNode<
       const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
       const { rowIndex, storeIndex } = renderedRow
       const y = zone === 'body'
-        ? this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
+        ? this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
         : yStart + localIndex * rowHeight
 
       if (renderedRow.kind !== 'data') {
@@ -1048,10 +1258,10 @@ export class DataTableRootNode<
           color: '#172033',
           font: {
             family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-            size: this.props.fontSize ?? 13,
+            size: this.fontSize,
             weight: isFooter ? '700' : '800',
           },
-          lineHeight: this.props.lineHeight ?? 18,
+          lineHeight: this.lineHeight,
           align: { horizontal: 'left', vertical: 'middle' },
           ellipsis: true,
         },
@@ -1102,6 +1312,12 @@ export class DataTableRootNode<
       columnSelected,
       hoverAlpha: this.props.hoverAlpha,
       selectionAlpha: this.props.selectionAlpha,
+      zoom: this.zoomValue,
+      rowScale: this.zoomRowScale,
+      headerScale: this.zoomHeaderScale,
+      columnScale: this.zoomColumnScale,
+      textScale: this.zoomTextScale,
+      iconScale: this.zoomIconScale,
       pinnedColumn: columnRect.column.pinned,
       pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
       sorted: sortIndex >= 0 ? viewState.sort[sortIndex]?.direction : undefined,
@@ -1240,11 +1456,11 @@ export class DataTableRootNode<
           color,
           font: {
             family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-            size: this.props.fontSize ?? 13,
+            size: this.fontSize,
             weight: isHeader ? '700' : '500',
             style: 'normal',
           },
-          lineHeight: this.props.lineHeight ?? 18,
+          lineHeight: this.lineHeight,
           align: {
             horizontal: column.align,
             vertical: 'middle',
@@ -1332,7 +1548,7 @@ export class DataTableRootNode<
     const rows = this.store.getRows()
     const rect = {
       x: this.viewport.bodyX,
-      y: Math.max(this.viewport.bodyY, this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.props.rowHeight - 124),
+      y: Math.max(this.viewport.bodyY, this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight - 124),
       width: this.viewport.bodyWidth,
       height: 112,
     }
@@ -1418,6 +1634,94 @@ export class DataTableRootNode<
       state,
     })
     if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private renderTooltipLayer(): void {
+    const options = this.props.tooltip
+    const target = this.tooltipTarget
+    const alpha = this.props.tooltipAlpha
+    if (!options || !target || alpha <= 0) return
+
+    const cell = this.createCellContext(target)
+    if (!cell || cell.zone === 'header') return
+
+    const content = this.resolveTooltipContent(cell, target)
+    if (!content) return
+
+    const pointer = this.lastPointerPosition
+    const useCursor = options.placement === 'cursor' || options.followCursor
+    const x = useCursor && pointer ? pointer.x : target.rect.x
+    const y = useCursor && pointer ? pointer.y : target.rect.y
+    const schema = NovaUIKit.tooltipSchema({
+      x,
+      y,
+      width: options.width,
+      height: options.height,
+      open: true,
+      trigger: options.modifier === false
+        ? 'hover'
+        : {
+            pointer: 'hover',
+            modifier: options.modifier,
+          },
+      placement: options.placement,
+      followCursor: options.followCursor,
+      collision: options.collision,
+      animation: options.animation,
+      content,
+      className: options.className,
+      contentClassName: options.contentClassName,
+      background: options.background,
+      color: options.color,
+      border: options.border,
+      padding: options.padding,
+      fontFamily: options.fontFamily,
+      fontSize: options.fontSize,
+      fontWeight: options.fontWeight,
+      lineHeight: options.lineHeight,
+      opacity: alpha,
+    } satisfies TooltipProps)
+    this.applyTooltipMotion(schema, alpha)
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private applyTooltipMotion(schema: NovaSchema, alpha: number): void {
+    const offsetY = Math.round((1 - alpha) * 5)
+    for (const item of schema) {
+      const shape = item as Record<string, any>
+      shape.y = Number(shape.y ?? 0) + offsetY
+      if (!shape.styles) continue
+      const currentOpacity = typeof shape.styles.opacity === 'number' ? shape.styles.opacity : 1
+      shape.styles.opacity = currentOpacity * alpha
+    }
+  }
+
+  private resolveTooltipContent(
+    cell: DataTableCellContext<Row>,
+    target: DataTableInteractionTarget<Row>,
+  ): TooltipContent | null {
+    const columnTooltip = cell.column.tooltip
+    if (columnTooltip === false) return null
+    if (typeof columnTooltip === 'function') return columnTooltip(cell) ?? null
+    if (columnTooltip) return columnTooltip
+
+    const options = this.props.tooltip
+    if (!options) return null
+    const custom = options.content?.({
+      cell,
+      target,
+      viewport: this.viewport,
+      store: this.store,
+      api: this.api,
+    } satisfies DataTableTooltipContext<Row>)
+    if (custom) return custom
+    if (!options.defaultContent) return null
+
+    const title = cell.column.title ?? cell.column.id
+    const value = cell.value === null || cell.value === undefined ? 'empty' : String(cell.value)
+    return {
+      markdown: `**${escapeTooltipMarkdown(title)}**\n${escapeTooltipMarkdown(value)}\nRow ${cell.rowIndex + 1} · Column ${cell.columnIndex + 1}`,
+    }
   }
 
   private createRowOverlayRects(
@@ -1523,6 +1827,7 @@ export class DataTableRootNode<
     if (sameInteractionTarget(previous, target)) {
       if (previous && target && !sameInteractionGeometry(previous, target)) {
         this.hoverTarget = target
+        this.syncTooltipTarget(target)
         this.refresh(['interaction'])
       }
       return
@@ -1535,6 +1840,7 @@ export class DataTableRootNode<
 
     this.hoverTarget = target
     this.hoverActive = target !== null
+    this.syncTooltipTarget(target)
     if (target) {
       const context = this.createCellContext(target)
       if (context) this.props.onCellEnter?.(context)
@@ -1555,10 +1861,131 @@ export class DataTableRootNode<
   private syncHoverAfterViewportChange(): void {
     if (!this.hoverActive || !this.lastPointerPosition) return
 
-    this.updateHover(this.resolveInteractionTargetAt(
+    const target = this.resolveInteractionTargetAt(
       this.lastPointerPosition.x,
       this.lastPointerPosition.y,
-    ))
+    )
+    this.updateHover(target)
+    this.syncTooltipTarget(target)
+  }
+
+  private syncTooltipTarget(target: DataTableInteractionTarget<Row> | null = this.hoverActive ? this.hoverTarget : null): void {
+    if (!this.canShowTooltipForTarget(target)) {
+      this.scheduleTooltipClose()
+      return
+    }
+
+    if (!target) return
+    const changed = !sameInteractionTarget(this.tooltipTarget, target)
+    this.tooltipTarget = target
+    if (changed) this.tooltipAlpha = 0
+    if (!changed && this.tooltipOpenTimer) return
+    if (this.props.tooltipAlpha >= 1 && !changed) {
+      this.refresh(['interaction'])
+      return
+    }
+    this.scheduleTooltipOpen(target)
+  }
+
+  private canShowTooltipForTarget(target: DataTableInteractionTarget<Row> | null): boolean {
+    const options = this.props.tooltip
+    if (!options || !options.enabled || !target) return false
+    if (target.zone === 'header' || isGroupInteractionZone(target.zone)) return false
+    if (!this.isTooltipModifierSatisfied()) return false
+    return this.createCellContext(target) !== null
+  }
+
+  private scheduleTooltipOpen(target: DataTableInteractionTarget<Row>): void {
+    this.clearTooltipTimers()
+    const delay = this.props.tooltip ? this.props.tooltip.delay : 0
+    if (delay <= 0) {
+      this.openTooltip(target)
+      return
+    }
+    this.tooltipOpenTimer = setTimeout(() => this.openTooltip(target), delay)
+  }
+
+  private openTooltip(target: DataTableInteractionTarget<Row>): void {
+    if (!this.canShowTooltipForTarget(target)) return
+    this.tooltipTarget = target
+    this.animateTooltipAlpha(1)
+    this.refresh(['interaction'])
+  }
+
+  private scheduleTooltipClose(): void {
+    if (!this.tooltipTarget && this.props.tooltipAlpha <= 0 && !this.tooltipOpenTimer) return
+    this.clearTooltipOpenTimer()
+    const delay = this.props.tooltip ? this.props.tooltip.hideDelay : 0
+    if (delay <= 0) {
+      this.closeTooltip()
+      return
+    }
+    this.clearTooltipHideTimer()
+    this.tooltipHideTimer = setTimeout(() => this.closeTooltip(), delay)
+  }
+
+  private closeTooltip(): void {
+    this.clearTooltipTimers()
+    this.animateTooltipAlpha(0)
+    this.refresh(['interaction'])
+  }
+
+  private animateTooltipAlpha(value: number): void {
+    const options = this.props.tooltip
+    const animation = options && options.animation
+    if (!options || animation === false) {
+      this.tooltipAlpha = value
+      return
+    }
+
+    this.nova.motion.to(this, { tooltipAlpha: value }, {
+      duration: animation.duration,
+      easing: animation.easing as never,
+      overwrite: true,
+    })
+  }
+
+  private clearTooltipTimers(): void {
+    this.clearTooltipOpenTimer()
+    this.clearTooltipHideTimer()
+  }
+
+  private clearTooltipOpenTimer(): void {
+    if (!this.tooltipOpenTimer) return
+    clearTimeout(this.tooltipOpenTimer)
+    this.tooltipOpenTimer = null
+  }
+
+  private clearTooltipHideTimer(): void {
+    if (!this.tooltipHideTimer) return
+    clearTimeout(this.tooltipHideTimer)
+    this.tooltipHideTimer = null
+  }
+
+  private trackTooltipModifiers(event: MouseEvent | WheelEvent): void {
+    const previous = this.isTooltipModifierSatisfied()
+    this.tooltipModifiers.ctrl = event.ctrlKey
+    this.tooltipModifiers.meta = event.metaKey
+    this.tooltipModifiers.shift = event.shiftKey
+    this.tooltipModifiers.alt = event.altKey
+    if (previous !== this.isTooltipModifierSatisfied()) this.syncTooltipTarget()
+  }
+
+  private updateTooltipModifierFromKey(event: KeyboardEvent, pressed: boolean): boolean {
+    const previous = this.isTooltipModifierSatisfied()
+    if (event.key === 'Control') this.tooltipModifiers.ctrl = pressed
+    else if (event.key === 'Meta') this.tooltipModifiers.meta = pressed
+    else if (event.key === 'Shift') this.tooltipModifiers.shift = pressed
+    else if (event.key === 'Alt') this.tooltipModifiers.alt = pressed
+    else return false
+
+    return previous !== this.isTooltipModifierSatisfied()
+  }
+
+  private isTooltipModifierSatisfied(): boolean {
+    const options = this.props.tooltip
+    if (!options || options.modifier === false) return true
+    return this.tooltipModifiers[options.modifier]
   }
 
   private updateSelection(target: DataTableInteractionTarget<Row>): void {
@@ -1679,19 +2106,19 @@ export class DataTableRootNode<
     zone: DataTableCellContext<Row>['zone']
     rect: DataTableCellRect
   } | null {
-    if (y < this.props.headerHeight) {
+    if (y < this.headerHeight) {
       return {
         row: {} as Row,
         rowId: '__header__',
         rowIndex: 0,
         zone: 'header',
-        rect: { x: 0, y: 0, width: this.width, height: this.props.headerHeight },
+        rect: { x: 0, y: 0, width: this.width, height: this.headerHeight },
       }
     }
 
     const topRows = this.props.pinnedRows.top ?? []
-    if (y >= this.props.headerHeight && y < this.viewport.bodyY) {
-      const localIndex = Math.floor((y - this.props.headerHeight) / this.props.rowHeight)
+    if (y >= this.headerHeight && y < this.viewport.bodyY) {
+      const localIndex = Math.floor((y - this.headerHeight) / this.rowHeight)
       const row = topRows[localIndex]
       if (!row) return null
       return {
@@ -1701,17 +2128,17 @@ export class DataTableRootNode<
         zone: 'pinned-top',
         rect: {
           x: 0,
-          y: this.props.headerHeight + localIndex * this.props.rowHeight,
+          y: this.headerHeight + localIndex * this.rowHeight,
           width: this.width,
-          height: this.props.rowHeight,
+          height: this.rowHeight,
         },
       }
     }
 
     const bottomRows = this.props.pinnedRows.bottom ?? []
-    const bottomStart = this.height - bottomRows.length * this.props.rowHeight
+    const bottomStart = this.height - bottomRows.length * this.rowHeight
     if (bottomRows.length > 0 && y >= bottomStart && y <= this.height) {
-      const localIndex = Math.floor((y - bottomStart) / this.props.rowHeight)
+      const localIndex = Math.floor((y - bottomStart) / this.rowHeight)
       const row = bottomRows[localIndex]
       if (!row) return null
       return {
@@ -1721,15 +2148,15 @@ export class DataTableRootNode<
         zone: 'pinned-bottom',
         rect: {
           x: 0,
-          y: bottomStart + localIndex * this.props.rowHeight,
+          y: bottomStart + localIndex * this.rowHeight,
           width: this.width,
-          height: this.props.rowHeight,
+          height: this.rowHeight,
         },
       }
     }
 
     if (y < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight) return null
-    const rowIndex = Math.floor((this.scrollY + y - this.viewport.bodyY) / this.props.rowHeight)
+    const rowIndex = Math.floor((this.scrollY + y - this.viewport.bodyY) / this.rowHeight)
     if (rowIndex < 0 || rowIndex >= this.viewPipeline.rowCount) return null
     const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
     const row = viewRow?.kind === 'data' ? viewRow.row : undefined
@@ -1744,9 +2171,9 @@ export class DataTableRootNode<
       zone,
       rect: {
         x: 0,
-        y: this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY,
+        y: this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY,
         width: this.width,
-        height: this.props.rowHeight,
+        height: this.rowHeight,
       },
     }
   }
@@ -1774,8 +2201,8 @@ export class DataTableRootNode<
     if (rowIndex === undefined) return null
     const row = this.viewPipeline.getRowAt(rowIndex) ?? (selection.rowId !== undefined ? this.store.getRow(selection.rowId) : undefined)
     const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
-    const y = this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
-    if (selection.rowId !== undefined && (y + this.props.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight)) {
+    const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+    if (selection.rowId !== undefined && (y + this.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight)) {
       return null
     }
     return {
@@ -1789,7 +2216,7 @@ export class DataTableRootNode<
         x: columnRect.x,
         y,
         width: columnRect.width,
-        height: this.props.rowHeight,
+        height: this.rowHeight,
       },
       zone: 'body',
     }
@@ -2161,6 +2588,10 @@ function pointInRect(x: number, y: number, rect: DataTableCellRect): boolean {
     && x <= rect.x + rect.width
     && y >= rect.y
     && y <= rect.y + rect.height
+}
+
+function escapeTooltipMarkdown(value: string): string {
+  return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, '\\$1')
 }
 
 function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedTableRow<Row>): value is RenderedTableRow<Row> {

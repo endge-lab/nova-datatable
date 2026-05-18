@@ -1,5 +1,13 @@
 import type { NovaMotionOptions, NovaSchema, RendererType } from '@endge/nova'
-import type { NovaUiCommonProps, NovaUiCommonResolvedProps } from '@endge/nova-ui-kit'
+import type {
+  NovaUiCommonProps,
+  NovaUiCommonResolvedProps,
+  TooltipAnimationOptions,
+  TooltipCollisionOptions,
+  TooltipContent,
+  TooltipModifier,
+  TooltipPlacement,
+} from '@endge/nova-ui-kit'
 
 export const DATATABLE_ROOT_SCHEMA_TYPE = 'NovaDataTable.Root'
 
@@ -30,6 +38,8 @@ export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
 export type DataTableCellEnterMotion = 'none' | 'fade'
 export type DataTableScrollbarVisibility = 'always' | 'hover' | 'scroll'
 export type DataTableScrollbarAxis = 'horizontal' | 'vertical'
+export type DataTableZoomMode = 'density' | 'layout' | 'text' | 'custom'
+export type DataTableZoomAffect = 'rows' | 'headers' | 'columns' | 'text' | 'icons'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -158,6 +168,12 @@ export interface DataTableCellState {
   columnSelected: boolean
   hoverAlpha: number
   selectionAlpha: number
+  zoom: number
+  rowScale: number
+  headerScale: number
+  columnScale: number
+  textScale: number
+  iconScale: number
   pinnedColumn?: DataTablePinnedColumnSide
   pinnedRow?: DataTablePinnedRowPosition
   sorted?: DataTableSortDirection
@@ -274,6 +290,110 @@ export interface DataTableInteractionLayerContext<Row extends Record<string, any
 export type DataTableInteractionLayerTemplate<Row extends Record<string, any> = Record<string, any>> = (
   context: DataTableInteractionLayerContext<Row>,
 ) => NovaSchema
+
+export interface DataTableTooltipContext<Row extends Record<string, any> = Record<string, any>> {
+  cell: DataTableCellContext<Row>
+  target: DataTableInteractionTarget<Row>
+  viewport: DataTableViewport
+  store: DataTableStoreApi<Row>
+  api: DataTableRootApi<Row>
+}
+
+export type DataTableCellTooltip<Row extends Record<string, any> = Record<string, any>> =
+  | TooltipContent
+  | ((context: DataTableCellContext<Row>) => TooltipContent | null | undefined)
+
+export interface DataTableTooltipOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled?: boolean
+  modifier?: TooltipModifier | false
+  placement?: TooltipPlacement
+  delay?: number
+  hideDelay?: number
+  followCursor?: boolean
+  collision?: TooltipCollisionOptions
+  animation?: false | TooltipAnimationOptions
+  className?: string | Array<string>
+  contentClassName?: string | Array<string>
+  width?: number
+  height?: number
+  background?: string
+  color?: string
+  border?: NovaUiCommonProps['border']
+  padding?: NovaUiCommonProps['padding']
+  fontFamily?: string
+  fontSize?: number
+  fontWeight?: NovaUiCommonProps['fontWeight']
+  lineHeight?: number
+  defaultContent?: boolean
+  content?: (context: DataTableTooltipContext<Row>) => TooltipContent | null | undefined
+}
+
+export interface DataTableResolvedTooltipOptions<Row extends Record<string, any> = Record<string, any>>
+  extends Required<Pick<DataTableTooltipOptions<Row>, 'enabled' | 'placement' | 'delay' | 'hideDelay' | 'followCursor' | 'defaultContent'>> {
+  modifier: TooltipModifier | false
+  collision: Required<TooltipCollisionOptions>
+  animation: false | Required<TooltipAnimationOptions>
+  className: string | Array<string>
+  contentClassName: string | Array<string>
+  width: number
+  height: number
+  background: string
+  color: string
+  border: NovaUiCommonProps['border']
+  padding: NovaUiCommonProps['padding']
+  fontFamily: string
+  fontSize: number
+  fontWeight: NovaUiCommonProps['fontWeight']
+  lineHeight: number
+  content?: (context: DataTableTooltipContext<Row>) => TooltipContent | null | undefined
+}
+
+export interface DataTableZoomWheelOptions {
+  enabled?: boolean
+  modifier?: TooltipModifier | false
+  step?: number
+}
+
+export interface DataTableZoomOptions {
+  value?: number
+  min?: number
+  max?: number
+  mode?: DataTableZoomMode
+  affects?: Array<DataTableZoomAffect>
+  rowScale?: number
+  headerScale?: number
+  columnScale?: number
+  textScale?: number
+  iconScale?: number
+  preserveAnchor?: 'viewport' | 'pointer'
+  wheel?: false | DataTableZoomWheelOptions
+}
+
+export interface DataTableResolvedZoomOptions {
+  value: number
+  min: number
+  max: number
+  mode: DataTableZoomMode
+  affects: Array<DataTableZoomAffect>
+  rowScale: number
+  headerScale: number
+  columnScale: number
+  textScale: number
+  iconScale: number
+  preserveAnchor: 'viewport' | 'pointer'
+  wheel: false | Required<DataTableZoomWheelOptions>
+}
+
+export interface DataTableZoomState {
+  value: number
+  mode: DataTableZoomMode
+  affects: Array<DataTableZoomAffect>
+  rowScale: number
+  headerScale: number
+  columnScale: number
+  textScale: number
+  iconScale: number
+}
 
 export interface DataTableScrollbarAxisOptions {
   visibility?: DataTableScrollbarVisibility
@@ -540,6 +660,7 @@ export interface DataTableColumnInput<Row extends Record<string, any> = Record<s
   filter?: string | DataTableFilterConfig<Row>
   reorderable?: boolean
   animated?: boolean
+  tooltip?: false | DataTableCellTooltip<Row>
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   filterTemplate?: DataTableTemplate<Row>
@@ -606,6 +727,8 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   interaction?: DataTableInteractionOptions
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
+  tooltip?: false | DataTableTooltipOptions<Row>
+  zoom?: false | DataTableZoomOptions
 }
 
 export interface DataTableRootProps<Row extends Record<string, any> = Record<string, any>>
@@ -647,8 +770,11 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   interaction: DataTableResolvedInteractionOptions
   view: DataTableResolvedViewOptions
   scrollbars: false | DataTableResolvedScrollbarOptions
+  tooltip: false | DataTableResolvedTooltipOptions<Row>
+  zoom: false | DataTableResolvedZoomOptions
   hoverAlpha: number
   selectionAlpha: number
+  tooltipAlpha: number
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
@@ -692,6 +818,9 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   resetColumnWidth: (columnId: string) => boolean
   scrollTo: (x: number, y: number) => void
   scrollToRow: (rowIndex: number) => void
+  getZoom: () => DataTableZoomState
+  setZoom: (value: number | DataTableZoomOptions) => void
+  resetZoom: () => void
   refresh: () => void
   batch: (callback: (api: DataTableRootApi<Row>) => void) => void
   getViewport: () => DataTableViewport
