@@ -686,7 +686,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         @change="onEditorInput"
         @keydown="onEditorKeydown"
         @blur="onEditorBlur"
-      >
+      />
     </div>
   </div>
 </template>
