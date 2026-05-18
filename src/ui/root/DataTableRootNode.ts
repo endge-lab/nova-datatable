@@ -42,6 +42,7 @@ import type {
   DataTableScrollbarGeometry,
   DataTableScrollbarLayerContext,
   DataTableScrollbarState,
+  DataTableScrollbarVisibility,
   DataTableSelectionState,
   DataTableStoreApi,
   DataTableViewport,
@@ -64,8 +65,6 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
 
 interface ScrollbarDragState {
   axis: DataTableScrollbarAxis
-  startX: number
-  startY: number
   startScrollX: number
   startScrollY: number
   trackTravel: number
@@ -134,7 +133,7 @@ export class DataTableRootNode<
   private pointerInside = false
   private hoveredScrollbarAxis: DataTableScrollbarAxis | null = null
   private scrollbarDragState: ScrollbarDragState | null = null
-  private scrollbarAlpha = 1
+  private scrollbarAlpha = 0
   private scrollbarHideTimer: ReturnType<typeof setTimeout> | null = null
 
   scrollX = 0
@@ -303,6 +302,12 @@ export class DataTableRootNode<
       this.scrollY = 0
       this.hoverTarget = null
       this.selection = null
+    }
+    if (changedKeys.includes('scrollbars')) {
+      this.clearScrollbarHideTimer()
+      this.hoveredScrollbarAxis = null
+      this.scrollbarDragState = null
+      this.scrollbarAlpha = 0
     }
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
@@ -625,8 +630,8 @@ export class DataTableRootNode<
       if (this.resizeState) return
       const [x, y] = this.trackPointerPosition(event)
       this.pointerInside = true
-      this.updateHoveredScrollbarAxis(x, y)
       this.revealScrollbars('hover')
+      this.updateHoveredScrollbarAxis(x, y)
       const nextHover = this.resolveInteractionTargetAt(x, y)
       this.updateHover(nextHover)
     })
@@ -643,7 +648,7 @@ export class DataTableRootNode<
       const [x, y] = this.trackPointerPosition(event)
       const scrollbarAxis = this.hitScrollbar(x, y)
       if (scrollbarAxis) {
-        this.startScrollbarDrag(scrollbarAxis, x, y, event)
+        this.startScrollbarDrag(scrollbarAxis, event)
         event.cancelBubble = true
         return
       }
@@ -1851,56 +1856,294 @@ export class DataTableRootNode<
   }
 
   private renderScrollbars(): void {
+    if (this.props.scrollbars === false || !this.props.scrollbars.nativeRenderer) return
+    const geometry = this.createScrollbarGeometry()
+    const state = this.getScrollbarState()
+    if (state.alpha <= 0) return
+
     const schema: NovaSchema = []
-    if (this.viewport.maxScrollY > 0) {
-      const trackHeight = Math.max(1, this.viewport.bodyHeight - 8)
-      const thumbHeight = Math.max(28, trackHeight * (this.viewport.bodyHeight / Math.max(1, this.viewport.contentHeight)))
-      const thumbY = this.viewport.bodyY + 4 + (trackHeight - thumbHeight) * (this.scrollY / this.viewport.maxScrollY)
+    if (geometry.vertical) {
+      const item = geometry.vertical
+      const hovered = state.hoveredAxis === 'vertical' || state.draggingAxis === 'vertical'
       schema.push(
         {
           type: 'rect',
-          x: this.width - 8,
-          y: this.viewport.bodyY + 4,
-          width: 4,
-          height: trackHeight,
-          styles: { background: 'rgba(23, 32, 51, 0.10)', border: { radius: 3 } },
+          ...item.track,
+          styles: {
+            background: item.options.trackColor,
+            opacity: state.alpha,
+            border: { radius: item.options.radius },
+          },
         },
         {
           type: 'rect',
-          x: this.width - 8,
-          y: thumbY,
-          width: 4,
-          height: thumbHeight,
-          styles: { background: 'rgba(23, 32, 51, 0.38)', border: { radius: 3 } },
+          ...item.thumb,
+          styles: {
+            background: hovered ? item.options.thumbHoverColor : item.options.thumbColor,
+            opacity: state.alpha,
+            border: { radius: item.options.radius },
+          },
         },
       )
     }
 
-    if (this.viewport.maxScrollX > 0) {
-      const trackWidth = Math.max(1, this.viewport.bodyWidth - 8)
-      const thumbWidth = Math.max(34, trackWidth * (this.viewport.bodyWidth / Math.max(1, this.viewport.contentWidth)))
-      const thumbX = this.viewport.bodyX + 4 + (trackWidth - thumbWidth) * (this.scrollX / this.viewport.maxScrollX)
+    if (geometry.horizontal) {
+      const item = geometry.horizontal
+      const hovered = state.hoveredAxis === 'horizontal' || state.draggingAxis === 'horizontal'
       schema.push(
         {
           type: 'rect',
-          x: this.viewport.bodyX + 4,
-          y: this.height - 8,
-          width: trackWidth,
-          height: 4,
-          styles: { background: 'rgba(23, 32, 51, 0.10)', border: { radius: 3 } },
+          ...item.track,
+          styles: {
+            background: item.options.trackColor,
+            opacity: state.alpha,
+            border: { radius: item.options.radius },
+          },
         },
         {
           type: 'rect',
-          x: thumbX,
-          y: this.height - 8,
-          width: thumbWidth,
-          height: 4,
-          styles: { background: 'rgba(23, 32, 51, 0.38)', border: { radius: 3 } },
+          ...item.thumb,
+          styles: {
+            background: hovered ? item.options.thumbHoverColor : item.options.thumbColor,
+            opacity: state.alpha,
+            border: { radius: item.options.radius },
+          },
         },
       )
     }
 
     if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private renderScrollbarLayer(): void {
+    const template = this.props.scrollbarLayerTemplate
+    if (!template || this.props.scrollbars === false) return
+
+    const schema = template(this.createScrollbarLayerContext())
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private createScrollbarLayerContext(): DataTableScrollbarLayerContext<Row> {
+    const geometry = this.createScrollbarGeometry()
+    return {
+      horizontal: geometry.horizontal,
+      vertical: geometry.vertical,
+      viewport: this.viewport,
+      state: this.getScrollbarState(),
+      actions: {
+        scrollTo: (x, y) => this.setScroll(x, y),
+        scrollBy: (dx, dy) => this.setScroll(this.scrollX + dx, this.scrollY + dy),
+        startDrag: (axis, event) => {
+          if (!event) return
+          this.trackPointerPosition(event)
+          this.startScrollbarDrag(axis, event)
+        },
+      },
+      store: this.store,
+      api: this.api,
+    }
+  }
+
+  private createScrollbarGeometry(): { horizontal: DataTableScrollbarGeometry | null; vertical: DataTableScrollbarGeometry | null } {
+    if (this.props.scrollbars === false) return { horizontal: null, vertical: null }
+
+    return {
+      horizontal: this.props.scrollbars.horizontal === false || this.viewport.maxScrollX <= 0
+        ? null
+        : this.createHorizontalScrollbarGeometry(this.props.scrollbars.horizontal),
+      vertical: this.props.scrollbars.vertical === false || this.viewport.maxScrollY <= 0
+        ? null
+        : this.createVerticalScrollbarGeometry(this.props.scrollbars.vertical),
+    }
+  }
+
+  private createVerticalScrollbarGeometry(options: DataTableResolvedScrollbarAxisOptions): DataTableScrollbarGeometry {
+    const inset = 4
+    const trackHeight = Math.max(1, this.viewport.bodyHeight - inset * 2)
+    const thickness = options.thickness
+    const thumbHeight = Math.min(trackHeight, Math.max(
+      options.minThumbSize,
+      trackHeight * (this.viewport.bodyHeight / Math.max(1, this.viewport.contentHeight)),
+    ))
+    const travel = Math.max(0, trackHeight - thumbHeight)
+    const thumbY = this.viewport.bodyY + inset + (this.viewport.maxScrollY > 0 ? travel * (this.scrollY / this.viewport.maxScrollY) : 0)
+
+    return {
+      axis: 'vertical',
+      track: {
+        x: this.width - thickness - inset,
+        y: this.viewport.bodyY + inset,
+        width: thickness,
+        height: trackHeight,
+      },
+      thumb: {
+        x: this.width - thickness - inset,
+        y: thumbY,
+        width: thickness,
+        height: thumbHeight,
+      },
+      value: this.scrollY,
+      max: this.viewport.maxScrollY,
+      viewportSize: this.viewport.bodyHeight,
+      contentSize: this.viewport.contentHeight,
+      visibleStart: this.scrollY,
+      visibleEnd: this.scrollY + this.viewport.bodyHeight,
+      options,
+    }
+  }
+
+  private createHorizontalScrollbarGeometry(options: DataTableResolvedScrollbarAxisOptions): DataTableScrollbarGeometry {
+    const inset = 4
+    const trackWidth = Math.max(1, this.viewport.bodyWidth - inset * 2)
+    const thickness = options.thickness
+    const thumbWidth = Math.min(trackWidth, Math.max(
+      options.minThumbSize,
+      trackWidth * (this.viewport.bodyWidth / Math.max(1, this.viewport.contentWidth)),
+    ))
+    const travel = Math.max(0, trackWidth - thumbWidth)
+    const thumbX = this.viewport.bodyX + inset + (this.viewport.maxScrollX > 0 ? travel * (this.scrollX / this.viewport.maxScrollX) : 0)
+
+    return {
+      axis: 'horizontal',
+      track: {
+        x: this.viewport.bodyX + inset,
+        y: this.height - thickness - inset,
+        width: trackWidth,
+        height: thickness,
+      },
+      thumb: {
+        x: thumbX,
+        y: this.height - thickness - inset,
+        width: thumbWidth,
+        height: thickness,
+      },
+      value: this.scrollX,
+      max: this.viewport.maxScrollX,
+      viewportSize: this.viewport.bodyWidth,
+      contentSize: this.viewport.contentWidth,
+      visibleStart: this.scrollX,
+      visibleEnd: this.scrollX + this.viewport.bodyWidth,
+      options,
+    }
+  }
+
+  private getScrollbarState(): DataTableScrollbarState {
+    return {
+      alpha: this.resolveScrollbarAlpha(),
+      hoveredAxis: this.hoveredScrollbarAxis,
+      draggingAxis: this.scrollbarDragState?.axis ?? null,
+      pointerInside: this.pointerInside,
+    }
+  }
+
+  private resolveScrollbarAlpha(): number {
+    if (this.props.scrollbars === false) return 0
+    if (this.hasAlwaysVisibleScrollbar()) return 1
+    return this.scrollbarAlpha
+  }
+
+  private hasAlwaysVisibleScrollbar(): boolean {
+    if (this.props.scrollbars === false) return false
+    return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'always' && this.viewport.maxScrollX > 0)
+      || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'always' && this.viewport.maxScrollY > 0)
+  }
+
+  private hasHoverVisibleScrollbar(): boolean {
+    if (this.props.scrollbars === false) return false
+    return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'hover' && this.viewport.maxScrollX > 0)
+      || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'hover' && this.viewport.maxScrollY > 0)
+  }
+
+  private hitScrollbar(x: number, y: number): DataTableScrollbarAxis | null {
+    if (this.resolveScrollbarAlpha() <= 0) return null
+    const geometry = this.createScrollbarGeometry()
+    if (geometry.vertical && pointInRect(x, y, geometry.vertical.track)) return 'vertical'
+    if (geometry.horizontal && pointInRect(x, y, geometry.horizontal.track)) return 'horizontal'
+    return null
+  }
+
+  private updateHoveredScrollbarAxis(x: number, y: number): void {
+    const next = this.hitScrollbar(x, y)
+    if (next === this.hoveredScrollbarAxis) return
+    this.hoveredScrollbarAxis = next
+    this.refresh(['interaction'])
+  }
+
+  private startScrollbarDrag(axis: DataTableScrollbarAxis, event: MouseEvent): void {
+    const geometry = this.createScrollbarGeometry()
+    const item = axis === 'horizontal' ? geometry.horizontal : geometry.vertical
+    if (!item || item.max <= 0) return
+
+    this.scrollbarDragState = {
+      axis,
+      startScrollX: this.scrollX,
+      startScrollY: this.scrollY,
+      trackTravel: Math.max(1, axis === 'horizontal'
+        ? item.track.width - item.thumb.width
+        : item.track.height - item.thumb.height),
+    }
+    this.hoveredScrollbarAxis = axis
+    this.revealScrollbars('scroll')
+    this.capturePointer(event)
+  }
+
+  private updateScrollbarDrag(dx: number, dy: number): void {
+    const drag = this.scrollbarDragState
+    if (!drag) return
+    const geometry = this.createScrollbarGeometry()
+    const item = drag.axis === 'horizontal' ? geometry.horizontal : geometry.vertical
+    if (!item || item.max <= 0) return
+
+    const delta = drag.axis === 'horizontal' ? dx : dy
+    const scrollDelta = delta / drag.trackTravel * item.max
+    if (drag.axis === 'horizontal') {
+      this.setScroll(drag.startScrollX + scrollDelta, this.scrollY)
+    } else {
+      this.setScroll(this.scrollX, drag.startScrollY + scrollDelta)
+    }
+  }
+
+  private revealScrollbars(reason: DataTableScrollbarVisibility): void {
+    if (!this.shouldRevealScrollbars(reason)) return
+    this.clearScrollbarHideTimer()
+    if (this.scrollbarAlpha !== 1) {
+      this.scrollbarAlpha = 1
+      this.refresh(['interaction'])
+    }
+    this.scheduleScrollbarHide(reason)
+  }
+
+  private shouldRevealScrollbars(reason: DataTableScrollbarVisibility): boolean {
+    if (this.props.scrollbars === false) return false
+    if (reason === 'hover') {
+      return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'hover')
+        || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'hover')
+    }
+    if (reason === 'scroll') {
+      return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'scroll')
+        || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'scroll')
+        || (this.pointerInside && (
+          (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'hover')
+          || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'hover')
+        ))
+    }
+    return this.hasAlwaysVisibleScrollbar()
+  }
+
+  private scheduleScrollbarHide(reason: DataTableScrollbarVisibility): void {
+    if (this.props.scrollbars === false || this.hasAlwaysVisibleScrollbar() || this.scrollbarDragState) return
+    this.clearScrollbarHideTimer()
+    this.scrollbarHideTimer = setTimeout(() => {
+      if (this.pointerInside && (reason === 'hover' || this.hasHoverVisibleScrollbar())) return
+      this.scrollbarAlpha = 0
+      this.refresh(['interaction'])
+    }, this.props.scrollbars.hideDelay)
+  }
+
+  private clearScrollbarHideTimer(): void {
+    if (!this.scrollbarHideTimer) return
+    clearTimeout(this.scrollbarHideTimer)
+    this.scrollbarHideTimer = null
   }
 
   private resolveRenderedRowId(zone: DataTableCellContext<Row>['zone'], row: Row, rowIndex: number): DataTableRowId {
@@ -1911,6 +2154,13 @@ export class DataTableRootNode<
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+}
+
+function pointInRect(x: number, y: number, rect: DataTableCellRect): boolean {
+  return x >= rect.x
+    && x <= rect.x + rect.width
+    && y >= rect.y
+    && y <= rect.y + rect.height
 }
 
 function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedTableRow<Row>): value is RenderedTableRow<Row> {

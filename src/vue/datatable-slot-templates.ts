@@ -9,6 +9,8 @@ import type {
   DataTableInteractionLayerContext,
   DataTableInteractionLayerTemplate,
   DataTablePinnedRows,
+  DataTableScrollbarLayerContext,
+  DataTableScrollbarLayerTemplate,
   DataTableTemplate,
   DataTableViewGroupingOptions,
 } from '@/model/types/datatable.types'
@@ -18,6 +20,7 @@ export interface DataTableDslNodes<Row extends Record<string, any>> {
   pinnedRows: DataTablePinnedRows<Row>
   grouping?: DataTableViewGroupingOptions<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<Row>
   groupRowTemplate?: DataTableGroupTemplate<Row>
   groupFooterTemplate?: DataTableGroupTemplate<Row>
   grandFooterTemplate?: DataTableGroupTemplate<Row>
@@ -33,6 +36,7 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
   const pinnedRows: DataTablePinnedRows<Row> = {}
   let grouping: DataTableViewGroupingOptions<Row> | undefined
   let interactionLayerTemplate: DataTableInteractionLayerTemplate<Row> | undefined
+  let scrollbarLayerTemplate: DataTableScrollbarLayerTemplate<Row> | undefined
   let groupRowTemplate: DataTableGroupTemplate<Row> | undefined
   let groupFooterTemplate: DataTableGroupTemplate<Row> | undefined
   let grandFooterTemplate: DataTableGroupTemplate<Row> | undefined
@@ -54,6 +58,12 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
       const slots = readSlots(node)
       interactionLayerTemplate = createInteractionLayerTemplate<Row>(
         slots.hover as ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
+      )
+    }
+    if (tag === 'DataTableScrollbarLayer') {
+      const slots = readSlots(node)
+      scrollbarLayerTemplate = createScrollbarLayerTemplate<Row>(
+        slots.default as ((context: DataTableScrollbarLayerContext<Row>) => Array<VNode>) | undefined,
       )
     }
     if (tag === 'DataTableGrouping') {
@@ -79,6 +89,7 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
     pinnedRows,
     grouping,
     interactionLayerTemplate,
+    scrollbarLayerTemplate,
     groupRowTemplate,
     groupFooterTemplate,
     grandFooterTemplate,
@@ -103,6 +114,26 @@ export function createSlotTemplate<Row extends Record<string, any>>(
 export function createInteractionLayerTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
 ): DataTableInteractionLayerTemplate<Row> | undefined {
+  if (!slot) return undefined
+
+  return context => {
+    const schema: NovaSchema = []
+    const rootRect = {
+      x: 0,
+      y: 0,
+      width: context.viewport.width,
+      height: context.viewport.height,
+    }
+    for (const node of flattenVNodes(slot(context))) {
+      appendPrimitiveNode(schema, node, rootRect)
+    }
+    return schema
+  }
+}
+
+export function createScrollbarLayerTemplate<Row extends Record<string, any>>(
+  slot: ((context: DataTableScrollbarLayerContext<Row>) => Array<VNode>) | undefined,
+): DataTableScrollbarLayerTemplate<Row> | undefined {
   if (!slot) return undefined
 
   return context => {
@@ -197,7 +228,7 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
       clip: readBooleanProp(node, 'clip') ? true : undefined,
       styles: {
         background: readStringProp(node, 'background'),
-        border: readProp(node, 'border') as any,
+        border: (readProp(node, 'border') as any) ?? resolveRadiusBorder(readProp(node, 'radius')),
         opacity: readNumberProp(node, 'opacity'),
       },
     })
@@ -363,6 +394,13 @@ function readFunctionProp(node: VNode, key: string): Function | undefined {
 function readArrayProp<Row>(node: VNode, key: string): Array<Row> {
   const value = readProp(node, key)
   return Array.isArray(value) ? value as Array<Row> : []
+}
+
+function resolveRadiusBorder(value: unknown): { radius: number } | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return { radius: value }
+  if (typeof value !== 'string') return undefined
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? { radius: parsed } : undefined
 }
 
 function readPinnedProp(node: VNode): DataTableColumnInput['pinned'] {

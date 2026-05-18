@@ -11,6 +11,7 @@ export {
   DataTableColumn,
   DataTableGrouping,
   DataTablePinnedRows,
+  DataTableScrollbarLayer,
   Rect,
   Surface,
   Text,

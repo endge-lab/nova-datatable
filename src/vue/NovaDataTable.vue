@@ -26,6 +26,8 @@ import {
   type DataTableRowReorderPayload,
   type DataTableRowKey,
   type DataTableRootOptions,
+  type DataTableScrollbarLayerTemplate,
+  type DataTableScrollbarOptions,
   type DataTableSelectionState,
   type DataTableSortState,
   type DataTableStoreApi,
@@ -55,8 +57,10 @@ interface DataTableVueProps {
   overscanColumns?: number
   interaction?: DataTableInteractionOptions
   view?: DataTableViewOptions
+  scrollbars?: false | DataTableScrollbarOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
+  scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<BaseRow>
   groupRowTemplate?: DataTableGroupTemplate<BaseRow>
   groupFooterTemplate?: DataTableGroupTemplate<BaseRow>
   grandFooterTemplate?: DataTableGroupTemplate<BaseRow>
@@ -98,8 +102,10 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   overscanColumns: 4,
   interaction: undefined,
   view: undefined,
+  scrollbars: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
+  scrollbarLayerTemplate: undefined,
   groupRowTemplate: undefined,
   groupFooterTemplate: undefined,
   grandFooterTemplate: undefined,
@@ -180,6 +186,7 @@ const rootHeaderTemplate = computed<DataTableTemplate<BaseRow> | undefined>(() =
   )
 ))
 const rootInteractionLayerTemplate = computed(() => compiledDsl.value.interactionLayerTemplate)
+const rootScrollbarLayerTemplate = computed(() => props.scrollbarLayerTemplate ?? compiledDsl.value.scrollbarLayerTemplate)
 const rootGroupRowTemplate = computed(() => props.groupRowTemplate ?? compiledDsl.value.groupRowTemplate)
 const rootGroupFooterTemplate = computed(() => props.groupFooterTemplate ?? compiledDsl.value.groupFooterTemplate)
 const rootGrandFooterTemplate = computed(() => props.grandFooterTemplate ?? compiledDsl.value.grandFooterTemplate)
@@ -360,9 +367,11 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :overscan-columns="overscanColumns"
       :interaction="interaction"
       :view="rootView"
+      :scrollbars="scrollbars"
       :cell-template="rootCellTemplate"
       :header-template="rootHeaderTemplate"
       :interaction-layer-template="rootInteractionLayerTemplate"
+      :scrollbar-layer-template="rootScrollbarLayerTemplate"
       :group-row-template="rootGroupRowTemplate"
       :group-footer-template="rootGroupFooterTemplate"
       :grand-footer-template="rootGrandFooterTemplate"

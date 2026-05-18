@@ -7,6 +7,7 @@ const primitiveProps = [
   'height',
   'background',
   'border',
+  'radius',
   'opacity',
   'color',
   'font',
@@ -106,6 +107,7 @@ export const DataTablePinnedRows = createDataTableDslMarker('DataTablePinnedRows
 })
 
 export const DataTableInteractionLayer = createDataTableDslMarker('DataTableInteractionLayer')
+export const DataTableScrollbarLayer = createDataTableDslMarker('DataTableScrollbarLayer')
 
 export const DataTableGrouping = createDataTableDslMarker('DataTableGrouping', {
   enabled: {

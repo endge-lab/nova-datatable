@@ -2,6 +2,7 @@ import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps } from '@endge/n
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
+  DataTableScrollbarAxisOptions,
   DataTableResolvedInteractionOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
@@ -34,7 +35,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   overscanColumns: { type: 'number' },
   interaction: { type: 'object' },
   view: { type: 'object' },
-  scrollbars: { type: 'object' },
+  scrollbars: { type: 'any' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
   cellTemplate: { type: 'function' },
@@ -66,17 +67,18 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
 export function normalizeDataTableRootProps<Row extends Record<string, any>>(
   props: DataTableRootProps<Row> = {},
 ): DataTableRootResolvedProps<Row> {
+  const common = normalizeCommonProps(props, {
+    width: 800,
+    height: 480,
+    background: '#ffffff',
+    color: '#172033',
+    fontFamily: 'Inter, Arial, sans-serif',
+    fontSize: 13,
+    lineHeight: 18,
+    clip: true,
+  })
   return {
-    ...normalizeCommonProps(props, {
-      width: 800,
-      height: 480,
-      background: '#ffffff',
-      color: '#172033',
-      fontFamily: 'Inter, Arial, sans-serif',
-      fontSize: 13,
-      lineHeight: 18,
-      clip: true,
-    }),
+    ...common,
     store: props.store,
     rows: props.rows,
     rowKey: props.rowKey,
@@ -92,7 +94,11 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     overscanColumns: Math.max(0, props.overscanColumns ?? 3),
     interaction: normalizeDataTableInteraction(props.interaction),
     view: normalizeDataTableView(props.view),
-    scrollbars: normalizeDataTableScrollbars(props.scrollbars),
+    scrollbars: normalizeDataTableScrollbars(props.scrollbars, {
+      trackColor: common.trackColor,
+      thumbColor: common.thumbColor,
+      thumbHoverColor: common.hoverBackground,
+    }),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
     cellTemplate: props.cellTemplate,
@@ -174,10 +180,11 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
 
 export function normalizeDataTableScrollbars(
   scrollbars: false | DataTableScrollbarOptions | undefined,
+  defaults: Pick<DataTableScrollbarOptions, 'trackColor' | 'thumbColor' | 'thumbHoverColor'> = {},
 ): false | DataTableResolvedScrollbarOptions {
   if (scrollbars === false) return false
 
-  const base = normalizeDataTableScrollbarAxis(scrollbars)
+  const base = normalizeDataTableScrollbarAxis(scrollbars, defaults)
   return {
     ...base,
     hideDelay: Math.max(0, finiteNumber(scrollbars?.hideDelay, 650)),
@@ -186,28 +193,29 @@ export function normalizeDataTableScrollbars(
       : normalizeDataTableScrollbarAxis({
           ...scrollbars,
           ...(scrollbars?.horizontal ?? {}),
-        }),
+        }, defaults),
     vertical: scrollbars?.vertical === false
       ? false
       : normalizeDataTableScrollbarAxis({
           ...scrollbars,
           ...(scrollbars?.vertical ?? {}),
-        }),
+        }, defaults),
     nativeRenderer: scrollbars?.nativeRenderer ?? true,
   }
 }
 
 function normalizeDataTableScrollbarAxis(
-  options: DataTableScrollbarOptions | NonNullable<DataTableScrollbarOptions['horizontal']> | undefined,
+  options: DataTableScrollbarOptions | DataTableScrollbarAxisOptions | undefined,
+  defaults: Pick<DataTableScrollbarOptions, 'trackColor' | 'thumbColor' | 'thumbHoverColor'> = {},
 ): DataTableResolvedScrollbarAxisOptions {
   return {
     visibility: options?.visibility ?? 'always',
     thickness: Math.max(3, finiteNumber(options?.thickness, 4)),
     minThumbSize: Math.max(12, finiteNumber(options?.minThumbSize, 28)),
     radius: Math.max(0, finiteNumber(options?.radius, 3)),
-    trackColor: options?.trackColor ?? 'rgba(23, 32, 51, 0.10)',
-    thumbColor: options?.thumbColor ?? 'rgba(23, 32, 51, 0.38)',
-    thumbHoverColor: options?.thumbHoverColor ?? options?.thumbColor ?? 'rgba(23, 32, 51, 0.55)',
+    trackColor: options?.trackColor ?? defaults.trackColor ?? 'rgba(23, 32, 51, 0.10)',
+    thumbColor: options?.thumbColor ?? defaults.thumbColor ?? 'rgba(23, 32, 51, 0.38)',
+    thumbHoverColor: options?.thumbHoverColor ?? defaults.thumbHoverColor ?? options?.thumbColor ?? defaults.thumbColor ?? 'rgba(23, 32, 51, 0.55)',
     className: options?.className,
   }
 }

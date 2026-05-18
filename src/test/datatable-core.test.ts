@@ -14,9 +14,10 @@ import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtim
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
+import { normalizeDataTableScrollbars } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
-import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
+import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, DataTableScrollbarLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
 interface Row {
@@ -354,6 +355,82 @@ describe('DataTable layout and columns', () => {
   })
 })
 
+describe('DataTable scrollbars', () => {
+  it('normalizes shared and axis scrollbar options', () => {
+    const options = normalizeDataTableScrollbars({
+      visibility: 'hover',
+      thickness: 8,
+      minThumbSize: 36,
+      radius: 6,
+      trackColor: '#e2e8f0',
+      thumbColor: '#2563eb',
+      thumbHoverColor: '#1d4ed8',
+      className: 'ops-scrollbar',
+      horizontal: { visibility: 'scroll', thickness: 12 },
+      vertical: false,
+      nativeRenderer: false,
+    })
+
+    expect(options).not.toBe(false)
+    if (options === false) return
+    expect(options.visibility).toBe('hover')
+    expect(options.horizontal && options.horizontal.visibility).toBe('scroll')
+    expect(options.horizontal && options.horizontal.thickness).toBe(12)
+    expect(options.vertical).toBe(false)
+    expect(options.nativeRenderer).toBe(false)
+    expect(options.className).toBe('ops-scrollbar')
+  })
+
+  it('uses root visual style defaults for scrollbar colors', () => {
+    const options = normalizeDataTableScrollbars({ visibility: 'always' }, {
+      trackColor: '#eef2ff',
+      thumbColor: '#2563eb',
+      thumbHoverColor: '#1d4ed8',
+    })
+
+    expect(options).not.toBe(false)
+    if (options === false) return
+    expect(options.trackColor).toBe('#eef2ff')
+    expect(options.thumbColor).toBe('#2563eb')
+    expect(options.thumbHoverColor).toBe('#1d4ed8')
+  })
+
+  it('calculates horizontal and vertical scrollbar geometry from viewport', () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+
+    root.setProps({
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', resizable: true },
+        ...Array.from({ length: 8 }, (_item, index) => ({ id: `metric-${index}`, width: 160 })),
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+      scrollbars: {
+        visibility: 'always',
+        thickness: 8,
+        minThumbSize: 40,
+      },
+    } as never)
+    root.getApi().scrollTo(180, 120)
+
+    const geometry = (root as any).createScrollbarGeometry()
+    expect(geometry.horizontal).toMatchObject({
+      axis: 'horizontal',
+      value: 180,
+      options: expect.objectContaining({ thickness: 8, minThumbSize: 40 }),
+    })
+    expect(geometry.vertical).toMatchObject({
+      axis: 'vertical',
+      value: 120,
+      options: expect.objectContaining({ thickness: 8, minThumbSize: 40 }),
+    })
+    expect(geometry.horizontal.thumb.width).toBeGreaterThanOrEqual(40)
+    expect(geometry.vertical.thumb.height).toBeGreaterThanOrEqual(40)
+
+    app.destroy()
+  })
+})
+
 describe('DataTableViewPipeline', () => {
   function createPipelineStore(): ReturnType<typeof createDataTableStore<Row>> {
     return createDataTableStore<Row>({
@@ -614,6 +691,69 @@ describe('DataTable DSL templates', () => {
       y: 6,
       width: 20,
       height: 10,
+    })
+  })
+
+  it('compiles scrollbar layer marker nodes', () => {
+    const dsl = compileDataTableDslNodes<Row>([
+      h(DataTableScrollbarLayer, {}, {
+        default: () => [
+          h(Surface, {
+            x: 10,
+            y: 80,
+            width: 120,
+            height: 8,
+            radius: 999,
+            background: '#14b8a6',
+            opacity: 0.8,
+          }),
+        ],
+      }),
+    ])
+    const viewport = createDataTableViewport({
+      width: 200,
+      height: 100,
+      rowHeight: 20,
+      headerHeight: 30,
+      overscanRows: 0,
+      overscanColumns: 0,
+      rowCount: 0,
+      columns: [],
+      pinnedTopCount: 0,
+      pinnedBottomCount: 0,
+      scrollX: 0,
+      scrollY: 0,
+    })
+    const schema = dsl.scrollbarLayerTemplate?.({
+      horizontal: null,
+      vertical: null,
+      viewport,
+      state: {
+        alpha: 1,
+        hoveredAxis: null,
+        draggingAxis: null,
+        pointerInside: true,
+      },
+      actions: {
+        scrollTo: vi.fn(),
+        scrollBy: vi.fn(),
+        startDrag: vi.fn(),
+      },
+      store: createDataTableStore<Row>({ rowKey: 'id', rows: [] }),
+      api: {} as never,
+    })
+
+    expect(schema?.[0]).toMatchObject({
+      type: 'rect',
+      x: 10,
+      y: 80,
+      width: 120,
+      height: 8,
+      styles: {
+        background: '#14b8a6',
+        opacity: 0.8,
+        border: { radius: 999 },
+      },
     })
   })
 
