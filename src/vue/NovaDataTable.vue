@@ -17,6 +17,7 @@ import {
   type DataTablePinnedColumns,
   type DataTablePinnedRows,
   type DataTableColumnReorderPayload,
+  type DataTableFilterExpression,
   type DataTableFilterState,
   type DataTableGroupingState,
   type DataTableGroupNode,
@@ -28,6 +29,7 @@ import {
   type DataTableRootOptions,
   type DataTableScrollbarLayerTemplate,
   type DataTableScrollbarOptions,
+  type DataTableSearchState,
   type DataTableSelectionState,
   type DataTableSortState,
   type DataTableStoreApi,
@@ -73,7 +75,8 @@ interface DataTableVueProps {
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<BaseRow>) => void
   onSortChange?: (state: DataTableSortState) => void
-  onFilterChange?: (state: DataTableFilterState) => void
+  onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
+  onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
@@ -122,6 +125,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onColumnResize: undefined,
   onSortChange: undefined,
   onFilterChange: undefined,
+  onSearchChange: undefined,
   onQueryChange: undefined,
   onRowOrderChange: undefined,
   onColumnOrderChange: undefined,
@@ -144,7 +148,8 @@ const emit = defineEmits<{
   (event: 'viewport-change', viewport: DataTableViewport): void
   (event: 'column-resize', payload: DataTableColumnResizePayload<BaseRow>): void
   (event: 'sort-change', state: DataTableSortState): void
-  (event: 'filter-change', state: DataTableFilterState): void
+  (event: 'filter-change', state: DataTableFilterState | DataTableFilterExpression): void
+  (event: 'search-change', state: DataTableSearchState): void
   (event: 'query-change', query: DataTableQueryState): void
   (event: 'row-order-change', payload: DataTableRowReorderPayload): void
   (event: 'column-order-change', payload: DataTableColumnReorderPayload): void
@@ -256,9 +261,14 @@ function handleSortChange(state: DataTableSortState): void {
   emit('sort-change', state)
 }
 
-function handleFilterChange(state: DataTableFilterState): void {
+function handleFilterChange(state: DataTableFilterState | DataTableFilterExpression): void {
   props.onFilterChange?.(state)
   emit('filter-change', state)
+}
+
+function handleSearchChange(state: DataTableSearchState): void {
+  props.onSearchChange?.(state)
+  emit('search-change', state)
 }
 
 function handleQueryChange(query: DataTableQueryState): void {
@@ -343,7 +353,16 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   setSort: sort => getRootApi().setSort(sort),
   clearSort: columnId => getRootApi().clearSort(columnId),
   setFilter: (columnId, filter) => getRootApi().setFilter(columnId, filter),
+  setFilters: filters => getRootApi().setFilters(filters),
+  patchFilter: (columnId, filter) => getRootApi().patchFilter(columnId, filter),
   clearFilter: columnId => getRootApi().clearFilter(columnId),
+  clearFilters: columnId => getRootApi().clearFilters(columnId),
+  setSearch: query => getRootApi().setSearch(query),
+  clearSearch: () => getRootApi().clearSearch(),
+  findNext: () => getRootApi().findNext(),
+  findPrevious: () => getRootApi().findPrevious(),
+  focusSearchMatch: index => getRootApi().focusSearchMatch(index),
+  getSearchState: () => getRootApi().getSearchState(),
   reorderRows: payload => getRootApi().reorderRows(payload),
   reorderColumns: payload => getRootApi().reorderColumns(payload),
   getGroupingState: () => getRootApi().getGroupingState(),
@@ -400,6 +419,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :on-column-resize="handleColumnResize"
       :on-sort-change="handleSortChange"
       :on-filter-change="handleFilterChange"
+      :on-search-change="handleSearchChange"
       :on-query-change="handleQueryChange"
       :on-row-order-change="handleRowOrderChange"
       :on-column-order-change="handleColumnOrderChange"

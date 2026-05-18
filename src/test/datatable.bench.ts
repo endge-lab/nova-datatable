@@ -148,6 +148,100 @@ describe('NovaDataTable benchmarks', () => {
     pipeline.getQuery()
   })
 
+  bench('100k client multi-sort', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<BenchRow>([
+        { id: 'status', field: 'status', sortable: true },
+        { id: 'amount', field: 'amount', sortable: true },
+        { id: 'name', field: 'name', sortable: true },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: { mode: 'client', multi: true, headerClick: 'append' },
+        filtering: false,
+        search: false,
+        grouping: false,
+      }),
+    })
+    pipeline.setSort([
+      { columnId: 'status', direction: 'asc' },
+      { columnId: 'amount', direction: 'desc' },
+      { columnId: 'name', direction: 'asc' },
+    ])
+    pipeline.getViewRowAt(0)
+  }, { iterations: 3 })
+
+  bench('100k client filter expression', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<BenchRow>([
+        { id: 'status', field: 'status', filter: 'set' },
+        { id: 'amount', field: 'amount', filter: 'number' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: false,
+        filtering: { mode: 'client' },
+        search: false,
+        grouping: false,
+      }),
+    })
+    pipeline.setFilters({
+      logic: 'and',
+      rules: [
+        { columnId: 'status', operator: 'equals', value: 'active' },
+        { columnId: 'amount', operator: 'gte', value: 50_000 },
+      ],
+    })
+    pipeline.getViewRows()
+  }, { iterations: 3 })
+
+  bench('100k client cell search', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<BenchRow>([
+        { id: 'name', field: 'name' },
+        { id: 'status', field: 'status' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: false,
+        filtering: false,
+        search: { mode: 'client', scope: 'cells', columns: ['name'] },
+        grouping: false,
+      }),
+    })
+    pipeline.setSearch({ text: 'Customer 99', scope: 'cells', columns: ['name'], match: 'contains' })
+    pipeline.findNext()
+  }, { iterations: 3 })
+
+  bench('10M lazy search query stays sparse', () => {
+    const store = createDataTableStore<BenchRow>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        getRow: index => rows(1, index)[0],
+      },
+    })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<BenchRow>([{ id: 'name', field: 'name' }], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: false,
+        filtering: false,
+        search: { mode: 'client', scope: 'cells', columns: ['name'] },
+        grouping: false,
+      }),
+    })
+    pipeline.setSearch('Customer')
+    pipeline.getQuery()
+  }, { iterations: 20 })
+
   bench('grouped summary update after 10k deltas', () => {
     const engine = new DataTableSummaryEngine<BenchRow>()
     const source = rows(50_000)

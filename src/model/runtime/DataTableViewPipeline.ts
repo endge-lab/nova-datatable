@@ -5,6 +5,7 @@ import type {
   DataTableColumnReorderPayload,
   DataTableDataViewRow,
   DataTableFilterContext,
+  DataTableFilterExpression,
   DataTableFilterOperator,
   DataTableFilterRule,
   DataTableFilterState,
@@ -18,6 +19,9 @@ import type {
   DataTableResolvedViewOptions,
   DataTableRowId,
   DataTableRowReorderPayload,
+  DataTableSearchMatch,
+  DataTableSearchQuery,
+  DataTableSearchState,
   DataTableSortRule,
   DataTableSortState,
   DataTableStoreApi,
@@ -40,7 +44,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private view: DataTableResolvedViewOptions
   private initialized = false
   private sort: DataTableSortState = []
-  private filters: DataTableFilterState = []
+  private filters: DataTableFilterState | DataTableFilterExpression = []
+  private search: DataTableSearchQuery = { text: '' }
+  private searchMatches: Array<DataTableSearchMatch> = []
+  private searchActiveIndex = -1
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
   private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
@@ -54,12 +61,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private passthrough = false
   private localSort = false
   private localFilter = false
+  private localSearch = false
   private localGrouping = false
 
   constructor(private readonly store: DataTableStoreApi<Row>) {
     this.view = {
       sorting: false,
       filtering: false,
+      search: false,
       rowOrdering: false,
       columnOrdering: false,
       filterUi: false,
@@ -87,7 +96,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const view = this.view
     if (!this.initialized) {
       this.sort = view.sorting ? [...view.sorting.initial] : []
-      this.filters = view.filtering ? [...view.filtering.initial] : []
+      this.filters = view.filtering ? cloneFilters(view.filtering.initial) : []
+      this.search = this.createSearchQuery('')
       this.columnOrder = view.columnOrdering ? [...view.columnOrdering.order] : []
       this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
       this.expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
@@ -161,7 +171,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   getQuery(): DataTableQueryState {
     return {
       sort: [...this.sort],
-      filters: [...this.filters],
+      filters: cloneFilters(this.filters),
+      search: this.search.text ? { ...this.search, columns: [...(this.search.columns ?? [])] } : undefined,
       rowOrder: [...this.rowOrder],
       columnOrder: [...this.columnOrder],
       grouping: this.view.grouping
@@ -178,7 +189,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   getState(): DataTableViewState {
     return {
       sort: [...this.sort],
-      filters: [...this.filters],
+      filters: cloneFilters(this.filters),
+      search: this.getSearchState(),
       rowOrder: [...this.rowOrder],
       columnOrder: [...this.columnOrder],
       grouping: this.getGroupingState(),
@@ -187,6 +199,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       mode: {
         sorting: this.view.sorting ? this.view.sorting.mode : 'off',
         filtering: this.view.filtering ? this.view.filtering.mode : 'off',
+        search: this.view.search ? this.view.search.mode : 'off',
         grouping: this.view.grouping ? this.view.grouping.mode : 'off',
       },
     }
@@ -207,7 +220,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   setSort(sort: DataTableSortState | DataTableSortRule): void {
-    this.sort = Array.isArray(sort) ? [...sort] : [sort]
+    this.sort = normalizeSort(Array.isArray(sort) ? sort : [sort])
     this.rebuild()
   }
 
@@ -219,25 +232,91 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       : current?.direction === 'desc'
         ? undefined
         : 'asc'
-    const base = additive && this.view.sorting.multi ? this.sort.filter(rule => rule.columnId !== columnId) : []
-    this.sort = nextDirection ? [...base, { columnId, direction: nextDirection }] : base
+    const shouldAppend = this.view.sorting.multi && (additive || this.view.sorting.headerClick === 'append')
+    const base = shouldAppend ? this.sort.filter(rule => rule.columnId !== columnId) : []
+    this.sort = normalizeSort(nextDirection ? [...base, { columnId, direction: nextDirection }] : base)
     this.rebuild()
   }
 
   clearSort(columnId?: string): void {
-    this.sort = columnId ? this.sort.filter(rule => rule.columnId !== columnId) : []
+    this.sort = normalizeSort(columnId ? this.sort.filter(rule => rule.columnId !== columnId) : [])
     this.rebuild()
   }
 
   setFilter(columnId: string, filter: Omit<DataTableFilterRule, 'columnId'> | DataTableFilterRule): void {
     const next = { ...filter, columnId } as DataTableFilterRule
-    this.filters = [...this.filters.filter(rule => rule.columnId !== columnId), next]
+    const rules = flattenFilterRules(this.filters)
+    this.filters = [...rules.filter(rule => rule.columnId !== columnId), next]
+    this.rebuild()
+  }
+
+  setFilters(filters: DataTableFilterState | DataTableFilterExpression): void {
+    this.filters = cloneFilters(filters)
     this.rebuild()
   }
 
   clearFilter(columnId?: string): void {
-    this.filters = columnId ? this.filters.filter(rule => rule.columnId !== columnId) : []
+    const rules = flattenFilterRules(this.filters)
+    this.filters = columnId ? rules.filter(rule => rule.columnId !== columnId) : []
     this.rebuild()
+  }
+
+  setSearch(query: string | DataTableSearchQuery): void {
+    this.search = this.createSearchQuery(query)
+    this.rebuild()
+  }
+
+  clearSearch(): void {
+    this.search = this.createSearchQuery('')
+    this.searchMatches = []
+    this.searchActiveIndex = -1
+  }
+
+  findNext(): DataTableSearchMatch | null {
+    if (this.searchMatches.length === 0) return null
+    const nextIndex = this.searchActiveIndex < 0
+      ? 0
+      : (this.searchActiveIndex + 1) % this.searchMatches.length
+    return this.focusSearchMatch(nextIndex)
+  }
+
+  findPrevious(): DataTableSearchMatch | null {
+    if (this.searchMatches.length === 0) return null
+    const nextIndex = this.searchActiveIndex < 0
+      ? this.searchMatches.length - 1
+      : (this.searchActiveIndex - 1 + this.searchMatches.length) % this.searchMatches.length
+    return this.focusSearchMatch(nextIndex)
+  }
+
+  focusSearchMatch(index: number): DataTableSearchMatch | null {
+    if (this.searchMatches.length === 0) return null
+    this.searchActiveIndex = clampInteger(index, 0, this.searchMatches.length - 1)
+    return this.searchMatches[this.searchActiveIndex] ?? null
+  }
+
+  getSearchState(): DataTableSearchState {
+    const activeMatch = this.searchActiveIndex >= 0
+      ? this.searchMatches[this.searchActiveIndex] ?? null
+      : null
+    return {
+      query: { ...this.search, columns: [...(this.search.columns ?? [])] },
+      matches: [...this.searchMatches],
+      activeIndex: this.searchActiveIndex,
+      activeMatch,
+      total: this.searchMatches.length,
+      mode: this.view.search ? this.view.search.mode : 'off',
+      local: this.localSearch,
+    }
+  }
+
+  getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch; index: number } | null {
+    for (let index = 0; index < this.searchMatches.length; index += 1) {
+      const match = this.searchMatches[index]!
+      if (match.rowId === rowId && (match.columnId === columnId || this.search.scope === 'rows')) {
+        return { match, index }
+      }
+    }
+    return null
   }
 
   setGrouping(groups: Array<DataTableGroupRule<Row>>): void {
@@ -335,7 +414,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 
   reset(): void {
     this.sort = this.view.sorting ? [...this.view.sorting.initial] : []
-    this.filters = this.view.filtering ? [...this.view.filtering.initial] : []
+    this.filters = this.view.filtering ? cloneFilters(this.view.filtering.initial) : []
+    this.search = this.createSearchQuery('')
+    this.searchMatches = []
+    this.searchActiveIndex = -1
     this.rowOrder = []
     this.columnOrder = this.view.columnOrdering ? [...this.view.columnOrdering.order] : []
     this.groupingGroupsOverride = null
@@ -358,23 +440,27 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   isServerControlled(): boolean {
     return !!(this.view.sorting && this.view.sorting.controlled)
       || !!(this.view.filtering && this.view.filtering.controlled)
+      || !!(this.view.search && this.view.search.controlled)
       || !!(this.view.grouping && this.view.grouping.controlled)
   }
 
   private rebuild(): void {
     this.localSort = this.shouldApplyLocal(this.view.sorting ? this.view.sorting.mode : 'server')
     this.localFilter = this.shouldApplyLocal(this.view.filtering ? this.view.filtering.mode : 'server')
+    this.localSearch = this.isSearchActive() && this.shouldApplyLocal(this.view.search ? this.view.search.mode : 'server')
     this.localGrouping = !!(this.view.grouping && this.view.grouping.enabled && this.view.grouping.groups.length > 0)
       && this.shouldApplyLocal(this.view.grouping.mode)
 
     const needsMaterializedRows = (this.localSort && this.sort.length > 0)
-      || (this.localFilter && this.filters.length > 0)
+      || (this.localFilter && hasFilters(this.filters))
+      || this.localSearch
       || this.localGrouping
       || this.rowOrder.length > 0
     if (!needsMaterializedRows) {
       this.passthrough = true
       this.groupNodes.clear()
       this.rows = []
+      this.rebuildSearchMatches()
       return
     }
 
@@ -394,6 +480,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       ? this.flattenGroupedRows(ordered, this.view.grouping.groups as Array<DataTableGroupRule<Row>>)
       : ordered
     this.rows = grouped.map((item, viewIndex) => ({ ...item, viewIndex }))
+    this.rebuildSearchMatches()
   }
 
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
@@ -405,27 +492,39 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 
   private matchesFilters(item: DataTableDataViewRow<Row>): boolean {
     if (!item.row || item.rowId === undefined) return false
-    for (const rule of this.filters) {
-      const column = this.columns.find(candidate => candidate.id === rule.columnId)
-      if (!column) continue
-      const value = resolveDataTableValue(item.row, item.storeIndex, column)
-      const filter = typeof column.filter === 'object' ? column.filter : undefined
-      const context: DataTableFilterContext<Row> = {
-        row: item.row,
-        rowId: item.rowId,
-        rowIndex: item.storeIndex,
-        column,
-        value,
-        operator: rule.operator,
-        filterValue: rule.value,
-      }
-      if (filter?.predicate) {
-        if (!filter.predicate(context)) return false
-      } else if (!defaultPredicate(rule.operator, value, rule.value)) {
-        return false
-      }
+    return this.matchesFilterNode(this.filters, item)
+  }
+
+  private matchesFilterNode(
+    node: DataTableFilterState | DataTableFilterExpression | DataTableFilterRule,
+    item: DataTableDataViewRow<Row>,
+  ): boolean {
+    if (Array.isArray(node)) return node.every(rule => this.matchesFilterRule(rule, item))
+    if ('logic' in node) {
+      return node.logic === 'or'
+        ? node.rules.some(rule => this.matchesFilterNode(rule, item))
+        : node.rules.every(rule => this.matchesFilterNode(rule, item))
     }
-    return true
+    return this.matchesFilterRule(node, item)
+  }
+
+  private matchesFilterRule(rule: DataTableFilterRule, item: DataTableDataViewRow<Row>): boolean {
+    if (!item.row || item.rowId === undefined) return false
+    const column = this.columns.find(candidate => candidate.id === rule.columnId)
+    if (!column) return true
+    const value = resolveDataTableValue(item.row, item.storeIndex, column)
+    const filter = typeof column.filter === 'object' ? column.filter : undefined
+    const context: DataTableFilterContext<Row> = {
+      row: item.row,
+      rowId: item.rowId,
+      rowIndex: item.storeIndex,
+      column,
+      value,
+      operator: rule.operator,
+      filterValue: rule.value,
+    }
+    if (filter?.predicate) return filter.predicate(context)
+    return defaultPredicate(rule.operator, value, rule.value)
   }
 
   private compareRows(a: DataTableDataViewRow<Row>, b: DataTableDataViewRow<Row>): number {
@@ -442,10 +541,96 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         : resolveDataTableValue(b.row, b.storeIndex, column)
       const compared = sortConfig?.compare
         ? sortConfig.compare(aValue, bValue, a.row, b.row)
-        : compareValues(aValue, bValue)
+        : compareValues(aValue, bValue, sortConfig?.nulls)
       if (compared !== 0) return rule.direction === 'asc' ? compared : -compared
     }
     return a.storeIndex - b.storeIndex
+  }
+
+  private isSearchActive(): boolean {
+    return this.search.text.trim().length > 0
+  }
+
+  private createSearchQuery(query: string | DataTableSearchQuery): DataTableSearchQuery {
+    const raw = typeof query === 'string' ? { text: query } : query
+    const options = this.view.search
+    return {
+      text: raw.text ?? '',
+      scope: raw.scope ?? options?.scope ?? 'cells',
+      match: raw.match ?? options?.match ?? 'contains',
+      caseSensitive: raw.caseSensitive ?? options?.caseSensitive ?? false,
+      columns: raw.columns ?? options?.columns ?? [],
+      highlight: raw.highlight ?? options?.highlight ?? 'cell-text',
+      highlightColor: raw.highlightColor ?? options?.highlightColor ?? '#b45309',
+      activeHighlightColor: raw.activeHighlightColor ?? options?.activeHighlightColor ?? '#be123c',
+    }
+  }
+
+  private rebuildSearchMatches(): void {
+    if (!this.localSearch || !this.isSearchActive()) {
+      this.searchMatches = []
+      this.searchActiveIndex = -1
+      return
+    }
+
+    const sourceRows = this.passthrough
+      ? Array.from({ length: this.store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
+      : this.rows
+    const matches: Array<DataTableSearchMatch> = []
+    for (const viewRow of sourceRows) {
+      if (!viewRow || viewRow.kind !== 'data' || !viewRow.row) continue
+      matches.push(...this.matchSearchRow(viewRow))
+    }
+    this.searchMatches = matches
+    if (matches.length === 0) this.searchActiveIndex = -1
+    else if (this.searchActiveIndex < 0) this.searchActiveIndex = 0
+    else this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1)
+  }
+
+  private matchSearchRow(viewRow: DataTableDataViewRow<Row>): Array<DataTableSearchMatch> {
+    const row = viewRow.row
+    if (!row) return []
+    const searchableColumns = this.resolveSearchableColumns()
+    const matches: Array<DataTableSearchMatch> = []
+    if (this.search.scope === 'rows') {
+      const value = searchableColumns
+        .map(column => String(resolveDataTableValue(row, viewRow.storeIndex, column) ?? ''))
+        .join(' ')
+      const ranges = findSearchRanges(value, this.search)
+      if (ranges.length > 0) {
+        matches.push({
+          rowId: viewRow.rowId,
+          rowIndex: viewRow.viewIndex,
+          storeIndex: viewRow.storeIndex,
+          value,
+          ranges,
+        })
+      }
+      return matches
+    }
+
+    for (const column of searchableColumns) {
+      const value = String(resolveDataTableValue(row, viewRow.storeIndex, column) ?? '')
+      const ranges = findSearchRanges(value, this.search)
+      if (ranges.length === 0) continue
+      matches.push({
+        rowId: viewRow.rowId,
+        rowIndex: viewRow.viewIndex,
+        storeIndex: viewRow.storeIndex,
+        columnId: column.id,
+        columnIndex: this.columns.indexOf(column),
+        value,
+        ranges,
+      })
+    }
+    return matches
+  }
+
+  private resolveSearchableColumns(): Array<DataTableResolvedColumn<Row>> {
+    const ids = this.search.columns ?? []
+    if (ids.length === 0) return this.columns
+    const allowed = new Set(ids)
+    return this.columns.filter(column => allowed.has(column.id))
   }
 
   private applyManualOrder(rows: Array<DataTableDataViewRow<Row>>): Array<DataTableDataViewRow<Row>> {
@@ -653,10 +838,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 }
 
-function compareValues(a: unknown, b: unknown): number {
+function compareValues(a: unknown, b: unknown, nulls: 'first' | 'last' = 'last'): number {
   if (a === b) return 0
-  if (a === undefined || a === null) return 1
-  if (b === undefined || b === null) return -1
+  if (a === undefined || a === null) return nulls === 'first' ? -1 : 1
+  if (b === undefined || b === null) return nulls === 'first' ? 1 : -1
   if (typeof a === 'number' && typeof b === 'number') return a - b
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
 }
@@ -691,6 +876,79 @@ function cloneExpanded(value: 'all' | 'none' | Array<string>): 'all' | 'none' | 
   return Array.isArray(value) ? [...value] : value
 }
 
+function normalizeSort(sort: DataTableSortState): DataTableSortState {
+  return sort.map((rule, index) => ({ ...rule, priority: index }))
+}
+
+function cloneFilters(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState | DataTableFilterExpression {
+  if (Array.isArray(filters)) return filters.map(rule => ({ ...rule }))
+  return {
+    logic: filters.logic,
+    rules: filters.rules.map(rule => cloneFilterNode(rule)),
+  }
+}
+
+function cloneFilterNode(rule: DataTableFilterRule | DataTableFilterExpression): DataTableFilterRule | DataTableFilterExpression {
+  if ('logic' in rule) {
+    return {
+      logic: rule.logic,
+      rules: rule.rules.map(child => cloneFilterNode(child)),
+    }
+  }
+  return { ...rule }
+}
+
+function flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState {
+  if (Array.isArray(filters)) return filters.map(rule => ({ ...rule }))
+  return filters.rules.flatMap(rule => 'logic' in rule ? flattenFilterRules(rule) : [{ ...rule }])
+}
+
+function hasFilters(filters: DataTableFilterState | DataTableFilterExpression): boolean {
+  if (Array.isArray(filters)) return filters.length > 0
+  return filters.rules.length > 0
+}
+
+function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ start: number; end: number }> {
+  const needle = query.text
+  if (!needle) return []
+
+  const source = query.caseSensitive ? value : value.toLowerCase()
+  const target = query.caseSensitive ? needle : needle.toLowerCase()
+  const ranges: Array<{ start: number; end: number }> = []
+
+  if (query.match === 'regex') {
+    try {
+      const flags = query.caseSensitive ? 'g' : 'gi'
+      const regex = new RegExp(needle, flags)
+      for (const match of source.matchAll(regex)) {
+        const start = match.index ?? -1
+        const text = match[0] ?? ''
+        if (start >= 0 && text.length > 0) ranges.push({ start, end: start + text.length })
+      }
+    } catch {
+      return []
+    }
+    return ranges
+  }
+
+  if (query.match === 'equals') {
+    return source === target ? [{ start: 0, end: value.length }] : []
+  }
+
+  if (query.match === 'startsWith') {
+    return source.startsWith(target) ? [{ start: 0, end: needle.length }] : []
+  }
+
+  let cursor = 0
+  while (cursor <= source.length) {
+    const index = source.indexOf(target, cursor)
+    if (index < 0) break
+    ranges.push({ start: index, end: index + needle.length })
+    cursor = index + Math.max(1, needle.length)
+  }
+  return ranges
+}
+
 function formatGroupLabel(value: unknown): string {
   if (value === undefined || value === null || value === '') return 'Empty'
   return String(value)
@@ -698,8 +956,24 @@ function formatGroupLabel(value: unknown): string {
 
 function createViewSignature(view: DataTableResolvedViewOptions, expanded: 'all' | 'none' | Array<string>): string {
   return JSON.stringify({
-    sorting: view.sorting && { mode: view.sorting.mode, multi: view.sorting.multi, controlled: view.sorting.controlled },
+    sorting: view.sorting && {
+      mode: view.sorting.mode,
+      multi: view.sorting.multi,
+      headerClick: view.sorting.headerClick,
+      controlled: view.sorting.controlled,
+    },
     filtering: view.filtering && { mode: view.filtering.mode, controlled: view.filtering.controlled },
+    search: view.search && {
+      mode: view.search.mode,
+      scope: view.search.scope,
+      match: view.search.match,
+      caseSensitive: view.search.caseSensitive,
+      columns: view.search.columns,
+      highlight: view.search.highlight,
+      highlightColor: view.search.highlightColor,
+      activeHighlightColor: view.search.activeHighlightColor,
+      controlled: view.search.controlled,
+    },
     grouping: view.grouping && {
       enabled: view.grouping.enabled,
       mode: view.grouping.mode,

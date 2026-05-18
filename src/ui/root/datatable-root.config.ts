@@ -61,6 +61,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   onColumnResize: { type: 'function' },
   onSortChange: { type: 'function' },
   onFilterChange: { type: 'function' },
+  onSearchChange: { type: 'function' },
   onQueryChange: { type: 'function' },
   onRowOrderChange: { type: 'function' },
   onColumnOrderChange: { type: 'function' },
@@ -128,6 +129,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onColumnResize: props.onColumnResize,
     onSortChange: props.onSortChange,
     onFilterChange: props.onFilterChange,
+    onSearchChange: props.onSearchChange,
     onQueryChange: props.onQueryChange,
     onRowOrderChange: props.onRowOrderChange,
     onColumnOrderChange: props.onColumnOrderChange,
@@ -158,6 +160,7 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
       : {
           mode: view?.sorting?.mode ?? 'hybrid',
           multi: view?.sorting?.multi ?? true,
+          headerClick: view?.sorting?.headerClick ?? 'append',
           controlled: view?.sorting?.controlled ?? false,
           initial: view?.sorting?.initial ?? [],
         },
@@ -167,6 +170,19 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           mode: view?.filtering?.mode ?? 'hybrid',
           controlled: view?.filtering?.controlled ?? false,
           initial: view?.filtering?.initial ?? [],
+        },
+    search: view?.search === false
+      ? false
+      : {
+          mode: view?.search?.mode ?? 'hybrid',
+          scope: view?.search?.scope ?? 'cells',
+          match: view?.search?.match ?? 'contains',
+          caseSensitive: view?.search?.caseSensitive ?? false,
+          columns: view?.search?.columns ?? [],
+          highlight: view?.search?.highlight ?? 'cell-text',
+          highlightColor: view?.search?.highlightColor ?? '#b45309',
+          activeHighlightColor: view?.search?.activeHighlightColor ?? '#be123c',
+          controlled: view?.search?.controlled ?? false,
         },
     rowOrdering: view?.rowOrdering === false
       ? false

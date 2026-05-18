@@ -21,6 +21,10 @@ const primitiveProps = [
   'active',
   'clip',
   'text',
+  'highlightRanges',
+  'highlightColor',
+  'activeHighlightColor',
+  'highlightActive',
   'if',
 ] as const
 

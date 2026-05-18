@@ -242,7 +242,16 @@ export class DataTableRootNode<
       setSort: sort => this.setSort(sort),
       clearSort: columnId => this.clearSort(columnId),
       setFilter: (columnId, filter) => this.setFilter(columnId, filter),
+      setFilters: filters => this.setFilters(filters),
+      patchFilter: (columnId, filter) => this.setFilter(columnId, filter),
       clearFilter: columnId => this.clearFilter(columnId),
+      clearFilters: columnId => this.clearFilter(columnId),
+      setSearch: query => this.setSearch(query),
+      clearSearch: () => this.clearSearch(),
+      findNext: () => this.findNextSearchMatch(),
+      findPrevious: () => this.findPreviousSearchMatch(),
+      focusSearchMatch: index => this.focusSearchMatch(index),
+      getSearchState: () => this.viewPipeline.getSearchState(),
       reorderRows: payload => this.reorderRows(payload),
       reorderColumns: payload => this.reorderColumns(payload),
       getGroupingState: () => this.viewPipeline.getGroupingState(),
@@ -736,11 +745,75 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  private setFilters(filters: Parameters<DataTableRootApi<Row>['setFilters']>[0]): void {
+    this.viewPipeline.setFilters(filters)
+    this.emitViewQuery('filter')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
   private clearFilter(columnId?: string): void {
     this.viewPipeline.clearFilter(columnId)
     this.emitViewQuery('filter')
     this.setScroll(this.scrollX, 0)
     this.refresh(['data', 'layout'])
+  }
+
+  private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
+    this.viewPipeline.setSearch(query)
+    this.emitViewQuery('search')
+    this.refresh(['data', 'layout'])
+  }
+
+  private clearSearch(): void {
+    this.viewPipeline.clearSearch()
+    this.emitViewQuery('search')
+    this.refresh(['data', 'layout'])
+  }
+
+  private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
+    const match = this.viewPipeline.findNext()
+    if (match) this.scrollToSearchMatch(match)
+    this.emitViewQuery('search')
+    this.refresh(['data', 'layout'])
+    return match
+  }
+
+  private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
+    const match = this.viewPipeline.findPrevious()
+    if (match) this.scrollToSearchMatch(match)
+    this.emitViewQuery('search')
+    this.refresh(['data', 'layout'])
+    return match
+  }
+
+  private focusSearchMatch(index: number): ReturnType<DataTableRootApi<Row>['focusSearchMatch']> {
+    const match = this.viewPipeline.focusSearchMatch(index)
+    if (match) this.scrollToSearchMatch(match)
+    this.emitViewQuery('search')
+    this.refresh(['data', 'layout'])
+    return match
+  }
+
+  private scrollToSearchMatch(match: NonNullable<ReturnType<DataTableRootApi<Row>['findNext']>>): void {
+    let nextScrollX = this.scrollX
+    if (match.columnId) {
+      const centerColumns = this.resolvedColumns.filter(column => !column.pinned)
+      let columnX = 0
+      for (const column of centerColumns) {
+        if (column.id === match.columnId) break
+        columnX += column.resolvedWidth
+      }
+      const column = centerColumns.find(item => item.id === match.columnId)
+      if (column) {
+        if (columnX < this.scrollX) nextScrollX = columnX
+        else if (columnX + column.resolvedWidth > this.scrollX + this.viewport.bodyWidth) {
+          nextScrollX = columnX + column.resolvedWidth - this.viewport.bodyWidth
+        }
+      }
+    }
+
+    this.setScroll(nextScrollX, match.rowIndex * this.rowHeight)
   }
 
   private reorderRows(payload: Parameters<DataTableRootApi<Row>['reorderRows']>[0]): void {
@@ -816,10 +889,11 @@ export class DataTableRootNode<
     this.refresh(['data', 'columns', 'layout'])
   }
 
-  private emitViewQuery(kind: 'sort' | 'filter' | 'row' | 'column' | 'grouping' | 'all'): void {
+  private emitViewQuery(kind: 'sort' | 'filter' | 'search' | 'row' | 'column' | 'grouping' | 'all'): void {
     const state = this.viewPipeline.getState()
     if (kind === 'sort' || kind === 'all') this.props.onSortChange?.(state.sort)
     if (kind === 'filter' || kind === 'all') this.props.onFilterChange?.(state.filters)
+    if (kind === 'search' || kind === 'all') this.props.onSearchChange?.(state.search)
     if (kind === 'grouping' || kind === 'all') this.props.onGroupingChange?.(state.grouping)
     this.props.onQueryChange?.(state.query)
   }
@@ -1489,6 +1563,7 @@ export class DataTableRootNode<
     const selection = this.selectionActive ? this.selection : null
     const viewState = this.viewPipeline.getState()
     const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
+    const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
     const hoverAffectsCells = !!hover && !isGroupInteractionZone(hover.zone)
     const hovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
     const rowHovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId
@@ -1530,7 +1605,11 @@ export class DataTableRootNode<
       pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
       sorted: sortIndex >= 0 ? viewState.sort[sortIndex]?.direction : undefined,
       sortPriority: sortIndex >= 0 ? sortIndex : undefined,
-      filtered: viewState.filters.some(rule => rule.columnId === columnRect.column.id),
+      filtered: filterStateHasColumn(viewState.filters, columnRect.column.id),
+      searchMatched: !!searchHit,
+      searchActive: !!searchHit && viewState.search.activeIndex === searchHit.index,
+      searchMatchIndex: searchHit?.index,
+      searchRanges: searchHit?.match.ranges,
     }
   }
 
@@ -1631,8 +1710,24 @@ export class DataTableRootNode<
     const { rect, value, column, zone, rowIndex } = context
     const isHeader = zone === 'header'
     const isPinned = zone === 'pinned-top' || zone === 'pinned-bottom'
-    const background = this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
+    const searchState = this.viewPipeline.getSearchState()
+    const searchHighlight = searchState.query.highlight ?? 'cell-text'
+    const cellSearchHighlighted = !isHeader
+      && context.state.searchMatched
+      && (searchHighlight === 'cell' || searchHighlight === 'cell-text')
+    const background = cellSearchHighlighted
+      ? context.state.searchActive ? '#fff1f2' : '#fef3c7'
+      : this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
     const color = isHeader ? '#172033' : '#263142'
+    const text = String(value ?? '')
+    const textRect = {
+      x: rect.x + 10,
+      y: rect.y,
+      width: Math.max(0, rect.width - 20),
+      height: rect.height,
+    }
+    const fontSize = this.fontSize
+    const fontWeight = isHeader ? '700' : '500'
 
     schema.push(
       {
@@ -1651,17 +1746,14 @@ export class DataTableRootNode<
       },
       {
         type: 'text',
-        text: String(value ?? ''),
-        x: rect.x + 10,
-        y: rect.y,
-        width: Math.max(0, rect.width - 20),
-        height: rect.height,
+        text,
+        ...textRect,
         styles: {
           color,
           font: {
             family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-            size: this.fontSize,
-            weight: isHeader ? '700' : '500',
+            size: fontSize,
+            weight: fontWeight,
             style: 'normal',
           },
           lineHeight: this.lineHeight,
@@ -1674,10 +1766,24 @@ export class DataTableRootNode<
       },
     )
 
+    if (!isHeader && context.state.searchRanges?.length && (searchHighlight === 'text' || searchHighlight === 'cell-text')) {
+      schema.push(...this.renderDefaultCellSearchTextHighlights(
+        text,
+        textRect,
+        column.align,
+        context.state.searchRanges,
+        context.state.searchActive,
+        searchState.query.highlightColor ?? '#b45309',
+        searchState.query.activeHighlightColor ?? '#be123c',
+        fontSize,
+        fontWeight,
+      ))
+    }
+
     if (isHeader && (context.state.sorted || context.state.filtered)) {
       schema.push({
         type: 'text',
-        text: `${context.state.sorted === 'asc' ? '↑' : context.state.sorted === 'desc' ? '↓' : ''}${context.state.filtered ? '•' : ''}`,
+        text: `${context.state.sortPriority !== undefined ? context.state.sortPriority + 1 : ''}${context.state.sorted === 'asc' ? '↑' : context.state.sorted === 'desc' ? '↓' : ''}${context.state.filtered ? '•' : ''}`,
         x: rect.x + rect.width - 22,
         y: rect.y,
         width: 18,
@@ -1696,6 +1802,59 @@ export class DataTableRootNode<
         },
       })
     }
+  }
+
+  private renderDefaultCellSearchTextHighlights(
+    text: string,
+    rect: DataTableCellRect,
+    align: DataTableResolvedColumn<Row>['align'],
+    ranges: Array<{ start: number; end: number }>,
+    active: boolean,
+    highlightColor: string,
+    activeHighlightColor: string,
+    fontSize: number,
+    fontWeight: string,
+  ): NovaSchema {
+    const schema: NovaSchema = []
+    const textWidth = estimateSearchTextWidth(text, fontSize)
+    const originX = align === 'right'
+      ? rect.x + rect.width - textWidth
+      : align === 'center'
+        ? rect.x + Math.max(0, (rect.width - textWidth) / 2)
+        : rect.x
+    const color = active ? activeHighlightColor : highlightColor
+    for (const range of ranges.slice(0, 4)) {
+      const start = Math.max(0, Math.min(text.length, range.start))
+      const end = Math.max(start, Math.min(text.length, range.end))
+      const prefix = text.slice(0, start)
+      const part = text.slice(start, end)
+      if (!part) continue
+      const x = originX + estimateSearchTextWidth(prefix, fontSize)
+      schema.push({
+        type: 'text',
+        text: part,
+        x,
+        y: rect.y,
+        width: Math.min(rect.x + rect.width - x, Math.max(0, estimateSearchTextWidth(part, fontSize) + 2)),
+        height: rect.height,
+        styles: {
+          color,
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: fontSize,
+            weight: active ? '800' : fontWeight,
+            style: 'normal',
+          },
+          lineHeight: this.lineHeight,
+          align: {
+            horizontal: 'left',
+            vertical: 'middle',
+          },
+          ellipsis: false,
+        },
+      })
+    }
+    return schema
   }
 
   private resolveDefaultCellBackground(
@@ -2725,6 +2884,22 @@ function clampUnit(value: number): number {
 
 function escapeTooltipMarkdown(value: string): string {
   return value.replace(/([\\`*_{}[\]()#+\-.!|>])/g, '\\$1')
+}
+
+function filterStateHasColumn(filters: DataTableViewState['filters'], columnId: string): boolean {
+  if (Array.isArray(filters)) return filters.some(rule => rule.columnId === columnId)
+  return filters.rules.some(rule => 'logic' in rule ? filterStateHasColumn(rule, columnId) : rule.columnId === columnId)
+}
+
+function estimateSearchTextWidth(value: string, fontSize: number): number {
+  let width = 0
+  for (const character of value) {
+    if (character === ' ') width += fontSize * 0.32
+    else if (/[il|.,:;]/.test(character)) width += fontSize * 0.28
+    else if (/[mwMW@#]/.test(character)) width += fontSize * 0.82
+    else width += fontSize * 0.56
+  }
+  return width
 }
 
 function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedTableRow<Row>): value is RenderedTableRow<Row> {

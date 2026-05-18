@@ -242,9 +242,15 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
 
   if (tag === 'Text' || tag === 'TextBlock') {
     const rect = resolveNodeRect(node, parentRect)
+    const text = String(readProp(node, 'text') ?? '')
+    const font = resolveFont(node)
+    const fontSize = typeof font?.size === 'number' ? font.size : 12
+    const align = resolveAlign(node)
+    const highlightRanges = readProp(node, 'highlightRanges')
+    const highlightActive = readProp(node, 'highlightActive') === true
     schema.push({
       type: 'text',
-      text: String(readProp(node, 'text') ?? ''),
+      text,
       x: rect.x,
       y: rect.y,
       width: rect.width,
@@ -253,14 +259,80 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
       clip: readBooleanProp(node, 'clip') ? true : undefined,
       styles: {
         color: readStringProp(node, 'color'),
-        font: resolveFont(node),
+        font,
         lineHeight: readNumberProp(node, 'lineHeight'),
-        align: resolveAlign(node),
+        align,
         ellipsis: readBooleanProp(node, 'ellipsis') || undefined,
         opacity: readNumberProp(node, 'opacity'),
       },
     })
+    if (Array.isArray(highlightRanges) && highlightRanges.length > 0) {
+      schema.push(...createDslTextHighlights(
+        text,
+        rect,
+        align?.horizontal === 'center' || align?.horizontal === 'right' ? align.horizontal : 'left',
+        highlightRanges as Array<{ start: number; end: number }>,
+        highlightActive,
+        readStringProp(node, 'highlightColor') ?? '#b45309',
+        readStringProp(node, 'activeHighlightColor') ?? '#be123c',
+        font,
+        readNumberProp(node, 'lineHeight'),
+        readNumberProp(node, 'opacity'),
+      ))
+    }
   }
+}
+
+function createDslTextHighlights(
+  text: string,
+  rect: DataTableCellRect,
+  align: 'left' | 'center' | 'right',
+  ranges: Array<{ start: number; end: number }>,
+  active: boolean,
+  color: string,
+  activeColor: string,
+  font: Record<string, unknown> | undefined,
+  lineHeight: number | undefined,
+  opacity: number | undefined,
+): NovaSchema {
+  const schema: NovaSchema = []
+  const fontSize = typeof font?.size === 'number' ? font.size : 12
+  const textWidth = estimateDslTextWidth(text, fontSize)
+  const originX = align === 'right'
+    ? rect.x + rect.width - textWidth
+    : align === 'center'
+      ? rect.x + Math.max(0, (rect.width - textWidth) / 2)
+      : rect.x
+  for (const range of ranges.slice(0, 4)) {
+    const start = Math.max(0, Math.min(text.length, range.start))
+    const end = Math.max(start, Math.min(text.length, range.end))
+    const part = text.slice(start, end)
+    if (!part) continue
+    const x = originX + estimateDslTextWidth(text.slice(0, start), fontSize)
+    schema.push({
+      type: 'text',
+      text: part,
+      x,
+      y: rect.y,
+      width: Math.min(rect.x + rect.width - x, Math.max(0, estimateDslTextWidth(part, fontSize) + 2)),
+      height: rect.height,
+      styles: {
+        color: active ? activeColor : color,
+        font: {
+          ...(font ?? {}),
+          weight: active ? '800' : font?.weight,
+        },
+        lineHeight,
+        align: {
+          horizontal: 'left',
+          vertical: 'middle',
+        },
+        ellipsis: false,
+        opacity,
+      },
+    })
+  }
+  return schema
 }
 
 function resolveNodeRect(node: VNode, parentRect: DataTableCellRect): DataTableCellRect {
@@ -328,6 +400,17 @@ function applyPadding(rect: DataTableCellRect, padding: unknown): DataTableCellR
     width: Math.max(0, rect.width - left - right),
     height: Math.max(0, rect.height - top - bottom),
   }
+}
+
+function estimateDslTextWidth(value: string, fontSize: number): number {
+  let width = 0
+  for (const character of value) {
+    if (character === ' ') width += fontSize * 0.32
+    else if (/[il|.,:;]/.test(character)) width += fontSize * 0.28
+    else if (/[mwMW@#]/.test(character)) width += fontSize * 0.82
+    else width += fontSize * 0.56
+  }
+  return width
 }
 
 function flattenVNodes(nodes: Array<VNode>): Array<VNode> {

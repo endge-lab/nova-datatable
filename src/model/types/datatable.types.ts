@@ -23,8 +23,10 @@ export type DataTablePinnedRowPosition = 'top' | 'bottom'
 export type DataTableColumnAlign = 'left' | 'center' | 'right'
 export type DataTableViewMode = 'client' | 'server' | 'hybrid'
 export type DataTableSortDirection = 'asc' | 'desc'
+export type DataTableSortHeaderClickMode = 'append' | 'replace'
 export type DataTableGroupFooterPlacement = 'scroll' | 'pinned-bottom' | 'both'
 export type DataTableFilterPreset = 'text' | 'number' | 'date' | 'set' | 'boolean' | 'custom'
+export type DataTableFilterExpressionLogic = 'and' | 'or'
 export type DataTableFilterOperator =
   | 'contains'
   | 'equals'
@@ -39,6 +41,9 @@ export type DataTableFilterOperator =
   | 'notIn'
   | 'is'
   | 'isNot'
+export type DataTableSearchScope = 'rows' | 'cells'
+export type DataTableSearchMatchMode = 'contains' | 'startsWith' | 'equals' | 'regex'
+export type DataTableSearchHighlightMode = 'none' | 'cell' | 'text' | 'cell-text'
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
 export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
 export type DataTableCellEnterMotion = 'none' | 'fade'
@@ -71,6 +76,53 @@ export interface DataTableFilterRule {
 }
 
 export type DataTableFilterState = Array<DataTableFilterRule>
+
+export interface DataTableFilterExpression {
+  logic: DataTableFilterExpressionLogic
+  rules: Array<DataTableFilterRule | DataTableFilterExpression>
+}
+
+export interface DataTableSearchRange {
+  start: number
+  end: number
+}
+
+export interface DataTableSearchQuery {
+  text: string
+  scope?: DataTableSearchScope
+  match?: DataTableSearchMatchMode
+  caseSensitive?: boolean
+  columns?: Array<string>
+  highlight?: DataTableSearchHighlightMode
+  highlightColor?: string
+  activeHighlightColor?: string
+}
+
+export interface DataTableSearchMatch {
+  rowId?: DataTableRowId
+  rowIndex: number
+  storeIndex?: number
+  columnId?: string
+  columnIndex?: number
+  value: string
+  ranges: Array<DataTableSearchRange>
+}
+
+export interface DataTableSearchResult {
+  matches: Array<DataTableSearchMatch>
+  total?: number
+  cursor?: string
+}
+
+export interface DataTableSearchState {
+  query: DataTableSearchQuery
+  matches: Array<DataTableSearchMatch>
+  activeIndex: number
+  activeMatch: DataTableSearchMatch | null
+  total: number
+  mode: DataTableViewMode | 'off'
+  local: boolean
+}
 
 export type DataTableAggregator<Row extends Record<string, any> = Record<string, any>> =
   | 'count'
@@ -126,7 +178,8 @@ export interface DataTableGroupingQueryState<Row extends Record<string, any> = R
 
 export interface DataTableQueryState {
   sort: DataTableSortState
-  filters: DataTableFilterState
+  filters: DataTableFilterState | DataTableFilterExpression
+  search?: DataTableSearchQuery
   rowOrder: Array<DataTableRowId>
   columnOrder: Array<string>
   grouping?: DataTableGroupingQueryState
@@ -177,6 +230,12 @@ export interface DataTableLazySource<Row extends Record<string, any>> {
   getRow?: (index: number) => Row | undefined
   loadRange?: (range: DataTableRange, query?: DataTableQueryState) => Promise<Array<Row> | void> | Array<Row> | void
   loadSummary?: (query?: DataTableQueryState) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+  search?: (
+    search: DataTableSearchQuery,
+    query?: DataTableQueryState,
+    cursor?: string,
+  ) => Promise<DataTableSearchResult | void> | DataTableSearchResult | void
+  resolveRowIndex?: (rowId: DataTableRowId, query?: DataTableQueryState) => Promise<number | undefined> | number | undefined
   subscribe?: (query: DataTableQueryState, emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void) => (() => void) | void
 }
 
@@ -226,6 +285,10 @@ export interface DataTableCellState {
   sorted?: DataTableSortDirection
   sortPriority?: number
   filtered?: boolean
+  searchMatched: boolean
+  searchActive: boolean
+  searchMatchIndex?: number
+  searchRanges?: Array<DataTableSearchRange>
   dragging?: boolean
 }
 
@@ -529,6 +592,7 @@ export interface DataTableSortConfig<Row extends Record<string, any> = Record<st
   accessor?: (row: Row, index: number) => unknown
   compare?: (a: unknown, b: unknown, aRow: Row, bRow: Row) => number
   comparator?: string
+  nulls?: 'first' | 'last'
 }
 
 export interface DataTableFilterContext<Row extends Record<string, any> = Record<string, any>> {
@@ -554,13 +618,19 @@ export interface DataTableFilterConfig<Row extends Record<string, any> = Record<
 export interface DataTableViewSortingOptions {
   mode?: DataTableViewMode
   multi?: boolean
+  headerClick?: DataTableSortHeaderClickMode
   initial?: DataTableSortState
   controlled?: boolean
 }
 
 export interface DataTableViewFilteringOptions {
   mode?: DataTableViewMode
-  initial?: DataTableFilterState
+  initial?: DataTableFilterState | DataTableFilterExpression
+  controlled?: boolean
+}
+
+export interface DataTableViewSearchOptions extends Omit<DataTableSearchQuery, 'text'> {
+  mode?: DataTableViewMode
   controlled?: boolean
 }
 
@@ -596,6 +666,7 @@ export interface DataTableViewGroupingOptions<Row extends Record<string, any> = 
 export interface DataTableViewOptions {
   sorting?: false | DataTableViewSortingOptions
   filtering?: false | DataTableViewFilteringOptions
+  search?: false | DataTableViewSearchOptions
   rowOrdering?: false | DataTableRowOrderingOptions
   columnOrdering?: false | DataTableColumnOrderingOptions
   filterUi?: false | DataTableFilterUiOptions
@@ -604,7 +675,8 @@ export interface DataTableViewOptions {
 
 export interface DataTableResolvedViewOptions {
   sorting: false | Required<Omit<DataTableViewSortingOptions, 'initial'>> & { initial: DataTableSortState }
-  filtering: false | Required<Omit<DataTableViewFilteringOptions, 'initial'>> & { initial: DataTableFilterState }
+  filtering: false | Required<Omit<DataTableViewFilteringOptions, 'initial'>> & { initial: DataTableFilterState | DataTableFilterExpression }
+  search: false | Required<DataTableViewSearchOptions>
   rowOrdering: false | Required<DataTableRowOrderingOptions>
   columnOrdering: false | Required<DataTableColumnOrderingOptions>
   filterUi: false | Required<DataTableFilterUiOptions>
@@ -616,7 +688,8 @@ export interface DataTableResolvedViewOptions {
 
 export interface DataTableViewState {
   sort: DataTableSortState
-  filters: DataTableFilterState
+  filters: DataTableFilterState | DataTableFilterExpression
+  search: DataTableSearchState
   rowOrder: Array<DataTableRowId>
   columnOrder: Array<string>
   grouping: DataTableGroupingState
@@ -625,6 +698,7 @@ export interface DataTableViewState {
   mode: {
     sorting: DataTableViewMode | 'off'
     filtering: DataTableViewMode | 'off'
+    search: DataTableViewMode | 'off'
     grouping: DataTableViewMode | 'off'
   }
 }
@@ -790,7 +864,8 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
   onSortChange?: (state: DataTableSortState) => void
-  onFilterChange?: (state: DataTableFilterState) => void
+  onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
+  onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
@@ -831,7 +906,8 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
   onSortChange?: (state: DataTableSortState) => void
-  onFilterChange?: (state: DataTableFilterState) => void
+  onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
+  onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
@@ -880,7 +956,16 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   setSort: (sort: DataTableSortState | DataTableSortRule) => void
   clearSort: (columnId?: string) => void
   setFilter: (columnId: string, filter: Omit<DataTableFilterRule, 'columnId'> | DataTableFilterRule) => void
+  setFilters: (filters: DataTableFilterState | DataTableFilterExpression) => void
+  patchFilter: (columnId: string, filter: Omit<DataTableFilterRule, 'columnId'> | DataTableFilterRule) => void
   clearFilter: (columnId?: string) => void
+  clearFilters: (columnId?: string) => void
+  setSearch: (query: string | DataTableSearchQuery) => void
+  clearSearch: () => void
+  findNext: () => DataTableSearchMatch | null
+  findPrevious: () => DataTableSearchMatch | null
+  focusSearchMatch: (index: number) => DataTableSearchMatch | null
+  getSearchState: () => DataTableSearchState
   reorderRows: (payload: DataTableRowReorderPayload) => void
   reorderColumns: (payload: DataTableColumnReorderPayload) => void
   getGroupingState: () => DataTableGroupingState<Row>

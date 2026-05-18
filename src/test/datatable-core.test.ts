@@ -224,6 +224,7 @@ describe('DataTableStore', () => {
       view: {
         sorting: false,
         filtering: false,
+        search: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -253,8 +254,19 @@ describe('DataTableStore', () => {
       ], {}, new Map(), store),
       performance: normalizeDataTablePerformance(undefined),
       view: {
-        sorting: { mode: 'client', multi: true, initial: [], controlled: false },
+        sorting: { mode: 'client', multi: true, headerClick: 'append', initial: [], controlled: false },
         filtering: { mode: 'client', initial: [], controlled: false },
+        search: {
+          mode: 'client',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: [],
+          highlight: 'cell-text',
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -522,8 +534,19 @@ describe('DataTableViewPipeline', () => {
       columns,
       performance: normalizeDataTablePerformance(undefined),
       view: {
-        sorting: { mode: 'client', multi: true, controlled: false, initial: [] },
+        sorting: { mode: 'client', multi: true, headerClick: 'append', controlled: false, initial: [] },
         filtering: { mode: 'client', controlled: false, initial: [] },
+        search: {
+          mode: 'client',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: [],
+          highlight: 'cell-text',
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
         rowOrdering: { enabled: true, mode: 'view', manualLayer: true },
         columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
         filterUi: { headerMenu: false, filterRow: false },
@@ -534,8 +557,9 @@ describe('DataTableViewPipeline', () => {
 
   function createGroupingView(expanded: 'all' | 'none') {
     return {
-      sorting: { mode: 'client' as const, multi: true, controlled: false, initial: [] },
+      sorting: { mode: 'client' as const, multi: true, headerClick: 'append' as const, controlled: false, initial: [] },
       filtering: { mode: 'client' as const, controlled: false, initial: [] },
+      search: false,
       rowOrdering: { enabled: true, mode: 'view' as const, manualLayer: true },
       columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
       filterUi: { headerMenu: false, filterRow: false },
@@ -570,6 +594,100 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
   })
 
+  it('cycles header multi-sort by appending columns and normalizing priorities', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    syncPipeline(pipeline, store)
+
+    pipeline.cycleSort('status', false)
+    pipeline.cycleSort('amount', false)
+    expect(pipeline.getState().sort).toEqual([
+      { columnId: 'status', direction: 'asc', priority: 0 },
+      { columnId: 'amount', direction: 'asc', priority: 1 },
+    ])
+
+    pipeline.cycleSort('status', false)
+    expect(pipeline.getState().sort).toEqual([
+      { columnId: 'amount', direction: 'asc', priority: 0 },
+      { columnId: 'status', direction: 'desc', priority: 1 },
+    ])
+
+    pipeline.cycleSort('status', false)
+    expect(pipeline.getState().sort).toEqual([
+      { columnId: 'amount', direction: 'asc', priority: 0 },
+    ])
+  })
+
+  it('filters rows with nested AND/OR expressions', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    syncPipeline(pipeline, store)
+
+    pipeline.setFilters({
+      logic: 'or',
+      rules: [
+        { columnId: 'name', operator: 'contains', value: 'Zulu' },
+        {
+          logic: 'and',
+          rules: [
+            { columnId: 'status', operator: 'equals', value: 'active' },
+            { columnId: 'amount', operator: 'gte', value: 20 },
+          ],
+        },
+      ],
+    })
+
+    expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-c'])
+    expect(pipeline.getQuery().filters).toMatchObject({ logic: 'or' })
+  })
+
+  it('searches cells, tracks active matches and stays sparse above maxClientRows', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    syncPipeline(pipeline, store)
+
+    pipeline.setSearch({ text: 'a', scope: 'cells', columns: ['name'], match: 'contains', highlight: 'cell-text' })
+    expect(pipeline.getSearchState().matches.map(match => match.rowId)).toEqual(['row-b', 'row-c'])
+    expect(pipeline.findNext()).toMatchObject({ rowId: 'row-c', columnId: 'name' })
+    expect(pipeline.findPrevious()).toMatchObject({ rowId: 'row-b', columnId: 'name' })
+    expect(pipeline.getSearchMatchForCell('row-b', 'name')?.match.ranges[0]).toEqual({ start: 0, end: 1 })
+
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const lazyStore = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: { rowCount: 10_000_000, getRow },
+    })
+    const lazyPipeline = new DataTableViewPipeline<Row>(lazyStore)
+    lazyPipeline.sync({
+      columns: resolveDataTableColumns<Row>([{ id: 'name', field: 'name' }], {}, new Map(), lazyStore),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: false,
+        filtering: false,
+        search: {
+          mode: 'client',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: ['name'],
+          highlight: 'cell-text',
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+      },
+    })
+    lazyPipeline.setSearch('Row')
+    expect(lazyPipeline.rowCount).toBe(10_000_000)
+    expect(lazyPipeline.getSearchState().local).toBe(false)
+    expect(getRow).not.toHaveBeenCalled()
+    expect(lazyPipeline.getQuery().search?.text).toBe('Row')
+  })
+
   it('keeps server mode as identity view while preserving query state', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
@@ -581,8 +699,9 @@ describe('DataTableViewPipeline', () => {
       columns,
       performance: normalizeDataTablePerformance(undefined),
       view: {
-        sorting: { mode: 'server', multi: true, controlled: true, initial: [] },
+        sorting: { mode: 'server', multi: true, headerClick: 'append', controlled: true, initial: [] },
         filtering: { mode: 'server', controlled: true, initial: [] },
+        search: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -592,7 +711,7 @@ describe('DataTableViewPipeline', () => {
     pipeline.setSort({ columnId: 'amount', direction: 'desc' })
 
     expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
-    expect(pipeline.getQuery().sort).toEqual([{ columnId: 'amount', direction: 'desc' }])
+    expect(pipeline.getQuery().sort).toEqual([{ columnId: 'amount', direction: 'desc', priority: 0 }])
     expect(pipeline.isServerControlled()).toBe(true)
   })
 
@@ -637,6 +756,7 @@ describe('DataTableViewPipeline', () => {
       view: {
         sorting: false,
         filtering: false,
+        search: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -677,8 +797,9 @@ describe('DataTableViewPipeline', () => {
       ], {}, new Map(), store),
       performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
       view: {
-        sorting: { mode: 'client', multi: true, controlled: false, initial: [{ columnId: 'amount', direction: 'desc' }] },
+        sorting: { mode: 'client', multi: true, headerClick: 'append', controlled: false, initial: [{ columnId: 'amount', direction: 'desc' }] },
         filtering: { mode: 'client', controlled: false, initial: [{ columnId: 'status', operator: 'equals', value: 'active' }] },
+        search: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -787,6 +908,7 @@ describe('DataTable DSL templates', () => {
       state: {
         rect: { x: 10, y: 20, width: 100, height: 30 },
         rowIndex: 0,
+        viewRowIndex: 0,
         columnIndex: 0,
         selected: false,
         hovered: false,
@@ -798,6 +920,14 @@ describe('DataTable DSL templates', () => {
         columnSelected: false,
         hoverAlpha: 0,
         selectionAlpha: 0,
+        zoom: 1,
+        rowScale: 1,
+        headerScale: 1,
+        columnScale: 1,
+        textScale: 1,
+        iconScale: 1,
+        searchMatched: false,
+        searchActive: false,
       },
       zone: 'body',
       store: createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) }),
@@ -1246,8 +1376,8 @@ describe('DataTable Root runtime', () => {
     root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 40, clientY: 12 }))
     app.raph.run()
 
-    expect(onSortChange).toHaveBeenCalledWith([{ columnId: 'name', direction: 'asc' }])
-    expect(root.getApi().getViewState().sort).toEqual([{ columnId: 'name', direction: 'asc' }])
+    expect(onSortChange).toHaveBeenCalledWith([{ columnId: 'name', direction: 'asc', priority: 0 }])
+    expect(root.getApi().getViewState().sort).toEqual([{ columnId: 'name', direction: 'asc', priority: 0 }])
     const firstNameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowIndex === 0)?.[0]
     expect(firstNameContext.rowId).toBe('row-b')
     expect(firstNameContext.storeIndex).toBe(1)
