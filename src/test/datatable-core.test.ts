@@ -13,8 +13,9 @@ import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
-import { normalizeDataTableScrollbars } from '@/ui/root/datatable-root.config'
+import { normalizeDataTablePerformance, normalizeDataTableScrollbars } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, DataTableScrollbarLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
@@ -89,6 +90,12 @@ function installCanvasMocks(): void {
     } as DOMRect
   })
 }
+
+beforeEach(() => {
+  vi.restoreAllMocks()
+  document.body.innerHTML = ''
+  installCanvasMocks()
+})
 
 function createApp(width = 900, height = 560): NovaApp<TestEvents> {
   const canvas = document.createElement('canvas')
@@ -213,6 +220,7 @@ describe('DataTableStore', () => {
       columns: resolveDataTableColumns([
         { id: 'name', field: 'name', width: 100 },
       ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         sorting: false,
         filtering: false,
@@ -243,6 +251,7 @@ describe('DataTableStore', () => {
       columns: resolveDataTableColumns([
         { id: 'name', field: 'name', width: 100 },
       ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         sorting: { mode: 'client', multi: true, initial: [], controlled: false },
         filtering: { mode: 'client', initial: [], controlled: false },
@@ -269,6 +278,65 @@ describe('DataTableStore', () => {
 
     expect(store.takeRevision()).toBe(initialRevision + 1)
     expect(store.getRow('row-10')?.amount).toBe(500)
+  })
+
+  it('applies delta batches with dirty pages, rows and cells', () => {
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      rows: rows(40),
+      performance: { pageSize: 32 },
+    })
+    const initialRevision = store.takeRevision()
+
+    store.clearDirtyState()
+    store.applyDeltaBatch([
+      { type: 'patch', rowId: 'row-2', patch: { status: 'draft' } },
+      { type: 'setCell', rowId: 'row-2', columnId: 'amount', value: 777 },
+      { type: 'patch', rowId: 'row-34', patch: { name: 'Updated' } },
+    ])
+
+    const dirty = store.getDirtyState()
+    expect(store.getRow('row-2')?.amount).toBe(777)
+    expect(store.getRow('row-34')?.name).toBe('Updated')
+    expect(store.takeRevision()).toBe(initialRevision + 1)
+    expect(dirty.pages).toEqual([0, 1])
+    expect(dirty.rows).toEqual(expect.arrayContaining(['row-2', 'row-34']))
+    expect(dirty.cells).toEqual(expect.arrayContaining([
+      { rowId: 'row-2', columnId: 'status' },
+      { rowId: 'row-2', columnId: 'amount' },
+      { rowId: 'row-34', columnId: 'name' },
+    ]))
+    expect(dirty.structural).toBe(false)
+    expect(dirty.summary).toBe(true)
+  })
+
+  it('moves loaded rows without rebuilding through dense array splices', () => {
+    const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(5) })
+
+    store.move('row-1', 3)
+
+    expect(store.getRowIdAt(0)).toBe('row-0')
+    expect(store.getRowIdAt(1)).toBe('row-2')
+    expect(store.getRowIdAt(2)).toBe('row-3')
+    expect(store.getRowIdAt(3)).toBe('row-1')
+    expect(store.getRowIndex('row-1')).toBe(3)
+    expect(store.getDirtyState().structural).toBe(true)
+  })
+
+  it('supports mixed structural deltas and preserves id/index consistency', () => {
+    const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(4) })
+
+    store.applyDeltaBatch([
+      { type: 'insert', index: 1, rows: [{ id: 'row-x', name: 'X', status: 'active', amount: 1 }] },
+      { type: 'replaceRange', start: 3, rows: [{ id: 'row-r', name: 'R', status: 'draft', amount: 2 }] },
+      { type: 'remove', rowIds: ['row-0'] },
+    ])
+
+    expect(store.rowCount).toBe(4)
+    expect(store.getRowIdAt(0)).toBe('row-x')
+    expect(store.getRowIdAt(2)).toBe('row-r')
+    expect(store.getRowIndex('row-r')).toBe(2)
+    expect(store.getDirtyState().structural).toBe(true)
   })
 })
 
@@ -335,6 +403,7 @@ describe('DataTable layout and columns', () => {
     expect(viewport.centerColumnRange.start).toBeGreaterThan(0)
     expect(viewport.centerColumnRange.end).toBeLessThan(centerColumns.length)
     expect(viewport.centerColumnRange.end - viewport.centerColumnRange.start).toBeLessThan(centerColumns.length)
+    expect(viewport.centerColumnOffset).toBe(viewport.centerColumnRange.start * 100)
   })
 
   it('autosizes default text columns and respects clamps and manual overrides', () => {
@@ -451,12 +520,14 @@ describe('DataTableViewPipeline', () => {
     ], {}, new Map(), store)
     pipeline.sync({
       columns,
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         sorting: { mode: 'client', multi: true, controlled: false, initial: [] },
         filtering: { mode: 'client', controlled: false, initial: [] },
         rowOrdering: { enabled: true, mode: 'view', manualLayer: true },
         columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
         filterUi: { headerMenu: false, filterRow: false },
+        grouping: false,
       },
     })
   }
@@ -508,12 +579,14 @@ describe('DataTableViewPipeline', () => {
 
     pipeline.sync({
       columns,
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         sorting: { mode: 'server', multi: true, controlled: true, initial: [] },
         filtering: { mode: 'server', controlled: true, initial: [] },
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
+        grouping: false,
       },
     })
     pipeline.setSort({ columnId: 'amount', direction: 'desc' })
@@ -533,6 +606,7 @@ describe('DataTableViewPipeline', () => {
 
     pipeline.sync({
       columns,
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         ...createGroupingView('all'),
       },
@@ -550,7 +624,7 @@ describe('DataTableViewPipeline', () => {
     pipeline.collapseGroup('status:active')
     expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['group', 'grand-footer'])
 
-    pipeline.sync({ columns, view: createGroupingView('none') })
+    pipeline.sync({ columns, view: createGroupingView('none'), performance: normalizeDataTablePerformance(undefined) })
     expect(pipeline.getGroupingState().expandedGroups).toEqual([])
   })
 
@@ -559,6 +633,7 @@ describe('DataTableViewPipeline', () => {
     const pipeline = new DataTableViewPipeline<Row>(store)
     pipeline.sync({
       columns: resolveDataTableColumns<Row>([{ id: 'status', field: 'status' }], {}, new Map(), store),
+      performance: normalizeDataTablePerformance(undefined),
       view: {
         sorting: false,
         filtering: false,
@@ -582,6 +657,96 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['data', 'data', 'data'])
     expect(pipeline.getQuery().grouping?.groups[0]?.id).toBe('status')
     expect(pipeline.isServerControlled()).toBe(true)
+  })
+
+  it('guards client sort/filter/grouping above maxClientRows and stays sparse', () => {
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        getRow,
+      },
+    })
+    const pipeline = new DataTableViewPipeline<Row>(store)
+
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([
+        { id: 'amount', field: 'amount', sortable: true },
+        { id: 'status', field: 'status', filter: 'set' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: { mode: 'client', multi: true, controlled: false, initial: [{ columnId: 'amount', direction: 'desc' }] },
+        filtering: { mode: 'client', controlled: false, initial: [{ columnId: 'status', operator: 'equals', value: 'active' }] },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: {
+          enabled: true,
+          mode: 'client',
+          groups: [{ id: 'status', field: 'status' }],
+          expanded: 'all',
+          showGroupRows: true,
+          showGroupFooters: false,
+          showGrandFooter: false,
+          footerPlacement: 'scroll',
+          controlled: false,
+        },
+      },
+    })
+
+    expect(pipeline.rowCount).toBe(10_000_000)
+    expect(getRow).not.toHaveBeenCalled()
+    expect(pipeline.getViewRowAt(5_000)?.storeIndex).toBe(5_000)
+    expect(getRow).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('DataTableSummaryEngine', () => {
+  it('computes numeric summaries and updates them incrementally', () => {
+    const engine = new DataTableSummaryEngine<Row>()
+    const result = engine.compute(rows(4), [
+      { id: 'count', aggregate: 'count' },
+      { id: 'amountSum', field: 'amount', aggregate: 'sum' },
+      { id: 'amountAvg', field: 'amount', aggregate: 'avg' },
+      { id: 'amountMin', field: 'amount', aggregate: 'min' },
+      { id: 'amountMax', field: 'amount', aggregate: 'max' },
+    ])
+
+    expect(result.values).toMatchObject({
+      count: 4,
+      amountSum: 60,
+      amountAvg: 15,
+      amountMin: 0,
+      amountMax: 30,
+    })
+
+    const updated = engine.applyRowChange(
+      { id: 'row-3', name: 'Row 3', status: 'draft', amount: 30 },
+      { id: 'row-3', name: 'Row 3', status: 'draft', amount: 75 },
+      3,
+    )
+    expect(updated.values).toMatchObject({
+      count: 4,
+      amountSum: 105,
+      amountAvg: 26.25,
+      amountMin: 0,
+      amountMax: 75,
+    })
+
+    const removed = engine.applyRowChange(
+      { id: 'row-0', name: 'Row 0', status: 'active', amount: 0 },
+      undefined,
+      0,
+    )
+    expect(removed.values).toMatchObject({
+      count: 3,
+      amountSum: 105,
+      amountAvg: 35,
+      amountMin: 10,
+      amountMax: 75,
+    })
   })
 })
 
@@ -783,12 +948,6 @@ describe('DataTable DSL templates', () => {
 })
 
 describe('DataTable Root runtime', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
-    document.body.innerHTML = ''
-    installCanvasMocks()
-  })
-
   it('mounts root and exposes the public ref API', () => {
     const app = createApp()
     const root = mountRoot(app)
@@ -1236,6 +1395,28 @@ describe('DataTable Root runtime', () => {
       order: ['amount', 'name', 'status'],
     }))
     expect(root.getApi().getViewState().columnOrder).toEqual(['amount', 'name', 'status'])
+
+    app.destroy()
+  })
+
+  it('coalesces public delta batches before the next render turn', async () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const revision = root.store.takeRevision()
+
+    root.getApi().applyDeltas([
+      { type: 'setCell', rowId: 'row-1', columnId: 'amount', value: 900 },
+      { type: 'patch', rowId: 'row-1', patch: { status: 'active' } },
+    ])
+
+    expect(root.store.getRow('row-1')?.amount).toBe(10)
+    await Promise.resolve()
+
+    expect(root.store.getRow('row-1')).toMatchObject({
+      amount: 900,
+      status: 'active',
+    })
+    expect(root.store.takeRevision()).toBe(revision + 1)
 
     app.destroy()
   })

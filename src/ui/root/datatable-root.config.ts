@@ -2,8 +2,10 @@ import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps, normalizeNovaSc
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
+  DataTablePerformanceOptions,
   DataTableScrollbarAxisOptions,
   DataTableResolvedInteractionOptions,
+  DataTableResolvedPerformanceOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
   DataTableResolvedTooltipOptions,
@@ -43,6 +45,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   scrollbars: { type: 'any' },
   tooltip: { type: 'any' },
   zoom: { type: 'any' },
+  performance: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
   tooltipAlpha: { type: 'number' },
@@ -109,6 +112,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     }),
     tooltip: normalizeDataTableTooltip(props.tooltip),
     zoom: normalizeDataTableZoom(props.zoom),
+    performance: normalizeDataTablePerformance(props.performance),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
     tooltipAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).tooltipAlpha, 0),
@@ -133,6 +137,17 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onCellLeave: props.onCellLeave,
     onCellClick: props.onCellClick,
     onSelectionChange: props.onSelectionChange,
+  }
+}
+
+export function normalizeDataTablePerformance(
+  performance: DataTablePerformanceOptions | undefined,
+): DataTableResolvedPerformanceOptions {
+  return {
+    pageSize: Math.max(32, Math.min(8192, Math.floor(finiteNumber(performance?.pageSize, 512)))),
+    maxClientRows: Math.max(1_000, Math.floor(finiteNumber(performance?.maxClientRows, 100_000))),
+    deltaFrameBudgetMs: finiteClamp(performance?.deltaFrameBudgetMs, 1, 32, 6),
+    workerPipeline: performance?.workerPipeline ?? true,
   }
 }
 
@@ -410,6 +425,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'scrollbars',
         'tooltip',
         'zoom',
+        'performance',
       ],
       render: [
         'style',

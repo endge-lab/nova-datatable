@@ -2,6 +2,9 @@ import { bench, describe } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
+import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
+import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import { normalizeDataTablePerformance, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 
 interface BenchRow {
   id: string
@@ -23,6 +26,22 @@ function rows(count: number, start = 0): Array<BenchRow> {
 }
 
 describe('NovaDataTable benchmarks', () => {
+  bench('10M lazy store initialization', () => {
+    const store = createDataTableStore<BenchRow>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        getRow: index => ({
+          id: `row-${index}`,
+          name: `Customer ${index}`,
+          status: index % 3 === 0 ? 'active' : 'draft',
+          amount: index,
+        }),
+      },
+    })
+    store.getRowAt(9_999_999)
+  }, { iterations: 20 })
+
   bench('1M row store indexing', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(1_000_000) })
     store.getRow('row-999999')
@@ -37,6 +56,35 @@ describe('NovaDataTable benchmarks', () => {
       }
     })
   }, { iterations: 8 })
+
+  bench('100k cell patches in one delta batch', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(120_000) })
+    store.applyDeltaBatch(Array.from({ length: 100_000 }, (_item, index) => ({
+      type: 'setCell' as const,
+      rowId: `row-${index}`,
+      columnId: 'amount',
+      value: index * 2,
+    })))
+  }, { iterations: 2 })
+
+  bench('1M coalesced cell patches over 10k loaded rows', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(10_000) })
+    store.applyDeltaBatch(Array.from({ length: 1_000_000 }, (_item, index) => ({
+      type: 'setCell' as const,
+      rowId: `row-${index % 10_000}`,
+      columnId: 'amount',
+      value: index,
+    })))
+  }, { iterations: 1 })
+
+  bench('100k structural insert/remove/move workload', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
+    store.insertMany(rows(1_000, 200_000), 50_000)
+    for (let index = 0; index < 100; index += 1) {
+      store.move(`row-${index}`, 90_000 - index)
+    }
+    store.removeMany(Array.from({ length: 1_000 }, (_item, index) => `row-${index + 1_000}`))
+  }, { iterations: 1 })
 
   bench('visible range calculation for huge logical grid', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(1_000) })
@@ -67,6 +115,57 @@ describe('NovaDataTable benchmarks', () => {
       scrollY: 1_200_000,
     })
   })
+
+  bench('server/lazy query update on 10M rows', () => {
+    const store = createDataTableStore<BenchRow>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        getRow: index => rows(1, index)[0],
+      },
+    })
+    const pipeline = new DataTableViewPipeline(store)
+    const columns = resolveDataTableColumns<BenchRow>([
+      { id: 'status', field: 'status', filter: 'set' },
+      { id: 'amount', field: 'amount', sortable: true },
+    ], {}, new Map(), store)
+
+    pipeline.sync({
+      columns,
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: { mode: 'server' },
+        filtering: { mode: 'server' },
+        grouping: {
+          enabled: true,
+          mode: 'server',
+          groups: [{ id: 'status', field: 'status' }],
+        },
+      }),
+    })
+    pipeline.setSort({ columnId: 'amount', direction: 'desc' })
+    pipeline.setFilter('status', { operator: 'equals', value: 'active' })
+    pipeline.getQuery()
+  })
+
+  bench('grouped summary update after 10k deltas', () => {
+    const engine = new DataTableSummaryEngine<BenchRow>()
+    const source = rows(50_000)
+    engine.compute(source, [
+      { id: 'count', aggregate: 'count' },
+      { id: 'amountSum', field: 'amount', aggregate: 'sum' },
+      { id: 'amountAvg', field: 'amount', aggregate: 'avg' },
+      { id: 'amountMin', field: 'amount', aggregate: 'min' },
+      { id: 'amountMax', field: 'amount', aggregate: 'max' },
+    ])
+    for (let index = 0; index < 10_000; index += 1) {
+      const previous = source[index]!
+      const next = { ...previous, amount: previous.amount + 100 }
+      source[index] = next
+      engine.applyRowChange(previous, next, index)
+    }
+    engine.snapshot()
+  }, { iterations: 4 })
 
   bench('auto-width sampling', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(20_000) })

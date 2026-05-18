@@ -18,10 +18,18 @@ export function createDataTableViewport<Row extends Record<string, any>>(
     scrollY: number
   },
 ): DataTableViewport {
-  const pinnedLeftWidth = sumColumns(input.columns.filter(column => column.pinned === 'left'))
-  const pinnedRightWidth = sumColumns(input.columns.filter(column => column.pinned === 'right'))
-  const centerColumns = input.columns.filter(column => !column.pinned)
-  const contentWidth = sumColumns(centerColumns)
+  let pinnedLeftWidth = 0
+  let pinnedRightWidth = 0
+  let contentWidth = 0
+  const centerColumns: Array<DataTableResolvedColumn<Row>> = []
+  for (const column of input.columns) {
+    if (column.pinned === 'left') pinnedLeftWidth += column.resolvedWidth
+    else if (column.pinned === 'right') pinnedRightWidth += column.resolvedWidth
+    else {
+      centerColumns.push(column)
+      contentWidth += column.resolvedWidth
+    }
+  }
   const pinnedTopHeight = input.pinnedTopCount * input.rowHeight
   const pinnedBottomHeight = input.pinnedBottomCount * input.rowHeight
   const bodyX = pinnedLeftWidth
@@ -33,6 +41,8 @@ export function createDataTableViewport<Row extends Record<string, any>>(
   const maxScrollY = Math.max(0, contentHeight - bodyHeight)
   const scrollX = clamp(input.scrollX, 0, maxScrollX)
   const scrollY = clamp(input.scrollY, 0, maxScrollY)
+
+  const centerRange = resolveColumnRange(scrollX, bodyWidth, centerColumns, input.overscanColumns)
 
   return {
     width: input.width,
@@ -48,7 +58,8 @@ export function createDataTableViewport<Row extends Record<string, any>>(
     maxScrollX,
     maxScrollY,
     rowRange: resolveRowRange(scrollY, bodyHeight, input.rowHeight, input.rowCount, input.overscanRows),
-    centerColumnRange: resolveColumnRange(scrollX, bodyWidth, centerColumns, input.overscanColumns),
+    centerColumnRange: { start: centerRange.start, end: centerRange.end },
+    centerColumnOffset: centerRange.offset,
     pinnedLeftWidth,
     pinnedRightWidth,
   }
@@ -84,32 +95,45 @@ export function resolveColumnRange<Row extends Record<string, any>>(
   viewportWidth: number,
   columns: Array<DataTableResolvedColumn<Row>>,
   overscan: number,
-): DataTableRange {
-  let cursor = 0
-  let start = 0
-  let end = columns.length
+): DataTableRange & { offset: number } {
+  if (columns.length === 0) return { start: 0, end: 0, offset: 0 }
+
+  const prefix = new Array<number>(columns.length + 1)
+  prefix[0] = 0
+  for (let index = 0; index < columns.length; index += 1) {
+    prefix[index + 1] = prefix[index]! + columns[index]!.resolvedWidth
+  }
+
   const viewportStart = scrollX
   const viewportEnd = scrollX + viewportWidth
+  const rawStart = Math.max(0, lowerBound(prefix, viewportStart) - 1)
+  const rawEnd = Math.min(columns.length, upperBound(prefix, viewportEnd))
+  const start = Math.max(0, rawStart - overscan)
+  const end = Math.min(columns.length, rawEnd + overscan)
 
-  for (let index = 0; index < columns.length; index += 1) {
-    const next = cursor + columns[index]!.resolvedWidth
-    if (next >= viewportStart) {
-      start = Math.max(0, index - overscan)
-      break
-    }
-    cursor = next
+  return { start, end, offset: prefix[start] ?? 0 }
+}
+
+function lowerBound(values: Array<number>, target: number): number {
+  let left = 0
+  let right = values.length
+  while (left < right) {
+    const middle = (left + right) >> 1
+    if ((values[middle] ?? 0) < target) left = middle + 1
+    else right = middle
   }
+  return left
+}
 
-  cursor = 0
-  for (let index = 0; index < columns.length; index += 1) {
-    cursor += columns[index]!.resolvedWidth
-    if (cursor > viewportEnd) {
-      end = Math.min(columns.length, index + 1 + overscan)
-      break
-    }
+function upperBound(values: Array<number>, target: number): number {
+  let left = 0
+  let right = values.length
+  while (left < right) {
+    const middle = (left + right) >> 1
+    if ((values[middle] ?? 0) <= target) left = middle + 1
+    else right = middle
   }
-
-  return { start, end }
+  return left
 }
 
 function clamp(value: number, min: number, max: number): number {

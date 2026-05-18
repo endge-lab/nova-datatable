@@ -134,10 +134,50 @@ export interface DataTableQueryState {
 
 export type DataTableRowKey<Row extends Record<string, any>> = keyof Row | ((row: Row, index: number) => DataTableRowId)
 
+export type DataTableDelta<Row extends Record<string, any> = Record<string, any>> =
+  | { type: 'patch'; rowId: DataTableRowId; patch: Partial<Row> }
+  | { type: 'setCell'; rowId: DataTableRowId; columnId: string; value: unknown }
+  | { type: 'insert'; index?: number; rows: Array<Row> }
+  | { type: 'remove'; rowIds: Array<DataTableRowId> }
+  | { type: 'move'; rowId: DataTableRowId; toIndex: number }
+  | { type: 'replaceRange'; start: number; rows: Array<Row> }
+
+export interface DataTableDirtyCell {
+  rowId: DataTableRowId
+  columnId: string
+}
+
+export interface DataTableDirtyState {
+  pages: Array<number>
+  rows: Array<DataTableRowId>
+  cells: Array<DataTableDirtyCell>
+  structural: boolean
+  summary: boolean
+  revision: number
+  dataRevision: number
+  structureRevision: number
+}
+
+export interface DataTablePerformanceOptions {
+  pageSize?: number
+  maxClientRows?: number
+  deltaFrameBudgetMs?: number
+  workerPipeline?: boolean
+}
+
+export interface DataTableResolvedPerformanceOptions {
+  pageSize: number
+  maxClientRows: number
+  deltaFrameBudgetMs: number
+  workerPipeline: boolean
+}
+
 export interface DataTableLazySource<Row extends Record<string, any>> {
   rowCount: number
   getRow?: (index: number) => Row | undefined
   loadRange?: (range: DataTableRange, query?: DataTableQueryState) => Promise<Array<Row> | void> | Array<Row> | void
+  loadSummary?: (query?: DataTableQueryState) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+  subscribe?: (query: DataTableQueryState, emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void) => (() => void) | void
 }
 
 export interface DataTableStoreOptions<Row extends Record<string, any>> {
@@ -145,6 +185,7 @@ export interface DataTableStoreOptions<Row extends Record<string, any>> {
   rows?: Array<Row>
   estimateRowCount?: number
   source?: DataTableLazySource<Row>
+  performance?: DataTablePerformanceOptions
 }
 
 export interface DataTableAutoWidthOptions {
@@ -712,6 +753,7 @@ export interface DataTableViewport {
   maxScrollY: number
   rowRange: DataTableRange
   centerColumnRange: DataTableRange
+  centerColumnOffset: number
   pinnedLeftWidth: number
   pinnedRightWidth: number
 }
@@ -729,6 +771,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<Row>
   zoom?: false | DataTableZoomOptions
+  performance?: DataTablePerformanceOptions
 }
 
 export interface DataTableRootProps<Row extends Record<string, any> = Record<string, any>>
@@ -773,6 +816,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   scrollbars: false | DataTableResolvedScrollbarOptions
   tooltip: false | DataTableResolvedTooltipOptions<Row>
   zoom: false | DataTableResolvedZoomOptions
+  performance: DataTableResolvedPerformanceOptions
   hoverAlpha: number
   selectionAlpha: number
   tooltipAlpha: number
@@ -814,6 +858,8 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   remove: (ids: DataTableRowId | Array<DataTableRowId>) => void
   setRows: (rows: Array<Row>) => void
   replaceRange: (start: number, rows: Array<Row>) => void
+  applyDeltas: (deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void
+  flushDeltas: () => void
   setColumnWidth: (columnId: string, width: number) => boolean
   autosizeColumn: (columnId: string) => boolean
   autosizeColumns: (columnIds?: Array<string>) => void
@@ -862,13 +908,19 @@ export interface DataTableStoreApi<Row extends Record<string, any> = Record<stri
   replaceRange: (start: number, rows: Array<Row>) => void
   insert: (row: Row, index?: number) => void
   insertMany: (rows: Array<Row>, index?: number) => void
+  move: (rowId: DataTableRowId, toIndex: number) => void
   patch: (rowId: DataTableRowId, patch: Partial<Row>) => void
   setCell: (rowId: DataTableRowId, columnId: string, value: unknown) => void
   remove: (rowId: DataTableRowId) => void
   removeMany: (rowIds: Array<DataTableRowId>) => void
+  applyDeltaBatch: (deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void
+  getDirtyState: () => DataTableDirtyState
+  clearDirtyState: () => void
   ensureRange: (range: DataTableRange, query?: DataTableQueryState) => Promise<void>
   batch: (callback: (store: DataTableStoreApi<Row>) => void) => void
   takeRevision: () => number
+  takeDataRevision: () => number
+  takeStructureRevision: () => number
 }
 
 export interface NovaDataTableProps<Row extends Record<string, any> = Record<string, any>>

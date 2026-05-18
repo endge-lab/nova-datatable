@@ -20,7 +20,7 @@ import {
   resolveDataTableColumns,
   resolveDataTableValue,
 } from '@/model/runtime/datatable-columns'
-import { createDataTableViewport, sumColumns } from '@/model/runtime/datatable-layout'
+import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidationScope'
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
@@ -32,6 +32,8 @@ import {
 import type {
   DataTableCellContext,
   DataTableCellRect,
+  DataTableDelta,
+  DataTableDirtyState,
   DataTableGroupNode,
   DataTableGroupTemplateContext,
   DataTableHoverMode,
@@ -133,6 +135,8 @@ export class DataTableRootNode<
   private readonly api: DataTableRootApi<Row>
   private viewPipeline: DataTableViewPipeline<Row>
   private readonly widthOverrides = new Map<string, number>()
+  private readonly columnIndexById = new Map<string, number>()
+  private readonly pendingDeltas: Array<DataTableDelta<Row>> = []
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
   private resizeState: ResizeState<Row> | null = null
@@ -159,6 +163,7 @@ export class DataTableRootNode<
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
   private gestureStartZoomValue = 1
   private gestureActive = false
+  private deltaFlushQueued = false
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
   private readonly handleGestureChange = (event: Event) => this.handleTrackpadGestureChange(event as DataTableGestureEvent)
@@ -188,6 +193,7 @@ export class DataTableRootNode<
     this.store = props.store ?? createDataTableStore<Row>({
       rowKey: props.rowKey ?? ('id' as keyof Row),
       rows: props.rows ?? [],
+      performance: props.performance,
     })
     this.viewPipeline = new DataTableViewPipeline(this.store)
     this.resolvedColumns = this.resolveColumns()
@@ -214,6 +220,8 @@ export class DataTableRootNode<
       remove: ids => this.removeRows(ids),
       setRows: rows => this.setRows(rows),
       replaceRange: (start, rows) => this.replaceRange(start, rows),
+      applyDeltas: deltas => this.applyDeltas(deltas),
+      flushDeltas: () => this.flushDeltas(),
       setColumnWidth: (columnId, width) => this.applyColumnWidth(columnId, width),
       autosizeColumn: columnId => this.autosizeColumn(columnId),
       autosizeColumns: columnIds => this.autosizeColumns(columnIds),
@@ -525,6 +533,7 @@ export class DataTableRootNode<
         scrollbars: this.props.scrollbars,
         tooltip: this.props.tooltip,
         zoom: this.props.zoom,
+        performance: this.props.performance,
       }
     }
 
@@ -629,6 +638,72 @@ export class DataTableRootNode<
   private replaceRange(start: number, rows: Array<Row>): void {
     this.store.replaceRange(start, rows)
     this.refresh(['data', 'layout'])
+  }
+
+  private applyDeltas(deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>): void {
+    const items = Array.isArray(deltas) ? deltas : [deltas]
+    if (items.length === 0) return
+
+    this.pendingDeltas.push(...items)
+    if (this.deltaFlushQueued) return
+
+    this.deltaFlushQueued = true
+    queueMicrotask(() => this.flushDeltasWithinBudget())
+  }
+
+  private flushDeltas(): void {
+    this.deltaFlushQueued = false
+    this.flushDeltaQueue(false)
+  }
+
+  private flushDeltasWithinBudget(): void {
+    this.deltaFlushQueued = false
+    this.flushDeltaQueue(true)
+  }
+
+  private flushDeltaQueue(useBudget: boolean): void {
+    if (this.pendingDeltas.length === 0) {
+      return
+    }
+
+    const startedAt = performance.now()
+    const budget = Math.max(1, this.props.performance.deltaFrameBudgetMs)
+    do {
+      const count = useBudget ? Math.min(this.pendingDeltas.length, 5_000) : this.pendingDeltas.length
+      const deltas = this.pendingDeltas.splice(0, count)
+      this.store.applyDeltaBatch(deltas)
+      const dirty = this.store.getDirtyState()
+      if (dirty.structural) {
+        this.refresh(['data', 'layout', 'view', 'summary'])
+      } else if (this.isDirtyStateVisible(dirty)) {
+        this.refresh(['data', 'summary'])
+      }
+      this.store.clearDirtyState()
+    } while (this.pendingDeltas.length > 0 && (!useBudget || performance.now() - startedAt < budget))
+
+    if (this.pendingDeltas.length > 0 && useBudget) {
+      this.deltaFlushQueued = true
+      setTimeout(() => this.flushDeltasWithinBudget(), 0)
+    }
+  }
+
+  private isDirtyStateVisible(dirty: DataTableDirtyState): boolean {
+    if (dirty.structural) return true
+
+    const pageSize = this.props.performance.pageSize
+    for (const page of dirty.pages) {
+      const start = page * pageSize
+      const end = start + pageSize
+      if (end >= this.viewport.rowRange.start && start <= this.viewport.rowRange.end) return true
+    }
+
+    for (const rowId of dirty.rows) {
+      const rowIndex = this.viewPipeline.findViewIndexByRowId(rowId)
+      if (rowIndex !== undefined && rowIndex >= this.viewport.rowRange.start && rowIndex < this.viewport.rowRange.end) {
+        return true
+      }
+    }
+    return false
   }
 
   private batch(callback: (api: DataTableRootApi<Row>) => void): void {
@@ -765,20 +840,25 @@ export class DataTableRootNode<
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
     const columns = resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
     const scale = this.zoomColumnScale
-    if (scale === 1) return columns
+    const resolved = scale === 1
+      ? columns
+      : columns.map(column => ({
+          ...column,
+          minWidth: Math.max(24, Math.round(column.minWidth * scale)),
+          maxWidth: Math.max(24, Math.round(column.maxWidth * scale)),
+          resolvedWidth: Math.max(24, Math.round(column.resolvedWidth * scale)),
+        }))
 
-    return columns.map(column => ({
-      ...column,
-      minWidth: Math.max(24, Math.round(column.minWidth * scale)),
-      maxWidth: Math.max(24, Math.round(column.maxWidth * scale)),
-      resolvedWidth: Math.max(24, Math.round(column.resolvedWidth * scale)),
-    }))
+    this.columnIndexById.clear()
+    resolved.forEach((column, index) => this.columnIndexById.set(column.id, index))
+    return resolved
   }
 
   private syncViewPipeline(): void {
     this.viewPipeline.sync({
       columns: this.resolvedColumns,
       view: this.props.view,
+      performance: this.props.performance,
     })
   }
 
@@ -1642,19 +1722,19 @@ export class DataTableRootNode<
     if (region === 'all' || region === 'left') {
       let x = 0
       for (const column of left) {
-        rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x, width: column.resolvedWidth })
         x += column.resolvedWidth
       }
     }
 
     if (region === 'all' || region === 'center') {
-      let centerOffset = sumColumns(center.slice(0, this.viewport.centerColumnRange.start))
+      let centerOffset = this.viewport.centerColumnOffset
       for (let index = this.viewport.centerColumnRange.start; index < this.viewport.centerColumnRange.end; index += 1) {
         const column = center[index]
         if (!column) continue
         rects.push({
           column,
-          columnIndex: this.resolvedColumns.indexOf(column),
+          columnIndex: this.columnIndexById.get(column.id) ?? 0,
           x: this.viewport.bodyX + centerOffset - this.scrollX,
           width: column.resolvedWidth,
         })
@@ -1665,7 +1745,7 @@ export class DataTableRootNode<
     if (region === 'all' || region === 'right') {
       let x = this.width - this.viewport.pinnedRightWidth
       for (const column of right) {
-        rects.push({ column, columnIndex: this.resolvedColumns.indexOf(column), x, width: column.resolvedWidth })
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x, width: column.resolvedWidth })
         x += column.resolvedWidth
       }
     }

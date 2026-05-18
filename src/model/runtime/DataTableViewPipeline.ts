@@ -12,6 +12,7 @@ import type {
   DataTableGroupingState,
   DataTableGroupNode,
   DataTableGroupRule,
+  DataTableResolvedPerformanceOptions,
   DataTableQueryState,
   DataTableResolvedColumn,
   DataTableResolvedViewOptions,
@@ -28,6 +29,7 @@ import type {
 interface DataTableViewPipelineInput<Row extends Record<string, any>> {
   columns: Array<DataTableResolvedColumn<Row>>
   view: DataTableResolvedViewOptions
+  performance: DataTableResolvedPerformanceOptions
 }
 
 /**
@@ -47,6 +49,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private groupingGroupsOverride: Array<DataTableGroupRule<Row>> | null = null
   private revision = -1
   private viewSignature = ''
+  private maxClientRows = 100_000
   private expandedInputSignature = ''
   private passthrough = false
   private localSort = false
@@ -70,6 +73,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   sync(input: DataTableViewPipelineInput<Row>): void {
     this.columns = input.columns
     this.view = input.view
+    this.maxClientRows = input.performance.maxClientRows
     if (this.groupingGroupsOverride && this.view.grouping) {
       this.view = {
         ...this.view,
@@ -140,6 +144,11 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       }
     }
     return this.rows[viewIndex]
+  }
+
+  findViewIndexByRowId(rowId: DataTableRowId): number | undefined {
+    if (this.passthrough) return this.store.getRowIndex(rowId)
+    return this.rows.find(row => row.kind === 'data' && row.rowId === rowId)?.viewIndex
   }
 
   getViewRows(): Array<DataTableViewRow<Row>> {
@@ -388,6 +397,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
+    if (this.store.rowCount > this.maxClientRows) return false
     if (mode === 'client') return true
     if (mode === 'server') return false
     return this.store.loadedRowCount >= this.store.rowCount
