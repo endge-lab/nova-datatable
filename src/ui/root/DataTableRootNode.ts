@@ -88,6 +88,7 @@ interface DataTableGestureEvent extends Event {
   clientX?: number
   clientY?: number
   preventDefault: () => void
+  stopPropagation: () => void
 }
 
 interface RenderedRow<Row extends Record<string, any>> {
@@ -158,6 +159,7 @@ export class DataTableRootNode<
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
   private gestureStartZoomValue = 1
   private gestureActive = false
+  private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
   private readonly handleGestureChange = (event: Event) => this.handleTrackpadGestureChange(event as DataTableGestureEvent)
   private readonly handleGestureEnd = (event: Event) => this.handleTrackpadGestureEnd(event as DataTableGestureEvent)
@@ -921,29 +923,52 @@ export class DataTableRootNode<
 
   private setupTrackpadGestureEvents(): void {
     const element = this.canvas.element
-    element.removeEventListener('gesturestart', this.handleGestureStart)
-    element.removeEventListener('gesturechange', this.handleGestureChange)
-    element.removeEventListener('gestureend', this.handleGestureEnd)
-    element.addEventListener('gesturestart', this.handleGestureStart, { passive: false })
-    element.addEventListener('gesturechange', this.handleGestureChange, { passive: false })
-    element.addEventListener('gestureend', this.handleGestureEnd)
+    element.removeEventListener('wheel', this.handleTrackpadWheelCapture, true)
+    element.addEventListener('wheel', this.handleTrackpadWheelCapture, { passive: false, capture: true })
+    this.removeWindowGestureEvents()
+    this.addWindowGestureEvents()
   }
 
   private teardownTrackpadGestureEvents(): void {
     const element = this.canvas.element
-    element.removeEventListener('gesturestart', this.handleGestureStart)
-    element.removeEventListener('gesturechange', this.handleGestureChange)
-    element.removeEventListener('gestureend', this.handleGestureEnd)
+    element.removeEventListener('wheel', this.handleTrackpadWheelCapture, true)
+    this.removeWindowGestureEvents()
     this.gestureActive = false
+  }
+
+  private addWindowGestureEvents(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('gesturestart', this.handleGestureStart, { passive: false, capture: true })
+    window.addEventListener('gesturechange', this.handleGestureChange, { passive: false, capture: true })
+    window.addEventListener('gestureend', this.handleGestureEnd, true)
+  }
+
+  private removeWindowGestureEvents(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('gesturestart', this.handleGestureStart, true)
+    window.removeEventListener('gesturechange', this.handleGestureChange, true)
+    window.removeEventListener('gestureend', this.handleGestureEnd, true)
+  }
+
+  private handleTrackpadWheelCaptureEvent(event: WheelEvent): void {
+    const zoom = this.props.zoom
+    if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !this.isTrackpadPinchWheel(event, zoom.wheel)) return
+    if (!this.trackGesturePointerPosition(event)) return
+    const nextValue = zoom.value * Math.exp(-event.deltaY * zoom.wheel.step * 0.04)
+    this.applyZoomValue(nextValue)
+    event.preventDefault()
+    event.stopPropagation()
+    event.cancelBubble = true
   }
 
   private handleTrackpadGestureStart(event: DataTableGestureEvent): void {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !zoom.wheel.pinch) return
+    if (!this.trackGesturePointerPosition(event)) return
     this.gestureStartZoomValue = zoom.value
     this.gestureActive = true
-    this.trackGesturePointerPosition(event)
     event.preventDefault()
+    event.stopPropagation()
     event.cancelBubble = true
   }
 
@@ -954,6 +979,7 @@ export class DataTableRootNode<
     this.trackGesturePointerPosition(event)
     this.applyZoomValue(this.gestureStartZoomValue * scale)
     event.preventDefault()
+    event.stopPropagation()
     event.cancelBubble = true
   }
 
@@ -961,6 +987,7 @@ export class DataTableRootNode<
     if (!this.gestureActive) return
     this.gestureActive = false
     event.preventDefault()
+    event.stopPropagation()
     event.cancelBubble = true
   }
 
@@ -987,13 +1014,19 @@ export class DataTableRootNode<
     return false
   }
 
-  private trackGesturePointerPosition(event: DataTableGestureEvent): void {
-    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return
+  private trackGesturePointerPosition(event: DataTableGestureEvent): boolean {
+    if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return this.pointerInside
     const rect = this.canvas.element.getBoundingClientRect()
     const x = (event.clientX ?? rect.left + rect.width / 2) - rect.left
     const y = (event.clientY ?? rect.top + rect.height / 2) - rect.top
     const position = this.toLocal(x, y)
+    if (!this.isLocalPointInsideRoot(position[0], position[1])) return false
     this.lastPointerPosition = { x: position[0], y: position[1] }
+    return true
+  }
+
+  private isLocalPointInsideRoot(x: number, y: number): boolean {
+    return x >= 0 && x <= this.width && y >= 0 && y <= this.height
   }
 
   private setupTooltipKeyboardEvents(): void {
