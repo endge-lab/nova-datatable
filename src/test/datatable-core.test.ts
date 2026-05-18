@@ -198,6 +198,36 @@ describe('DataTableStore', () => {
     expect(loadRange).toHaveBeenCalledWith({ start: 0, end: 5 }, query)
   })
 
+  it('keeps plain lazy views sparse for huge row counts', () => {
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 1_000_000,
+        getRow,
+      },
+    })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns([
+        { id: 'name', field: 'name', width: 100 },
+      ], {}, new Map(), store),
+      view: {
+        sorting: false,
+        filtering: false,
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+      },
+    })
+
+    expect(pipeline.rowCount).toBe(1_000_000)
+    expect(getRow).not.toHaveBeenCalled()
+    expect(pipeline.getViewRowAt(120)?.row?.id).toBe('row-120')
+    expect(getRow).toHaveBeenCalledTimes(1)
+  })
+
   it('coalesces transaction revisions', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) })
     const initialRevision = store.takeRevision()
@@ -607,6 +637,25 @@ describe('DataTable Root runtime', () => {
     expect(api.getViewport().scrollY).toBeGreaterThan(0)
     expect(api.data().at(-1)?.status).toBe('draft')
 
+    app.destroy()
+  })
+
+  it('does not clear an external lazy store when rows prop is empty', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 1_000_000,
+        loadRange: range => rows(range.end - range.start, range.start),
+      },
+    })
+
+    root.setProps({ store, rows: [] } as never)
+    app.raph.run()
+
+    expect(store.rowCount).toBe(1_000_000)
+    expect(root.getApi().getViewState().rowCount).toBe(1_000_000)
     app.destroy()
   })
 

@@ -96,10 +96,10 @@ export class DataTableRootNode<
   > {
   readonly invalidation = new DataTableInvalidationScope()
   readonly actions = new DataTableRuntimeActions<Row>(this)
-  readonly store: DataTableStoreApi<Row>
+  store: DataTableStoreApi<Row>
 
   private readonly api: DataTableRootApi<Row>
-  private readonly viewPipeline: DataTableViewPipeline<Row>
+  private viewPipeline: DataTableViewPipeline<Row>
   private readonly widthOverrides = new Map<string, number>()
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
@@ -273,7 +273,15 @@ export class DataTableRootNode<
   protected override onPropsChanged(changedKeys: Array<keyof DataTableRootResolvedProps<Row>>): void {
     this.props = normalizeDataTableRootProps(this.props)
     this.applyCommonPropsChanged(changedKeys)
-    if (changedKeys.includes('rows') && this.props.rows) this.store.setRows(this.props.rows)
+    if (changedKeys.includes('store') && this.props.store && this.props.store !== this.store) {
+      this.store = this.props.store
+      this.viewPipeline = new DataTableViewPipeline(this.store)
+      this.scrollX = 0
+      this.scrollY = 0
+      this.hoverTarget = null
+      this.selection = null
+    }
+    if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
   }
 

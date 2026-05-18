@@ -147,7 +147,7 @@ const dataTableRoot = Nova.ref<NovaDataTableRef<BaseRow>>('dataTableRoot')
 const plugins: Array<NovaSchemaPlugin> = [registerNovaUIKit, registerNovaDataTable]
 
 const compiledDsl = computed(() => compileDataTableDslNodes<BaseRow>(slots.default?.() ?? []))
-const rootRows = computed(() => props.rows ?? props.data ?? [])
+const rootRows = computed(() => (props.store ? undefined : props.rows ?? props.data ?? []))
 const rootColumns = computed(() => [
   ...(props.columns ?? []),
   ...compiledDsl.value.columns,
