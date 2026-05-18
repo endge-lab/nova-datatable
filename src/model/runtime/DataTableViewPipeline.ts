@@ -358,7 +358,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.localGrouping = !!(this.view.grouping && this.view.grouping.enabled && this.view.grouping.groups.length > 0)
       && this.shouldApplyLocal(this.view.grouping.mode)
 
-    const needsMaterializedRows = this.localSort || this.localFilter || this.localGrouping || this.rowOrder.length > 0
+    const needsMaterializedRows = (this.localSort && this.sort.length > 0)
+      || (this.localFilter && this.filters.length > 0)
+      || this.localGrouping
+      || this.rowOrder.length > 0
     if (!needsMaterializedRows) {
       this.passthrough = true
       this.groupNodes.clear()

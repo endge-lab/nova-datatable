@@ -228,6 +228,34 @@ describe('DataTableStore', () => {
     expect(getRow).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps inactive client sort and filters sparse for lazy views', () => {
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 1_000_000,
+        getRow,
+      },
+    })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns([
+        { id: 'name', field: 'name', width: 100 },
+      ], {}, new Map(), store),
+      view: {
+        sorting: { mode: 'client', multi: true, initial: [], controlled: false },
+        filtering: { mode: 'client', initial: [], controlled: false },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+      },
+    })
+
+    expect(pipeline.rowCount).toBe(1_000_000)
+    expect(getRow).not.toHaveBeenCalled()
+  })
+
   it('coalesces transaction revisions', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) })
     const initialRevision = store.takeRevision()
@@ -750,6 +778,48 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('keeps hover target synchronized with vertical and horizontal scroll', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      interaction: { motion: false },
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', resizable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 120 },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120 },
+        { id: 'extraA', title: 'Extra A', field: 'name', width: 160 },
+        { id: 'extraB', title: 'Extra B', field: 'status', width: 160 },
+        { id: 'actions', title: 'Actions', field: 'name', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 220, clientY: 122 }))
+    app.raph.run()
+
+    expect(root.getApi().getInteraction().hover?.rowId).toBe('row-1')
+    expect(root.getApi().getInteraction().hover?.rect).toMatchObject({
+      x: 180,
+      y: 112,
+      width: 120,
+      height: 36,
+    })
+
+    root.getApi().scrollTo(40, 72)
+    app.raph.run()
+
+    expect(root.getApi().getInteraction().hover?.rowId).toBe('row-3')
+    expect(root.getApi().getInteraction().hover?.column.id).toBe('status')
+    expect(root.getApi().getInteraction().hover?.rect).toMatchObject({
+      x: 140,
+      y: 112,
+      width: 120,
+      height: 36,
+    })
+
+    app.destroy()
+  })
+
   it('does not schedule cell enter fade in sync scheduler mode', () => {
     const app = createApp()
     const root = mountRoot(app)
@@ -937,6 +1007,67 @@ describe('DataTable Root runtime', () => {
     expect(onGroupToggle).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'status:active' }))
     expect(onGroupingChange).toHaveBeenCalled()
     expect(root.getApi().getViewState().grouping.expandedGroups).not.toContain('status:active')
+
+    app.destroy()
+  })
+
+  it('treats grouped rows as full-row interaction targets', () => {
+    const app = createApp()
+    const surface = app.createSurface('datatable-group-hover-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 520, height: 220 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(6),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            interaction: { motion: false },
+            columns: [
+              { id: 'name', field: 'name', width: 160 },
+              { id: 'status', field: 'status', width: 120 },
+            ],
+            view: {
+              grouping: {
+                enabled: true,
+                mode: 'client',
+                groups: [{ id: 'status', field: 'status', title: 'Status' }],
+                expanded: 'none',
+                showGroupRows: true,
+              },
+            },
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+    if (canvasContextStub) canvasContextStub.__sets = []
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 210, clientY: 36 }))
+    app.raph.run()
+
+    const hover = root.getApi().getInteraction().hover
+    expect(hover?.zone).toBe('group')
+    expect(hover?.rowId).toBe('status:active')
+    expect(hover?.rect).toMatchObject({
+      x: 0,
+      y: 30,
+      width: 520,
+      height: 20,
+    })
+    const styleSets = canvasContextStub?.__sets as Array<[PropertyKey, unknown]>
+    expect(styleSets).toContainEqual(['fillStyle', 'rgba(37, 99, 235, 0.08)'])
+    expect(styleSets).not.toContainEqual(['fillStyle', 'rgba(14, 165, 233, 0.07)'])
+    expect(styleSets).not.toContainEqual(['fillStyle', 'rgba(250, 204, 21, 0.16)'])
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 210, clientY: 36 }))
+    expect(root.getApi().getInteraction().selection).toBeNull()
 
     app.destroy()
   })

@@ -116,6 +116,7 @@ export class DataTableRootNode<
   private visibleAnimatedCells = false
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
+  private lastPointerPosition: { x: number; y: number } | null = null
 
   scrollX = 0
   scrollY = 0
@@ -296,6 +297,7 @@ export class DataTableRootNode<
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
     if (delta > this.props.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
+    this.syncHoverAfterViewportChange()
     this.refresh(['viewport'])
   }
 
@@ -588,6 +590,7 @@ export class DataTableRootNode<
 
   private setupEvents(): void {
     this.on('wheel', event => {
+      this.lastPointerPosition = this.toLocalPointerPosition(event)
       const nextX = this.scrollX + event.deltaX + (event.shiftKey ? event.deltaY : 0)
       const nextY = this.scrollY + (event.shiftKey ? 0 : event.deltaY)
       this.setScroll(nextX, nextY)
@@ -597,17 +600,18 @@ export class DataTableRootNode<
 
     this.on('mousemove', event => {
       if (this.resizeState) return
-      const [x, y] = this.toLocalPosition(event)
+      const [x, y] = this.trackPointerPosition(event)
       const nextHover = this.resolveInteractionTargetAt(x, y)
       this.updateHover(nextHover)
     })
 
     this.on('mouseleave', () => {
+      this.lastPointerPosition = null
       this.clearHover()
     })
 
     this.on('mousedown', event => {
-      const [x, y] = this.toLocalPosition(event)
+      const [x, y] = this.trackPointerPosition(event)
       const resizeColumn = this.hitResizeHandle(x, y)
       if (resizeColumn) {
         this.resizeState = {
@@ -1013,9 +1017,10 @@ export class DataTableRootNode<
     const selection = this.selectionActive ? this.selection : null
     const viewState = this.viewPipeline.getState()
     const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
-    const hovered = !!hover && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
-    const rowHovered = !!hover && hover.zone === zone && hover.rowId === rowId
-    const columnHovered = !!hover && hover.column.id === columnRect.column.id
+    const hoverAffectsCells = !!hover && !isGroupInteractionZone(hover.zone)
+    const hovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
+    const rowHovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId
+    const columnHovered = hoverAffectsCells && hover.column.id === columnRect.column.id
     const selected = !!selection
       && selection.mode === 'cell'
       && selection.rowId === rowId
@@ -1303,6 +1308,12 @@ export class DataTableRootNode<
 
     const alpha = this.props.hoverAlpha
     const schema: NovaSchema = []
+    if (isGroupInteractionZone(hover.zone)) {
+      schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
+      if (schema.length > 0) this.renderer.schema(schema)
+      return
+    }
+
     if (modeHasRow(options.mode)) {
       schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
     }
@@ -1341,7 +1352,9 @@ export class DataTableRootNode<
 
     const state = this.getInteractionState()
     const hoverRects = this.hoverTarget
-      ? [...this.createRowRects(this.hoverTarget, true), this.hoverTarget.rect]
+      ? isGroupInteractionZone(this.hoverTarget.zone)
+        ? this.createRowRects(this.hoverTarget, true)
+        : [...this.createRowRects(this.hoverTarget, true), this.hoverTarget.rect]
       : []
     const schema = template({
       hover: state.hover,
@@ -1453,7 +1466,13 @@ export class DataTableRootNode<
 
   private updateHover(target: DataTableInteractionTarget<Row> | null): void {
     const previous = this.hoverActive ? this.hoverTarget : null
-    if (sameInteractionTarget(previous, target)) return
+    if (sameInteractionTarget(previous, target)) {
+      if (previous && target && !sameInteractionGeometry(previous, target)) {
+        this.hoverTarget = target
+        this.refresh(['interaction'])
+      }
+      return
+    }
 
     if (previous) {
       const previousContext = this.createCellContext(previous)
@@ -1474,6 +1493,18 @@ export class DataTableRootNode<
 
   private clearHover(): void {
     this.updateHover(null)
+  }
+
+  /**
+   * Обновляет hover target после изменения viewport без ожидания нового mousemove.
+   */
+  private syncHoverAfterViewportChange(): void {
+    if (!this.hoverActive || !this.lastPointerPosition) return
+
+    this.updateHover(this.resolveInteractionTargetAt(
+      this.lastPointerPosition.x,
+      this.lastPointerPosition.y,
+    ))
   }
 
   private updateSelection(target: DataTableInteractionTarget<Row>): void {
@@ -1549,6 +1580,19 @@ export class DataTableRootNode<
 
     const rowTarget = this.resolveRowAt(y)
     if (!rowTarget) return null
+
+    if (isGroupInteractionZone(rowTarget.zone)) {
+      return {
+        row: rowTarget.row,
+        rowId: rowTarget.rowId,
+        rowIndex: rowTarget.rowIndex,
+        storeIndex: rowTarget.storeIndex,
+        column: columnRect.column,
+        columnIndex: columnRect.columnIndex,
+        rect: rowTarget.rect,
+        zone: rowTarget.zone,
+      }
+    }
 
     const rect: DataTableCellRect = {
       x: columnRect.x,
@@ -1706,7 +1750,7 @@ export class DataTableRootNode<
   }
 
   private createCellContext(target: DataTableInteractionTarget<Row>): DataTableCellContext<Row> | null {
-    if (!target.row || target.rowId === undefined) return null
+    if (isGroupInteractionZone(target.zone) || !target.row || target.rowId === undefined) return null
     return {
       row: target.row,
       rowId: target.rowId,
@@ -1729,7 +1773,19 @@ export class DataTableRootNode<
     }
   }
 
-  private toLocalPosition(event: MouseEvent): [number, number] {
+  /**
+   * Запоминает последнюю локальную позицию pointer для синхронизации hover при scroll.
+   */
+  private trackPointerPosition(event: MouseEvent): [number, number] {
+    const position = this.toLocalPointerPosition(event)
+    this.lastPointerPosition = { x: position[0], y: position[1] }
+    return position
+  }
+
+  /**
+   * Переводит pointer event в локальные координаты root node.
+   */
+  private toLocalPointerPosition(event: MouseEvent): [number, number] {
     const position = this.events.getCanvasMousePosition(event)
     return this.toLocal(position.x, position.y)
   }
@@ -1818,9 +1874,26 @@ function sameInteractionTarget<Row extends Record<string, any>>(
 ): boolean {
   if (left === right) return true
   if (!left || !right) return false
-  return left.rowId === right.rowId
-    && left.column.id === right.column.id
-    && left.zone === right.zone
+  if (isGroupInteractionZone(left.zone) || isGroupInteractionZone(right.zone)) {
+    return left.rowId === right.rowId && left.zone === right.zone
+  }
+  return left.rowId === right.rowId && left.column.id === right.column.id && left.zone === right.zone
+}
+
+function sameInteractionGeometry<Row extends Record<string, any>>(
+  left: DataTableInteractionTarget<Row>,
+  right: DataTableInteractionTarget<Row>,
+): boolean {
+  return left.rowIndex === right.rowIndex
+    && left.storeIndex === right.storeIndex
+    && left.rect.x === right.rect.x
+    && left.rect.y === right.rect.y
+    && left.rect.width === right.rect.width
+    && left.rect.height === right.rect.height
+}
+
+function isGroupInteractionZone(zone: DataTableCellContext['zone']): boolean {
+  return zone === 'group' || zone === 'group-footer' || zone === 'grand-footer'
 }
 
 function modeHasRow(mode: DataTableHoverMode): boolean {
