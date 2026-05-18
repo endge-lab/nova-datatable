@@ -24,6 +24,8 @@ import {
 import type {
   DataTableCellContext,
   DataTableCellRect,
+  DataTableGroupNode,
+  DataTableGroupTemplateContext,
   DataTableHoverMode,
   DataTableInteractionState,
   DataTableInteractionTarget,
@@ -38,6 +40,7 @@ import type {
   DataTableSelectionState,
   DataTableStoreApi,
   DataTableViewport,
+  DataTableViewRow,
   DataTableViewState,
 } from '@/model/types/datatable.types'
 
@@ -57,12 +60,26 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
 
 interface RenderedRow<Row extends Record<string, any>> {
+  kind: 'data'
   row: Row
   rowId: DataTableRowId
   rowIndex: number
   storeIndex?: number
   zone: DataTableCellContext<Row>['zone']
 }
+
+interface RenderedGroupRow<Row extends Record<string, any>> {
+  kind: 'group' | 'group-footer' | 'grand-footer'
+  rowId: DataTableRowId
+  rowIndex: number
+  storeIndex?: number
+  zone: DataTableCellContext<Row>['zone']
+  group?: DataTableGroupNode<Row>
+  aggregate: Record<string, unknown>
+  rows: Array<Row>
+}
+
+type RenderedTableRow<Row extends Record<string, any>> = RenderedRow<Row> | RenderedGroupRow<Row>
 
 /**
  * Корневой Nova-node таблицы, который владеет store, viewport, column widths и render pass.
@@ -154,6 +171,14 @@ export class DataTableRootNode<
       clearFilter: columnId => this.clearFilter(columnId),
       reorderRows: payload => this.reorderRows(payload),
       reorderColumns: payload => this.reorderColumns(payload),
+      getGroupingState: () => this.viewPipeline.getGroupingState(),
+      setGrouping: groups => this.setGrouping(groups),
+      clearGrouping: () => this.clearGrouping(),
+      toggleGroup: groupId => this.toggleGroup(groupId),
+      expandGroup: groupId => this.expandGroup(groupId),
+      collapseGroup: groupId => this.collapseGroup(groupId),
+      expandAllGroups: () => this.expandAllGroups(),
+      collapseAllGroups: () => this.collapseAllGroups(),
       resetView: () => this.resetView(),
       setChildren: children => this.setChildren(children),
     }
@@ -448,6 +473,51 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  private setGrouping(groups: Parameters<DataTableRootApi<Row>['setGrouping']>[0]): void {
+    this.viewPipeline.setGrouping(groups)
+    this.emitViewQuery('grouping')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private clearGrouping(): void {
+    this.viewPipeline.clearGrouping()
+    this.emitViewQuery('grouping')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  private toggleGroup(groupId: string): void {
+    const group = this.viewPipeline.toggleGroup(groupId)
+    if (group) this.props.onGroupToggle?.(group)
+    this.emitViewQuery('grouping')
+    this.refresh(['data', 'layout'])
+  }
+
+  private expandGroup(groupId: string): void {
+    this.viewPipeline.expandGroup(groupId)
+    this.emitViewQuery('grouping')
+    this.refresh(['data', 'layout'])
+  }
+
+  private collapseGroup(groupId: string): void {
+    this.viewPipeline.collapseGroup(groupId)
+    this.emitViewQuery('grouping')
+    this.refresh(['data', 'layout'])
+  }
+
+  private expandAllGroups(): void {
+    this.viewPipeline.expandAllGroups()
+    this.emitViewQuery('grouping')
+    this.refresh(['data', 'layout'])
+  }
+
+  private collapseAllGroups(): void {
+    this.viewPipeline.collapseAllGroups()
+    this.emitViewQuery('grouping')
+    this.refresh(['data', 'layout'])
+  }
+
   private resetView(): void {
     this.viewPipeline.reset()
     this.emitViewQuery('all')
@@ -455,10 +525,11 @@ export class DataTableRootNode<
     this.refresh(['data', 'columns', 'layout'])
   }
 
-  private emitViewQuery(kind: 'sort' | 'filter' | 'row' | 'column' | 'all'): void {
+  private emitViewQuery(kind: 'sort' | 'filter' | 'row' | 'column' | 'grouping' | 'all'): void {
     const state = this.viewPipeline.getState()
     if (kind === 'sort' || kind === 'all') this.props.onSortChange?.(state.sort)
     if (kind === 'filter' || kind === 'all') this.props.onFilterChange?.(state.filters)
+    if (kind === 'grouping' || kind === 'all') this.props.onGroupingChange?.(state.grouping)
     this.props.onQueryChange?.(state.query)
   }
 
@@ -544,6 +615,11 @@ export class DataTableRootNode<
           event.cancelBubble = true
           return
         }
+        if (target.zone === 'group' && typeof target.rowId === 'string') {
+          this.toggleGroup(target.rowId)
+          event.cancelBubble = true
+          return
+        }
         this.updateSelection(target)
         const context = this.createCellContext(target)
         if (context) this.props.onCellClick?.(context)
@@ -598,6 +674,7 @@ export class DataTableRootNode<
       )
     }
 
+    this.renderPinnedBottomGroupPanel()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
     this.renderScrollbars()
@@ -606,7 +683,7 @@ export class DataTableRootNode<
 
   private renderPartitionedRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row> | Array<RenderedRow<Row>>,
+    rows: Array<Row> | Array<RenderedTableRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -663,26 +740,58 @@ export class DataTableRootNode<
   }
 
   private renderBodyRows(): void {
-    const rows: Array<RenderedRow<Row>> = []
+    const rows: Array<RenderedTableRow<Row>> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
-      const row = this.viewPipeline.getRowAt(rowIndex)
-      if (!row) continue
-      rows.push({
-        row,
-        rowId: this.viewPipeline.getRowIdAt(rowIndex) ?? this.resolveRenderedRowId('body', row, rowIndex),
-        rowIndex,
-        storeIndex: this.viewPipeline.getStoreIndexAt(rowIndex),
-        zone: 'body',
-      })
+      const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
+      if (!viewRow) continue
+      const renderedRow = this.createRenderedBodyRow(viewRow, rowIndex)
+      if (renderedRow) rows.push(renderedRow)
     }
     if (rows.length === 0) return
 
     this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.props.rowHeight, true)
   }
 
+  private createRenderedBodyRow(viewRow: DataTableViewRow<Row>, rowIndex: number): RenderedTableRow<Row> | null {
+    if (viewRow.kind === 'data') {
+      if (!viewRow.row) return null
+      return {
+        kind: 'data',
+        row: viewRow.row,
+        rowId: viewRow.rowId ?? this.resolveRenderedRowId('body', viewRow.row, rowIndex),
+        rowIndex,
+        storeIndex: viewRow.storeIndex,
+        zone: 'body',
+      }
+    }
+
+    if (viewRow.kind === 'grand-footer') {
+      return {
+        kind: 'grand-footer',
+        rowId: viewRow.rowId,
+        rowIndex,
+        storeIndex: viewRow.storeIndex,
+        zone: 'grand-footer',
+        aggregate: viewRow.aggregate,
+        rows: viewRow.rows,
+      }
+    }
+
+    return {
+      kind: viewRow.kind,
+      rowId: viewRow.rowId,
+      rowIndex,
+      storeIndex: viewRow.storeIndex,
+      zone: viewRow.kind,
+      group: viewRow.group,
+      aggregate: viewRow.group.aggregate,
+      rows: viewRow.group.rows,
+    }
+  }
+
   private renderClippedRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row> | Array<RenderedRow<Row>>,
+    rows: Array<Row> | Array<RenderedTableRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -701,7 +810,7 @@ export class DataTableRootNode<
 
   private renderRowZone(
     zone: DataTableCellContext<Row>['zone'],
-    rows: Array<Row> | Array<RenderedRow<Row>>,
+    rows: Array<Row> | Array<RenderedTableRow<Row>>,
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
@@ -712,11 +821,17 @@ export class DataTableRootNode<
 
     rows.forEach((rowInput, localIndex) => {
       const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
-      const { row, rowId, rowIndex, storeIndex } = renderedRow
+      const { rowIndex, storeIndex } = renderedRow
       const y = zone === 'body'
         ? this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY
         : yStart + localIndex * rowHeight
 
+      if (renderedRow.kind !== 'data') {
+        this.renderGroupLikeRow(schema, renderedRow, y, rowHeight, columnRegion)
+        return
+      }
+
+      const { row, rowId } = renderedRow
       for (const columnRect of columnRects) {
         const rect: DataTableCellRect = {
           x: columnRect.x,
@@ -749,10 +864,10 @@ export class DataTableRootNode<
 
   private normalizeRenderedRow(
     zone: DataTableCellContext<Row>['zone'],
-    rowInput: Row | RenderedRow<Row>,
+    rowInput: Row | RenderedTableRow<Row>,
     localIndex: number,
     useBodyIndex: boolean,
-  ): RenderedRow<Row> {
+  ): RenderedTableRow<Row> {
     if (isRenderedRow(rowInput)) return rowInput
 
     const rowIndex = zone === 'body' && useBodyIndex
@@ -762,12 +877,115 @@ export class DataTableRootNode<
       ? '__header__'
       : this.resolveRenderedRowId(zone, rowInput, rowIndex)
     return {
+      kind: 'data',
       row: rowInput,
       rowId,
       rowIndex,
       storeIndex: rowIndex,
       zone,
     }
+  }
+
+  private renderGroupLikeRow(
+    schema: NovaSchema,
+    row: RenderedGroupRow<Row>,
+    y: number,
+    height: number,
+    columnRegion: VisibleColumnRegion,
+  ): void {
+    const rect = this.createRegionRect(columnRegion, y, height)
+    if (!rect) return
+
+    const template = row.kind === 'group'
+      ? this.props.groupRowTemplate
+      : row.kind === 'group-footer'
+        ? this.props.groupFooterTemplate
+        : this.props.grandFooterTemplate
+
+    if (template) {
+      schema.push(...template(this.createGroupTemplateContext(row, rect, false)))
+      return
+    }
+
+    if (row.kind === 'grand-footer') return
+    schema.push(...this.renderDefaultGroupRow(row, rect))
+  }
+
+  private createRegionRect(columnRegion: VisibleColumnRegion, y: number, height: number): DataTableCellRect | null {
+    if (columnRegion === 'left') {
+      if (this.viewport.pinnedLeftWidth <= 0) return null
+      return { x: 0, y, width: this.viewport.pinnedLeftWidth, height }
+    }
+    if (columnRegion === 'right') {
+      if (this.viewport.pinnedRightWidth <= 0) return null
+      return { x: this.width - this.viewport.pinnedRightWidth, y, width: this.viewport.pinnedRightWidth, height }
+    }
+    return { x: this.viewport.bodyX, y, width: this.viewport.bodyWidth, height }
+  }
+
+  private createGroupTemplateContext(
+    row: RenderedGroupRow<Row>,
+    rect: DataTableCellRect,
+    pinned: boolean,
+  ): DataTableGroupTemplateContext<Row> {
+    return {
+      group: row.group,
+      aggregate: row.aggregate,
+      rows: row.rows,
+      viewport: this.viewport,
+      rect,
+      zone: pinned ? 'pinned-bottom' : row.zone as DataTableGroupTemplateContext<Row>['zone'],
+      state: {
+        expanded: row.group?.expanded ?? true,
+        hovered: this.hoverActive && this.hoverTarget?.rowId === row.rowId,
+        pinned,
+      },
+      toggle: () => {
+        if (row.group) this.toggleGroup(row.group.groupId)
+      },
+      api: this.api,
+    }
+  }
+
+  private renderDefaultGroupRow(row: RenderedGroupRow<Row>, rect: DataTableCellRect): NovaSchema {
+    const group = row.group
+    const depthOffset = (group?.depth ?? 0) * 14
+    const isFooter = row.kind === 'group-footer'
+    const label = group
+      ? `${isFooter ? 'Total' : group.title}: ${group.label} · ${group.count}`
+      : `Total · ${row.rows.length}`
+    return [
+      {
+        type: 'rect',
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        styles: {
+          background: isFooter ? '#f8fafc' : '#eef3f8',
+          border: { color: '#d8e0ea', width: 1 },
+        },
+      },
+      {
+        type: 'text',
+        text: `${group && !isFooter ? group.expanded ? '▾ ' : '▸ ' : ''}${label}`,
+        x: rect.x + 10 + depthOffset,
+        y: rect.y,
+        width: Math.max(0, rect.width - 20 - depthOffset),
+        height: rect.height,
+        styles: {
+          color: '#172033',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: this.props.fontSize ?? 13,
+            weight: isFooter ? '700' : '800',
+          },
+          lineHeight: this.props.lineHeight ?? 18,
+          align: { horizontal: 'left', vertical: 'middle' },
+          ellipsis: true,
+        },
+      },
+    ]
   }
 
   private createCellState(
@@ -1002,6 +1220,38 @@ export class DataTableRootNode<
     this.renderSelectionOverlay()
   }
 
+  private renderPinnedBottomGroupPanel(): void {
+    const template = this.props.pinnedBottomTemplate
+    const grouping = this.props.view.grouping
+    if (!template || !grouping || !grouping.enabled) return
+    if (grouping.footerPlacement !== 'pinned-bottom' && grouping.footerPlacement !== 'both') return
+
+    const rows = this.store.getRows()
+    const rect = {
+      x: this.viewport.bodyX,
+      y: Math.max(this.viewport.bodyY, this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.props.rowHeight - 124),
+      width: this.viewport.bodyWidth,
+      height: 112,
+    }
+    if (rect.width <= 0 || rect.height <= 0) return
+
+    const rendered: RenderedGroupRow<Row> = {
+      kind: 'grand-footer',
+      rowId: '__pinned-bottom-group-panel__',
+      rowIndex: -1,
+      storeIndex: -1,
+      zone: 'grand-footer',
+      aggregate: { count: rows.length },
+      rows,
+    }
+    const schema = template(this.createGroupTemplateContext(rendered, rect, true))
+    if (schema.length === 0) return
+
+    this.renderer.clip(rect.x, rect.y, rect.width, rect.height)
+    this.renderer.schema(schema)
+    this.renderer.clearClip()
+  }
+
   private renderHoverOverlay(): void {
     const hover = this.hoverTarget
     const options = this.props.interaction.hover
@@ -1184,6 +1434,7 @@ export class DataTableRootNode<
 
   private updateSelection(target: DataTableInteractionTarget<Row>): void {
     if (target.zone === 'header') return
+    if (target.zone === 'group' || target.zone === 'group-footer' || target.zone === 'grand-footer') return
     const options = this.props.interaction.selection
     if (!options || options.mode === 'none') return
 
@@ -1338,15 +1589,17 @@ export class DataTableRootNode<
     if (y < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight) return null
     const rowIndex = Math.floor((this.scrollY + y - this.viewport.bodyY) / this.props.rowHeight)
     if (rowIndex < 0 || rowIndex >= this.viewPipeline.rowCount) return null
-    const row = this.viewPipeline.getRowAt(rowIndex)
-    const rowId = this.viewPipeline.getRowIdAt(rowIndex)
-    const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
+    const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
+    const row = viewRow?.kind === 'data' ? viewRow.row : undefined
+    const rowId = viewRow?.rowId ?? this.viewPipeline.getRowIdAt(rowIndex)
+    const storeIndex = viewRow?.storeIndex ?? this.viewPipeline.getStoreIndexAt(rowIndex)
+    const zone = viewRow && viewRow.kind !== 'data' ? viewRow.kind : 'body'
     return {
       row,
       rowId,
       rowIndex,
       storeIndex,
-      zone: 'body',
+      zone,
       rect: {
         x: 0,
         y: this.viewport.bodyY + rowIndex * this.props.rowHeight - this.scrollY,
@@ -1511,8 +1764,8 @@ function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }
 
-function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedRow<Row>): value is RenderedRow<Row> {
-  return 'zone' in value && 'row' in value && 'rowIndex' in value
+function isRenderedRow<Row extends Record<string, any>>(value: Row | RenderedTableRow<Row>): value is RenderedTableRow<Row> {
+  return 'zone' in value && 'rowIndex' in value && 'kind' in value
 }
 
 function sameInteractionTarget<Row extends Record<string, any>>(

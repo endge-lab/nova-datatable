@@ -9,6 +9,7 @@ export const NovaDataTable = Object.assign(NovaDataTableComponent, {
 
 export {
   DataTableColumn,
+  DataTableGrouping,
   DataTablePinnedRows,
   Rect,
   Surface,

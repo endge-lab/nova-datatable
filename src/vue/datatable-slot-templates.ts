@@ -4,16 +4,24 @@ import type {
   DataTableCellContext,
   DataTableCellRect,
   DataTableColumnInput,
+  DataTableGroupTemplate,
+  DataTableGroupTemplateContext,
   DataTableInteractionLayerContext,
   DataTableInteractionLayerTemplate,
   DataTablePinnedRows,
   DataTableTemplate,
+  DataTableViewGroupingOptions,
 } from '@/model/types/datatable.types'
 
 export interface DataTableDslNodes<Row extends Record<string, any>> {
   columns: Array<DataTableColumnInput<Row>>
   pinnedRows: DataTablePinnedRows<Row>
+  grouping?: DataTableViewGroupingOptions<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  groupRowTemplate?: DataTableGroupTemplate<Row>
+  groupFooterTemplate?: DataTableGroupTemplate<Row>
+  grandFooterTemplate?: DataTableGroupTemplate<Row>
+  pinnedBottomTemplate?: DataTableGroupTemplate<Row>
 }
 
 type SlotMap = Record<string, (...args: Array<any>) => Array<VNode>>
@@ -23,7 +31,12 @@ const PRIMITIVE_TAGS = new Set(['Rect', 'Surface', 'Text', 'TextBlock'])
 export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes: Array<VNode>): DataTableDslNodes<Row> {
   const columns: Array<DataTableColumnInput<Row>> = []
   const pinnedRows: DataTablePinnedRows<Row> = {}
+  let grouping: DataTableViewGroupingOptions<Row> | undefined
   let interactionLayerTemplate: DataTableInteractionLayerTemplate<Row> | undefined
+  let groupRowTemplate: DataTableGroupTemplate<Row> | undefined
+  let groupFooterTemplate: DataTableGroupTemplate<Row> | undefined
+  let grandFooterTemplate: DataTableGroupTemplate<Row> | undefined
+  let pinnedBottomTemplate: DataTableGroupTemplate<Row> | undefined
 
   for (const node of flattenVNodes(nodes)) {
     const tag = getVNodeTag(node)
@@ -43,9 +56,34 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
         slots.hover as ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
       )
     }
+    if (tag === 'DataTableGrouping') {
+      const slots = readSlots(node)
+      grouping = compileGroupingNode<Row>(node)
+      groupRowTemplate = createGroupTemplate<Row>(
+        slots['group-row'] as ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
+      )
+      groupFooterTemplate = createGroupTemplate<Row>(
+        slots['group-footer'] as ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
+      )
+      grandFooterTemplate = createGroupTemplate<Row>(
+        slots['grand-footer'] as ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
+      )
+      pinnedBottomTemplate = createGroupTemplate<Row>(
+        slots['pinned-bottom'] as ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
+      )
+    }
   }
 
-  return { columns, pinnedRows, interactionLayerTemplate }
+  return {
+    columns,
+    pinnedRows,
+    grouping,
+    interactionLayerTemplate,
+    groupRowTemplate,
+    groupFooterTemplate,
+    grandFooterTemplate,
+    pinnedBottomTemplate,
+  }
 }
 
 export function createSlotTemplate<Row extends Record<string, any>>(
@@ -82,6 +120,20 @@ export function createInteractionLayerTemplate<Row extends Record<string, any>>(
   }
 }
 
+export function createGroupTemplate<Row extends Record<string, any>>(
+  slot: ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
+): DataTableGroupTemplate<Row> | undefined {
+  if (!slot) return undefined
+
+  return context => {
+    const schema: NovaSchema = []
+    for (const node of flattenVNodes(slot(context))) {
+      appendPrimitiveNode(schema, node, context.rect)
+    }
+    return schema
+  }
+}
+
 function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTableColumnInput<Row> | null {
   const id = readStringProp(node, 'id')
   if (!id) return null
@@ -107,6 +159,19 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
   }
 
   return dropUndefined(column)
+}
+
+function compileGroupingNode<Row extends Record<string, any>>(node: VNode): DataTableViewGroupingOptions<Row> {
+  return dropUndefined({
+    enabled: readBooleanProp(node, 'enabled'),
+    mode: readProp(node, 'mode') as DataTableViewGroupingOptions<Row>['mode'],
+    groups: readProp(node, 'groups') as DataTableViewGroupingOptions<Row>['groups'],
+    expanded: readProp(node, 'expanded') as DataTableViewGroupingOptions<Row>['expanded'],
+    showGroupRows: readBooleanProp(node, 'showGroupRows'),
+    showGroupFooters: readBooleanProp(node, 'showGroupFooters'),
+    showGrandFooter: readBooleanProp(node, 'showGrandFooter'),
+    footerPlacement: readProp(node, 'footerPlacement') as DataTableViewGroupingOptions<Row>['footerPlacement'],
+  })
 }
 
 function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTableCellRect): void {

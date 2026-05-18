@@ -16,7 +16,7 @@ import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
-import { DataTableColumn, DataTableInteractionLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
+import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
 interface Row {
@@ -326,6 +326,27 @@ describe('DataTableViewPipeline', () => {
     })
   }
 
+  function createGroupingView(expanded: 'all' | 'none') {
+    return {
+      sorting: { mode: 'client' as const, multi: true, controlled: false, initial: [] },
+      filtering: { mode: 'client' as const, controlled: false, initial: [] },
+      rowOrdering: { enabled: true, mode: 'view' as const, manualLayer: true },
+      columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
+      filterUi: { headerMenu: false, filterRow: false },
+      grouping: {
+        enabled: true,
+        mode: 'client' as const,
+        groups: [{ id: 'status', field: 'status', title: 'Status', aggregates: { amount: 'sum' as const } }],
+        expanded,
+        showGroupRows: true,
+        showGroupFooters: true,
+        showGrandFooter: true,
+        footerPlacement: 'scroll' as const,
+        controlled: false,
+      },
+    }
+  }
+
   it('sorts, filters and applies manual row order over the current view', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
@@ -364,6 +385,67 @@ describe('DataTableViewPipeline', () => {
 
     expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
     expect(pipeline.getQuery().sort).toEqual([{ columnId: 'amount', direction: 'desc' }])
+    expect(pipeline.isServerControlled()).toBe(true)
+  })
+
+  it('groups rows after filter and sort and exposes aggregate view rows', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    const columns = resolveDataTableColumns<Row>([
+      { id: 'status', field: 'status', filter: 'set' },
+      { id: 'amount', field: 'amount', sortable: true },
+    ], {}, new Map(), store)
+
+    pipeline.sync({
+      columns,
+      view: {
+        ...createGroupingView('all'),
+      },
+    })
+    pipeline.setFilter('status', { operator: 'equals', value: 'active' })
+    pipeline.setSort({ columnId: 'amount', direction: 'desc' })
+
+    const viewRows = pipeline.getViewRows()
+    expect(viewRows.map(row => row.kind)).toEqual(['group', 'data', 'data', 'group-footer', 'grand-footer'])
+    expect(viewRows[0]).toMatchObject({ kind: 'group', rowId: 'status:active' })
+    expect(viewRows[3]).toMatchObject({ kind: 'group-footer', rowId: 'status:active:footer' })
+    expect(viewRows[4]).toMatchObject({ kind: 'grand-footer' })
+    expect(pipeline.getGroupingState().expandedGroups).toEqual(['status:active'])
+
+    pipeline.collapseGroup('status:active')
+    expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['group', 'grand-footer'])
+
+    pipeline.sync({ columns, view: createGroupingView('none') })
+    expect(pipeline.getGroupingState().expandedGroups).toEqual([])
+  })
+
+  it('keeps server grouping as query state without local materialization', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([{ id: 'status', field: 'status' }], {}, new Map(), store),
+      view: {
+        sorting: false,
+        filtering: false,
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: {
+          enabled: true,
+          mode: 'server',
+          groups: [{ id: 'status', field: 'status' }],
+          expanded: 'all',
+          showGroupRows: true,
+          showGroupFooters: false,
+          showGrandFooter: false,
+          footerPlacement: 'scroll',
+          controlled: true,
+        },
+      },
+    })
+
+    expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['data', 'data', 'data'])
+    expect(pipeline.getQuery().grouping?.groups[0]?.id).toBe('status')
     expect(pipeline.isServerControlled()).toBe(true)
   })
 })
@@ -475,6 +557,30 @@ describe('DataTable DSL templates', () => {
       width: 20,
       height: 10,
     })
+  })
+
+  it('compiles grouping marker templates', () => {
+    const dsl = compileDataTableDslNodes<Row>([
+      h(DataTableGrouping, {
+        groups: [{ id: 'status', field: 'status' }],
+        footerPlacement: 'both',
+        showGrandFooter: true,
+      }, {
+        'group-row': (context: any) => [
+          h(Surface, { background: '#eef3f8' }, () => [
+            h(TextBlock, { text: context.group?.label ?? 'Group' }),
+          ]),
+        ],
+        'grand-footer': () => [
+          h(Rect, { x: 2, y: 3, width: 20, height: 10, background: '#0f172a' }),
+        ],
+      }),
+    ])
+
+    expect(dsl.grouping?.groups).toHaveLength(1)
+    expect(dsl.grouping?.footerPlacement).toBe('both')
+    expect(dsl.groupRowTemplate).toBeTypeOf('function')
+    expect(dsl.grandFooterTemplate).toBeTypeOf('function')
   })
 })
 
@@ -687,6 +793,61 @@ describe('DataTable Root runtime', () => {
     const firstNameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowIndex === 0)?.[0]
     expect(firstNameContext.rowId).toBe('row-b')
     expect(firstNameContext.storeIndex).toBe(1)
+
+    app.destroy()
+  })
+
+  it('renders group rows and toggles them from pointer input', () => {
+    const app = createApp()
+    const groupRowTemplate = vi.fn(() => [])
+    const onGroupingChange = vi.fn()
+    const onGroupToggle = vi.fn()
+    const surface = app.createSurface('datatable-group-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 520, height: 220 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(6),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            columns: [
+              { id: 'name', field: 'name', width: 160 },
+              { id: 'status', field: 'status', width: 120 },
+            ],
+            view: {
+              grouping: {
+                enabled: true,
+                mode: 'client',
+                groups: [{ id: 'status', field: 'status', title: 'Status' }],
+                expanded: 'all',
+                showGroupRows: true,
+              },
+            },
+            groupRowTemplate,
+            onGroupingChange,
+            onGroupToggle,
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+
+    expect(groupRowTemplate).toHaveBeenCalled()
+    expect(root.getApi().getViewState().grouping.expandedGroups).toContain('status:active')
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 40, clientY: 36 }))
+    app.raph.run()
+
+    expect(onGroupToggle).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'status:active' }))
+    expect(onGroupingChange).toHaveBeenCalled()
+    expect(root.getApi().getViewState().grouping.expandedGroups).not.toContain('status:active')
 
     app.destroy()
   })

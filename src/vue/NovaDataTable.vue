@@ -18,6 +18,10 @@ import {
   type DataTablePinnedRows,
   type DataTableColumnReorderPayload,
   type DataTableFilterState,
+  type DataTableGroupingState,
+  type DataTableGroupNode,
+  type DataTableGroupRule,
+  type DataTableGroupTemplate,
   type DataTableQueryState,
   type DataTableRowReorderPayload,
   type DataTableRowKey,
@@ -53,6 +57,10 @@ interface DataTableVueProps {
   view?: DataTableViewOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
+  groupRowTemplate?: DataTableGroupTemplate<BaseRow>
+  groupFooterTemplate?: DataTableGroupTemplate<BaseRow>
+  grandFooterTemplate?: DataTableGroupTemplate<BaseRow>
+  pinnedBottomTemplate?: DataTableGroupTemplate<BaseRow>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<BaseRow>) => void
   onSortChange?: (state: DataTableSortState) => void
@@ -60,6 +68,8 @@ interface DataTableVueProps {
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
+  onGroupingChange?: (state: DataTableGroupingState<BaseRow>) => void
+  onGroupToggle?: (group: DataTableGroupNode<BaseRow>) => void
   onCellEnter?: (context: DataTableCellContext<BaseRow>) => void
   onCellLeave?: (context: DataTableCellContext<BaseRow>) => void
   onCellClick?: (context: DataTableCellContext<BaseRow>) => void
@@ -90,6 +100,10 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   view: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
+  groupRowTemplate: undefined,
+  groupFooterTemplate: undefined,
+  grandFooterTemplate: undefined,
+  pinnedBottomTemplate: undefined,
   onViewportChange: undefined,
   onColumnResize: undefined,
   onSortChange: undefined,
@@ -97,6 +111,8 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onQueryChange: undefined,
   onRowOrderChange: undefined,
   onColumnOrderChange: undefined,
+  onGroupingChange: undefined,
+  onGroupToggle: undefined,
   onCellEnter: undefined,
   onCellLeave: undefined,
   onCellClick: undefined,
@@ -117,6 +133,8 @@ const emit = defineEmits<{
   (event: 'query-change', query: DataTableQueryState): void
   (event: 'row-order-change', payload: DataTableRowReorderPayload): void
   (event: 'column-order-change', payload: DataTableColumnReorderPayload): void
+  (event: 'grouping-change', state: DataTableGroupingState<BaseRow>): void
+  (event: 'group-toggle', group: DataTableGroupNode<BaseRow>): void
   (event: 'cell-enter', context: DataTableCellContext<BaseRow>): void
   (event: 'cell-leave', context: DataTableCellContext<BaseRow>): void
   (event: 'cell-click', context: DataTableCellContext<BaseRow>): void
@@ -144,6 +162,13 @@ const rootPinnedRows = computed(() => ({
     ...(compiledDsl.value.pinnedRows.bottom ?? []),
   ],
 }))
+const rootView = computed<DataTableViewOptions | undefined>(() => {
+  if (!compiledDsl.value.grouping) return props.view
+  return {
+    ...(props.view ?? {}),
+    grouping: props.view?.grouping ?? compiledDsl.value.grouping,
+  }
+})
 const rootCellTemplate = computed<DataTableTemplate<BaseRow> | undefined>(() => (
   props.cellTemplate ?? createSlotTemplate<BaseRow>(
     slots.cell as ((context: Parameters<DataTableTemplate<BaseRow>>[0]) => Array<any>) | undefined,
@@ -155,6 +180,10 @@ const rootHeaderTemplate = computed<DataTableTemplate<BaseRow> | undefined>(() =
   )
 ))
 const rootInteractionLayerTemplate = computed(() => compiledDsl.value.interactionLayerTemplate)
+const rootGroupRowTemplate = computed(() => props.groupRowTemplate ?? compiledDsl.value.groupRowTemplate)
+const rootGroupFooterTemplate = computed(() => props.groupFooterTemplate ?? compiledDsl.value.groupFooterTemplate)
+const rootGrandFooterTemplate = computed(() => props.grandFooterTemplate ?? compiledDsl.value.grandFooterTemplate)
+const rootPinnedBottomTemplate = computed(() => props.pinnedBottomTemplate ?? compiledDsl.value.pinnedBottomTemplate)
 const devtools = computed(() => props.devtools)
 
 const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
@@ -230,6 +259,16 @@ function handleColumnOrderChange(payload: DataTableColumnReorderPayload): void {
   emit('column-order-change', payload)
 }
 
+function handleGroupingChange(state: DataTableGroupingState<BaseRow>): void {
+  props.onGroupingChange?.(state)
+  emit('grouping-change', state)
+}
+
+function handleGroupToggle(group: DataTableGroupNode<BaseRow>): void {
+  props.onGroupToggle?.(group)
+  emit('group-toggle', group)
+}
+
 function handleCellEnter(context: DataTableCellContext<BaseRow>): void {
   props.onCellEnter?.(context)
   emit('cell-enter', context)
@@ -282,6 +321,14 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   clearFilter: columnId => getRootApi().clearFilter(columnId),
   reorderRows: payload => getRootApi().reorderRows(payload),
   reorderColumns: payload => getRootApi().reorderColumns(payload),
+  getGroupingState: () => getRootApi().getGroupingState(),
+  setGrouping: (groups: Array<DataTableGroupRule<BaseRow>>) => getRootApi().setGrouping(groups),
+  clearGrouping: () => getRootApi().clearGrouping(),
+  toggleGroup: groupId => getRootApi().toggleGroup(groupId),
+  expandGroup: groupId => getRootApi().expandGroup(groupId),
+  collapseGroup: groupId => getRootApi().collapseGroup(groupId),
+  expandAllGroups: () => getRootApi().expandAllGroups(),
+  collapseAllGroups: () => getRootApi().collapseAllGroups(),
   resetView: () => getRootApi().resetView(),
   setChildren: children => getRootApi().setChildren(children),
 })
@@ -312,10 +359,14 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :overscan-rows="overscanRows"
       :overscan-columns="overscanColumns"
       :interaction="interaction"
-      :view="view"
+      :view="rootView"
       :cell-template="rootCellTemplate"
       :header-template="rootHeaderTemplate"
       :interaction-layer-template="rootInteractionLayerTemplate"
+      :group-row-template="rootGroupRowTemplate"
+      :group-footer-template="rootGroupFooterTemplate"
+      :grand-footer-template="rootGrandFooterTemplate"
+      :pinned-bottom-template="rootPinnedBottomTemplate"
       :on-viewport-change="handleViewportChange"
       :on-column-resize="handleColumnResize"
       :on-sort-change="handleSortChange"
@@ -323,6 +374,8 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :on-query-change="handleQueryChange"
       :on-row-order-change="handleRowOrderChange"
       :on-column-order-change="handleColumnOrderChange"
+      :on-grouping-change="handleGroupingChange"
+      :on-group-toggle="handleGroupToggle"
       :on-cell-enter="handleCellEnter"
       :on-cell-leave="handleCellLeave"
       :on-cell-click="handleCellClick"

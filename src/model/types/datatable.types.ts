@@ -9,6 +9,7 @@ export type DataTablePinnedRowPosition = 'top' | 'bottom'
 export type DataTableColumnAlign = 'left' | 'center' | 'right'
 export type DataTableViewMode = 'client' | 'server' | 'hybrid'
 export type DataTableSortDirection = 'asc' | 'desc'
+export type DataTableGroupFooterPlacement = 'scroll' | 'pinned-bottom' | 'both'
 export type DataTableFilterPreset = 'text' | 'number' | 'date' | 'set' | 'boolean' | 'custom'
 export type DataTableFilterOperator =
   | 'contains'
@@ -53,11 +54,64 @@ export interface DataTableFilterRule {
 
 export type DataTableFilterState = Array<DataTableFilterRule>
 
+export type DataTableAggregator<Row extends Record<string, any> = Record<string, any>> =
+  | 'count'
+  | 'sum'
+  | 'avg'
+  | 'min'
+  | 'max'
+  | ((rows: Array<Row>, context: DataTableGroupContext<Row>) => unknown)
+
+export interface DataTableGroupRule<Row extends Record<string, any> = Record<string, any>> {
+  id: string
+  title?: string
+  field?: keyof Row | string
+  value?: (row: Row, index: number) => unknown
+  sort?: 'asc' | 'desc' | ((a: DataTableGroupNode<Row>, b: DataTableGroupNode<Row>) => number)
+  aggregates?: Record<string, DataTableAggregator<Row>>
+}
+
+export interface DataTableGroupContext<Row extends Record<string, any> = Record<string, any>> {
+  rule?: DataTableGroupRule<Row>
+  groupId: string
+  key: unknown
+  label: string
+  title: string
+  depth: number
+  rows: Array<Row>
+  count: number
+}
+
+export interface DataTableGroupNode<Row extends Record<string, any> = Record<string, any>>
+  extends DataTableGroupContext<Row> {
+  parentId?: string
+  aggregate: Record<string, unknown>
+  expanded: boolean
+  children: Array<DataTableGroupNode<Row> | DataTableDataViewRow<Row>>
+}
+
+export interface DataTableGroupingState<Row extends Record<string, any> = Record<string, any>> {
+  enabled: boolean
+  mode: DataTableViewMode | 'off'
+  groups: Array<DataTableGroupRule<Row>>
+  expanded: 'all' | 'none' | Array<string>
+  expandedGroups: Array<string>
+  footerPlacement: DataTableGroupFooterPlacement
+}
+
+export interface DataTableGroupingQueryState<Row extends Record<string, any> = Record<string, any>> {
+  enabled: boolean
+  groups: Array<DataTableGroupRule<Row>>
+  expanded: 'all' | 'none' | Array<string>
+  footerPlacement: DataTableGroupFooterPlacement
+}
+
 export interface DataTableQueryState {
   sort: DataTableSortState
   filters: DataTableFilterState
   rowOrder: Array<DataTableRowId>
   columnOrder: Array<string>
+  grouping?: DataTableGroupingQueryState
 }
 
 export type DataTableRowKey<Row extends Record<string, any>> = keyof Row | ((row: Row, index: number) => DataTableRowId)
@@ -128,7 +182,7 @@ export interface DataTableCellContext<Row extends Record<string, any> = Record<s
   value: unknown
   rect: DataTableCellRect
   state: DataTableCellState
-  zone: 'header' | 'body' | 'pinned-top' | 'pinned-bottom'
+  zone: 'header' | 'body' | 'pinned-top' | 'pinned-bottom' | 'group' | 'group-footer' | 'grand-footer'
   store: DataTableStoreApi<Row>
   api: DataTableRootApi<Row>
 }
@@ -219,6 +273,28 @@ export type DataTableInteractionLayerTemplate<Row extends Record<string, any> = 
   context: DataTableInteractionLayerContext<Row>,
 ) => NovaSchema
 
+export interface DataTableGroupTemplateState {
+  expanded: boolean
+  hovered: boolean
+  pinned: boolean
+}
+
+export interface DataTableGroupTemplateContext<Row extends Record<string, any> = Record<string, any>> {
+  group?: DataTableGroupNode<Row>
+  aggregate: Record<string, unknown>
+  rows: Array<Row>
+  viewport: DataTableViewport
+  rect: DataTableCellRect
+  zone: 'group' | 'group-footer' | 'grand-footer' | 'pinned-bottom'
+  state: DataTableGroupTemplateState
+  toggle: () => void
+  api: DataTableRootApi<Row>
+}
+
+export type DataTableGroupTemplate<Row extends Record<string, any> = Record<string, any>> = (
+  context: DataTableGroupTemplateContext<Row>,
+) => NovaSchema
+
 export interface DataTableSortConfig<Row extends Record<string, any> = Record<string, any>> {
   accessor?: (row: Row, index: number) => unknown
   compare?: (a: unknown, b: unknown, aRow: Row, bRow: Row) => number
@@ -275,12 +351,25 @@ export interface DataTableFilterUiOptions {
   filterRow?: boolean
 }
 
+export interface DataTableViewGroupingOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled?: boolean
+  mode?: DataTableViewMode
+  groups?: Array<DataTableGroupRule<Row>>
+  expanded?: 'all' | 'none' | Array<string>
+  showGroupRows?: boolean
+  showGroupFooters?: boolean
+  showGrandFooter?: boolean
+  footerPlacement?: DataTableGroupFooterPlacement
+  controlled?: boolean
+}
+
 export interface DataTableViewOptions {
   sorting?: false | DataTableViewSortingOptions
   filtering?: false | DataTableViewFilteringOptions
   rowOrdering?: false | DataTableRowOrderingOptions
   columnOrdering?: false | DataTableColumnOrderingOptions
   filterUi?: false | DataTableFilterUiOptions
+  grouping?: false | DataTableViewGroupingOptions
 }
 
 export interface DataTableResolvedViewOptions {
@@ -289,6 +378,10 @@ export interface DataTableResolvedViewOptions {
   rowOrdering: false | Required<DataTableRowOrderingOptions>
   columnOrdering: false | Required<DataTableColumnOrderingOptions>
   filterUi: false | Required<DataTableFilterUiOptions>
+  grouping: false | Required<Omit<DataTableViewGroupingOptions, 'groups' | 'expanded'>> & {
+    groups: Array<DataTableGroupRule>
+    expanded: 'all' | 'none' | Array<string>
+  }
 }
 
 export interface DataTableViewState {
@@ -296,13 +389,58 @@ export interface DataTableViewState {
   filters: DataTableFilterState
   rowOrder: Array<DataTableRowId>
   columnOrder: Array<string>
+  grouping: DataTableGroupingState
   query: DataTableQueryState
   rowCount: number
   mode: {
     sorting: DataTableViewMode | 'off'
     filtering: DataTableViewMode | 'off'
+    grouping: DataTableViewMode | 'off'
   }
 }
+
+export interface DataTableDataViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'data'
+  row?: Row
+  rowId?: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+}
+
+export interface DataTableGroupViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'group'
+  group: DataTableGroupNode<Row>
+  rowId: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+}
+
+export interface DataTableGroupFooterViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'group-footer'
+  group: DataTableGroupNode<Row>
+  rowId: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+}
+
+export interface DataTableGrandFooterViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'grand-footer'
+  rowId: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+  aggregate: Record<string, unknown>
+  rows: Array<Row>
+}
+
+export type DataTableViewRow<Row extends Record<string, any> = Record<string, any>> =
+  | DataTableDataViewRow<Row>
+  | DataTableGroupViewRow<Row>
+  | DataTableGroupFooterViewRow<Row>
+  | DataTableGrandFooterViewRow<Row>
 
 export interface DataTableRowReorderPayload {
   rowId: DataTableRowId
@@ -407,6 +545,10 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  groupRowTemplate?: DataTableGroupTemplate<Row>
+  groupFooterTemplate?: DataTableGroupTemplate<Row>
+  grandFooterTemplate?: DataTableGroupTemplate<Row>
+  pinnedBottomTemplate?: DataTableGroupTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
   onSortChange?: (state: DataTableSortState) => void
@@ -414,6 +556,8 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
+  onGroupingChange?: (state: DataTableGroupingState<Row>) => void
+  onGroupToggle?: (group: DataTableGroupNode<Row>) => void
   onCellEnter?: (context: DataTableCellContext<Row>) => void
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
@@ -435,6 +579,10 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   interactionLayerTemplate?: DataTableInteractionLayerTemplate<Row>
+  groupRowTemplate?: DataTableGroupTemplate<Row>
+  groupFooterTemplate?: DataTableGroupTemplate<Row>
+  grandFooterTemplate?: DataTableGroupTemplate<Row>
+  pinnedBottomTemplate?: DataTableGroupTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
   onSortChange?: (state: DataTableSortState) => void
@@ -442,6 +590,8 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onQueryChange?: (query: DataTableQueryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
+  onGroupingChange?: (state: DataTableGroupingState<Row>) => void
+  onGroupToggle?: (group: DataTableGroupNode<Row>) => void
   onCellEnter?: (context: DataTableCellContext<Row>) => void
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
@@ -482,6 +632,14 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   clearFilter: (columnId?: string) => void
   reorderRows: (payload: DataTableRowReorderPayload) => void
   reorderColumns: (payload: DataTableColumnReorderPayload) => void
+  getGroupingState: () => DataTableGroupingState<Row>
+  setGrouping: (groups: Array<DataTableGroupRule<Row>>) => void
+  clearGrouping: () => void
+  toggleGroup: (groupId: string) => void
+  expandGroup: (groupId: string) => void
+  collapseGroup: (groupId: string) => void
+  expandAllGroups: () => void
+  collapseAllGroups: () => void
   resetView: () => void
   setChildren: (children: Array<unknown>) => void
 }

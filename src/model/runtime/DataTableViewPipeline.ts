@@ -1,11 +1,17 @@
 import { resolveDataTableValue } from '@/model/runtime/datatable-columns'
 import type {
+  DataTableAggregator,
   DataTableColumnInput,
   DataTableColumnReorderPayload,
+  DataTableDataViewRow,
   DataTableFilterContext,
   DataTableFilterOperator,
   DataTableFilterRule,
   DataTableFilterState,
+  DataTableGroupContext,
+  DataTableGroupingState,
+  DataTableGroupNode,
+  DataTableGroupRule,
   DataTableQueryState,
   DataTableResolvedColumn,
   DataTableResolvedViewOptions,
@@ -15,15 +21,9 @@ import type {
   DataTableSortState,
   DataTableStoreApi,
   DataTableViewMode,
+  DataTableViewRow,
   DataTableViewState,
 } from '@/model/types/datatable.types'
-
-export interface DataTableViewRow<Row extends Record<string, any>> {
-  row?: Row
-  rowId?: DataTableRowId
-  storeIndex: number
-  viewIndex: number
-}
 
 interface DataTableViewPipelineInput<Row extends Record<string, any>> {
   columns: Array<DataTableResolvedColumn<Row>>
@@ -31,7 +31,7 @@ interface DataTableViewPipelineInput<Row extends Record<string, any>> {
 }
 
 /**
- * Строит текущий view поверх store: sort/filter/manual row order/column order.
+ * Строит текущий view поверх store: sort/filter/manual order/grouping/column order.
  */
 export class DataTableViewPipeline<Row extends Record<string, any> = Record<string, any>> {
   private columns: Array<DataTableResolvedColumn<Row>> = []
@@ -41,10 +41,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private filters: DataTableFilterState = []
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
+  private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
   private rows: Array<DataTableViewRow<Row>> = []
+  private groupNodes = new Map<string, DataTableGroupNode<Row>>()
+  private groupingGroupsOverride: Array<DataTableGroupRule<Row>> | null = null
   private revision = -1
+  private viewSignature = ''
+  private expandedInputSignature = ''
   private localSort = false
   private localFilter = false
+  private localGrouping = false
 
   constructor(private readonly store: DataTableStoreApi<Row>) {
     this.view = {
@@ -53,6 +59,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       rowOrdering: false,
       columnOrdering: false,
       filterUi: false,
+      grouping: false,
     }
   }
 
@@ -62,18 +69,40 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   sync(input: DataTableViewPipelineInput<Row>): void {
     this.columns = input.columns
     this.view = input.view
+    if (this.groupingGroupsOverride && this.view.grouping) {
+      this.view = {
+        ...this.view,
+        grouping: {
+          ...this.view.grouping,
+          enabled: this.groupingGroupsOverride.length > 0,
+          groups: [...this.groupingGroupsOverride],
+        },
+      }
+    }
+    const view = this.view
     if (!this.initialized) {
-      this.sort = input.view.sorting ? [...input.view.sorting.initial] : []
-      this.filters = input.view.filtering ? [...input.view.filtering.initial] : []
-      this.columnOrder = input.view.columnOrdering ? [...input.view.columnOrdering.order] : []
+      this.sort = view.sorting ? [...view.sorting.initial] : []
+      this.filters = view.filtering ? [...view.filtering.initial] : []
+      this.columnOrder = view.columnOrdering ? [...view.columnOrdering.order] : []
+      this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
+      this.expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
       this.initialized = true
-    } else if (input.view.columnOrdering && input.view.columnOrdering.order.length > 0 && this.columnOrder.length === 0) {
-      this.columnOrder = [...input.view.columnOrdering.order]
+    } else {
+      if (view.columnOrdering && view.columnOrdering.order.length > 0 && this.columnOrder.length === 0) {
+        this.columnOrder = [...view.columnOrdering.order]
+      }
+      const expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
+      if (expandedInputSignature !== this.expandedInputSignature) {
+        this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
+        this.expandedInputSignature = expandedInputSignature
+      }
     }
 
     const revision = this.store.takeRevision()
-    if (revision !== this.revision) {
+    const viewSignature = createViewSignature(view, this.groupingExpanded)
+    if (revision !== this.revision || viewSignature !== this.viewSignature) {
       this.revision = revision
+      this.viewSignature = viewSignature
       this.rebuild()
     }
   }
@@ -83,7 +112,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   getRowAt(viewIndex: number): Row | undefined {
-    return this.rows[viewIndex]?.row ?? this.store.getRowAt(viewIndex)
+    const row = this.rows[viewIndex]
+    if (!row) return this.store.getRowAt(viewIndex)
+    return row.kind === 'data' ? row.row : undefined
   }
 
   getRowIdAt(viewIndex: number): DataTableRowId | undefined {
@@ -92,6 +123,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 
   getStoreIndexAt(viewIndex: number): number | undefined {
     return this.rows[viewIndex]?.storeIndex ?? viewIndex
+  }
+
+  getViewRowAt(viewIndex: number): DataTableViewRow<Row> | undefined {
+    return this.rows[viewIndex]
   }
 
   getViewRows(): Array<DataTableViewRow<Row>> {
@@ -104,6 +139,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       filters: [...this.filters],
       rowOrder: [...this.rowOrder],
       columnOrder: [...this.columnOrder],
+      grouping: this.view.grouping
+        ? {
+            enabled: this.view.grouping.enabled,
+            groups: [...this.view.grouping.groups],
+            expanded: cloneExpanded(this.groupingExpanded),
+            footerPlacement: this.view.grouping.footerPlacement,
+          }
+        : undefined,
     }
   }
 
@@ -113,12 +156,28 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       filters: [...this.filters],
       rowOrder: [...this.rowOrder],
       columnOrder: [...this.columnOrder],
+      grouping: this.getGroupingState(),
       query: this.getQuery(),
       rowCount: this.rowCount,
       mode: {
         sorting: this.view.sorting ? this.view.sorting.mode : 'off',
         filtering: this.view.filtering ? this.view.filtering.mode : 'off',
+        grouping: this.view.grouping ? this.view.grouping.mode : 'off',
       },
+    }
+  }
+
+  getGroupingState(): DataTableGroupingState<Row> {
+    const expandedGroups = [...this.groupNodes.values()]
+      .filter(group => group.expanded)
+      .map(group => group.groupId)
+    return {
+      enabled: !!(this.view.grouping && this.view.grouping.enabled),
+      mode: this.view.grouping ? this.view.grouping.mode : 'off',
+      groups: this.view.grouping ? [...this.view.grouping.groups as Array<DataTableGroupRule<Row>>] : [],
+      expanded: cloneExpanded(this.groupingExpanded),
+      expandedGroups,
+      footerPlacement: this.view.grouping ? this.view.grouping.footerPlacement : 'scroll',
     }
   }
 
@@ -156,8 +215,68 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.rebuild()
   }
 
+  setGrouping(groups: Array<DataTableGroupRule<Row>>): void {
+    if (!this.view.grouping) return
+    this.groupingGroupsOverride = [...groups]
+    this.view = {
+      ...this.view,
+      grouping: {
+        ...this.view.grouping,
+        enabled: groups.length > 0,
+        groups,
+      },
+    }
+    this.groupingExpanded = this.view.grouping.expanded === 'none' ? 'none' : 'all'
+    this.rebuild()
+  }
+
+  clearGrouping(): void {
+    if (!this.view.grouping) return
+    this.groupingGroupsOverride = []
+    this.view = {
+      ...this.view,
+      grouping: {
+        ...this.view.grouping,
+        enabled: false,
+        groups: [],
+      },
+    }
+    this.groupingExpanded = 'all'
+    this.rebuild()
+  }
+
+  toggleGroup(groupId: string): DataTableGroupNode<Row> | undefined {
+    const group = this.groupNodes.get(groupId)
+    if (!group) return undefined
+
+    if (group.expanded) this.collapseGroup(groupId)
+    else this.expandGroup(groupId)
+    return this.groupNodes.get(groupId) ?? group
+  }
+
+  expandGroup(groupId: string): void {
+    this.setGroupExpanded(groupId, true)
+  }
+
+  collapseGroup(groupId: string): void {
+    this.setGroupExpanded(groupId, false)
+  }
+
+  expandAllGroups(): void {
+    this.groupingExpanded = 'all'
+    this.rebuild()
+  }
+
+  collapseAllGroups(): void {
+    this.groupingExpanded = 'none'
+    this.rebuild()
+  }
+
   reorderRows(payload: DataTableRowReorderPayload): DataTableRowReorderPayload {
-    const ids = this.rows.map(row => row.rowId).filter((id): id is DataTableRowId => id !== undefined)
+    const ids = this.rows
+      .filter((row): row is DataTableDataViewRow<Row> => row.kind === 'data')
+      .map(row => row.rowId)
+      .filter((id): id is DataTableRowId => id !== undefined)
     const fromIndex = clampInteger(payload.fromIndex, 0, Math.max(0, ids.length - 1))
     const toIndex = clampInteger(payload.toIndex, 0, Math.max(0, ids.length - 1))
     const [id] = ids.splice(fromIndex, 1)
@@ -194,6 +313,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.filters = this.view.filtering ? [...this.view.filtering.initial] : []
     this.rowOrder = []
     this.columnOrder = this.view.columnOrdering ? [...this.view.columnOrdering.order] : []
+    this.groupingGroupsOverride = null
+    this.groupingExpanded = this.view.grouping ? cloneExpanded(this.view.grouping.expanded) : 'all'
     this.rebuild()
   }
 
@@ -210,34 +331,46 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   isServerControlled(): boolean {
-    return !!(this.view.sorting && this.view.sorting.controlled) || !!(this.view.filtering && this.view.filtering.controlled)
+    return !!(this.view.sorting && this.view.sorting.controlled)
+      || !!(this.view.filtering && this.view.filtering.controlled)
+      || !!(this.view.grouping && this.view.grouping.controlled)
   }
 
   private rebuild(): void {
     this.localSort = this.shouldApplyLocal(this.view.sorting ? this.view.sorting.mode : 'server')
     this.localFilter = this.shouldApplyLocal(this.view.filtering ? this.view.filtering.mode : 'server')
-    if (!this.localSort && !this.localFilter && this.rowOrder.length === 0) {
+    this.localGrouping = !!(this.view.grouping && this.view.grouping.enabled && this.view.grouping.groups.length > 0)
+      && this.shouldApplyLocal(this.view.grouping.mode)
+
+    const needsMaterializedRows = this.localSort || this.localFilter || this.localGrouping || this.rowOrder.length > 0
+    if (!needsMaterializedRows) {
+      this.groupNodes.clear()
       this.rows = Array.from({ length: this.store.rowCount }, (_item, viewIndex) => ({
+        kind: 'data',
         row: this.store.getRowAt(viewIndex),
         rowId: this.store.getRowIdAt(viewIndex),
         storeIndex: viewIndex,
         viewIndex,
+        depth: 0,
       }))
       return
     }
 
-    const rows: Array<DataTableViewRow<Row>> = []
+    const rows: Array<DataTableDataViewRow<Row>> = []
     for (let storeIndex = 0; storeIndex < this.store.rowCount; storeIndex += 1) {
       const row = this.store.getRowAt(storeIndex)
       if (!row) continue
       const rowId = this.store.getRowIdAt(storeIndex)
-      rows.push({ row, rowId, storeIndex, viewIndex: rows.length })
+      rows.push({ kind: 'data', row, rowId, storeIndex, viewIndex: rows.length, depth: 0 })
     }
 
     const filtered = this.localFilter ? rows.filter(item => this.matchesFilters(item)) : rows
     const sorted = this.localSort && this.sort.length > 0 ? [...filtered].sort((a, b) => this.compareRows(a, b)) : filtered
     const ordered = this.applyManualOrder(sorted)
-    this.rows = ordered.map((item, viewIndex) => ({ ...item, viewIndex }))
+    const grouped = this.localGrouping && this.view.grouping
+      ? this.flattenGroupedRows(ordered, this.view.grouping.groups as Array<DataTableGroupRule<Row>>)
+      : ordered
+    this.rows = grouped.map((item, viewIndex) => ({ ...item, viewIndex }))
   }
 
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
@@ -246,7 +379,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     return this.store.loadedRowCount >= this.store.rowCount
   }
 
-  private matchesFilters(item: DataTableViewRow<Row>): boolean {
+  private matchesFilters(item: DataTableDataViewRow<Row>): boolean {
     if (!item.row || item.rowId === undefined) return false
     for (const rule of this.filters) {
       const column = this.columns.find(candidate => candidate.id === rule.columnId)
@@ -271,7 +404,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     return true
   }
 
-  private compareRows(a: DataTableViewRow<Row>, b: DataTableViewRow<Row>): number {
+  private compareRows(a: DataTableDataViewRow<Row>, b: DataTableDataViewRow<Row>): number {
     for (let index = 0; index < this.sort.length; index += 1) {
       const rule = this.sort[index]!
       const column = this.columns.find(item => item.id === rule.columnId)
@@ -291,10 +424,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     return a.storeIndex - b.storeIndex
   }
 
-  private applyManualOrder(rows: Array<DataTableViewRow<Row>>): Array<DataTableViewRow<Row>> {
+  private applyManualOrder(rows: Array<DataTableDataViewRow<Row>>): Array<DataTableDataViewRow<Row>> {
     if (this.rowOrder.length === 0) return rows
     const byId = new Map(rows.map(row => [row.rowId, row]))
-    const ordered: Array<DataTableViewRow<Row>> = []
+    const ordered: Array<DataTableDataViewRow<Row>> = []
     const used = new Set<DataTableRowId>()
     for (const id of this.rowOrder) {
       const row = byId.get(id)
@@ -306,6 +439,193 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       if (row.rowId === undefined || !used.has(row.rowId)) ordered.push(row)
     }
     return ordered
+  }
+
+  private flattenGroupedRows(
+    rows: Array<DataTableDataViewRow<Row>>,
+    rules: Array<DataTableGroupRule<Row>>,
+  ): Array<DataTableViewRow<Row>> {
+    this.groupNodes.clear()
+    const grouped = this.buildGroupNodes(rows, rules, 0, undefined)
+    const flattened: Array<DataTableViewRow<Row>> = []
+    const showGroupRows = this.view.grouping ? this.view.grouping.showGroupRows : true
+    const showGroupFooters = this.view.grouping ? this.view.grouping.showGroupFooters : false
+    for (const group of grouped) {
+      this.appendGroupRows(group, flattened, showGroupRows, showGroupFooters)
+    }
+
+    const showGrandFooter = this.view.grouping
+      && this.view.grouping.showGrandFooter
+      && (this.view.grouping.footerPlacement === 'scroll' || this.view.grouping.footerPlacement === 'both')
+    if (showGrandFooter) {
+      const materializedRows = rows.map(item => item.row).filter((row): row is Row => !!row)
+      flattened.push({
+        kind: 'grand-footer',
+        rowId: '__grand-footer__',
+        storeIndex: -1,
+        viewIndex: flattened.length,
+        depth: 0,
+        aggregate: this.computeAggregate(materializedRows, rules),
+        rows: materializedRows,
+      })
+    }
+    return flattened
+  }
+
+  private buildGroupNodes(
+    rows: Array<DataTableDataViewRow<Row>>,
+    rules: Array<DataTableGroupRule<Row>>,
+    depth: number,
+    parentId: string | undefined,
+  ): Array<DataTableGroupNode<Row>> {
+    const rule = rules[depth]
+    if (!rule) return []
+
+    const buckets = new Map<string, { key: unknown; label: string; rows: Array<DataTableDataViewRow<Row>> }>()
+    for (const row of rows) {
+      if (!row.row) continue
+      const key = this.resolveGroupKey(rule, row.row, row.storeIndex)
+      const label = formatGroupLabel(key)
+      const bucketId = String(label)
+      const bucket = buckets.get(bucketId)
+      if (bucket) bucket.rows.push(row)
+      else buckets.set(bucketId, { key, label, rows: [row] })
+    }
+
+    const groups = [...buckets.values()].map(bucket => {
+      const groupId = `${parentId ? `${parentId}/` : ''}${rule.id}:${bucket.label}`
+      const groupRows = bucket.rows.map(item => item.row).filter((row): row is Row => !!row)
+      const node: DataTableGroupNode<Row> = {
+        rule,
+        groupId,
+        key: bucket.key,
+        label: bucket.label,
+        title: rule.title ?? rule.id,
+        depth,
+        rows: groupRows,
+        count: groupRows.length,
+        parentId,
+        aggregate: this.computeAggregate(groupRows, [rule]),
+        expanded: this.isGroupExpanded(groupId),
+        children: [],
+      }
+      const childGroups = this.buildGroupNodes(bucket.rows, rules, depth + 1, groupId)
+      node.children = childGroups.length > 0 ? childGroups : bucket.rows.map(row => ({ ...row, depth: depth + 1 }))
+      this.groupNodes.set(groupId, node)
+      return node
+    })
+
+    return this.sortGroups(groups, rule)
+  }
+
+  private appendGroupRows(
+    group: DataTableGroupNode<Row>,
+    target: Array<DataTableViewRow<Row>>,
+    showGroupRows: boolean,
+    showGroupFooters: boolean,
+  ): void {
+    if (showGroupRows) {
+      target.push({
+        kind: 'group',
+        group,
+        rowId: group.groupId,
+        storeIndex: -1,
+        viewIndex: target.length,
+        depth: group.depth,
+      })
+    }
+
+    if (group.expanded) {
+      for (const child of group.children) {
+        if ('kind' in child && child.kind === 'data') target.push({ ...child, viewIndex: target.length })
+        else this.appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters)
+      }
+      if (showGroupFooters) {
+        target.push({
+          kind: 'group-footer',
+          group,
+          rowId: `${group.groupId}:footer`,
+          storeIndex: -1,
+          viewIndex: target.length,
+          depth: group.depth,
+        })
+      }
+    }
+  }
+
+  private resolveGroupKey(rule: DataTableGroupRule<Row>, row: Row, index: number): unknown {
+    if (rule.value) return rule.value(row, index)
+    if (rule.field) return row[rule.field as keyof Row]
+    return row[rule.id]
+  }
+
+  private sortGroups(groups: Array<DataTableGroupNode<Row>>, rule: DataTableGroupRule<Row>): Array<DataTableGroupNode<Row>> {
+    if (!rule.sort) return groups
+    const sorted = [...groups]
+    if (typeof rule.sort === 'function') return sorted.sort(rule.sort)
+    return sorted.sort((a, b) => rule.sort === 'asc'
+      ? compareValues(a.label, b.label)
+      : compareValues(b.label, a.label))
+  }
+
+  private computeAggregate(rows: Array<Row>, rules: Array<DataTableGroupRule<Row>>): Record<string, unknown> {
+    const aggregate: Record<string, unknown> = { count: rows.length }
+    for (const rule of rules) {
+      for (const [key, aggregator] of Object.entries(rule.aggregates ?? {})) {
+        aggregate[key] = this.resolveAggregate(rows, key, aggregator, rule)
+      }
+    }
+    return aggregate
+  }
+
+  private resolveAggregate(
+    rows: Array<Row>,
+    key: string,
+    aggregator: DataTableAggregator<Row>,
+    rule: DataTableGroupRule<Row>,
+  ): unknown {
+    const context: DataTableGroupContext<Row> = {
+      rule,
+      groupId: rule.id,
+      key,
+      label: key,
+      title: rule.title ?? rule.id,
+      depth: 0,
+      rows,
+      count: rows.length,
+    }
+    if (typeof aggregator === 'function') return aggregator(rows, context)
+    if (aggregator === 'count') return rows.length
+
+    const values = rows.map(row => Number(row[key])).filter(Number.isFinite)
+    if (values.length === 0) return 0
+    if (aggregator === 'sum') return values.reduce((sum, value) => sum + value, 0)
+    if (aggregator === 'avg') return values.reduce((sum, value) => sum + value, 0) / values.length
+    if (aggregator === 'min') return Math.min(...values)
+    if (aggregator === 'max') return Math.max(...values)
+    return undefined
+  }
+
+  private isGroupExpanded(groupId: string): boolean {
+    if (this.groupingExpanded === 'all') return true
+    if (this.groupingExpanded === 'none') return false
+    return this.groupingExpanded.includes(groupId)
+  }
+
+  private setGroupExpanded(groupId: string, expanded: boolean): void {
+    const allGroupIds = [...this.groupNodes.keys()]
+    if (this.groupingExpanded === 'all') {
+      if (expanded) return
+      this.groupingExpanded = allGroupIds.filter(id => id !== groupId)
+    } else if (this.groupingExpanded === 'none') {
+      this.groupingExpanded = expanded ? [groupId] : []
+    } else {
+      const set = new Set(this.groupingExpanded)
+      if (expanded) set.add(groupId)
+      else set.delete(groupId)
+      this.groupingExpanded = [...set]
+    }
+    this.rebuild()
   }
 }
 
@@ -341,4 +661,31 @@ function defaultPredicate(operator: DataTableFilterOperator, value: unknown, fil
 
 function clampInteger(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(Number.isFinite(value) ? value : min)))
+}
+
+function cloneExpanded(value: 'all' | 'none' | Array<string>): 'all' | 'none' | Array<string> {
+  return Array.isArray(value) ? [...value] : value
+}
+
+function formatGroupLabel(value: unknown): string {
+  if (value === undefined || value === null || value === '') return 'Empty'
+  return String(value)
+}
+
+function createViewSignature(view: DataTableResolvedViewOptions, expanded: 'all' | 'none' | Array<string>): string {
+  return JSON.stringify({
+    sorting: view.sorting && { mode: view.sorting.mode, multi: view.sorting.multi, controlled: view.sorting.controlled },
+    filtering: view.filtering && { mode: view.filtering.mode, controlled: view.filtering.controlled },
+    grouping: view.grouping && {
+      enabled: view.grouping.enabled,
+      mode: view.grouping.mode,
+      controlled: view.grouping.controlled,
+      groups: view.grouping.groups.map(group => [group.id, group.title, String(group.field ?? '')]),
+      showGroupRows: view.grouping.showGroupRows,
+      showGroupFooters: view.grouping.showGroupFooters,
+      showGrandFooter: view.grouping.showGrandFooter,
+      footerPlacement: view.grouping.footerPlacement,
+      expanded,
+    },
+  })
 }

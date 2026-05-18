@@ -107,6 +107,45 @@ export const DataTablePinnedRows = createDataTableDslMarker('DataTablePinnedRows
 
 export const DataTableInteractionLayer = createDataTableDslMarker('DataTableInteractionLayer')
 
+export const DataTableGrouping = createDataTableDslMarker('DataTableGrouping', {
+  enabled: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  mode: {
+    type: String,
+    required: false,
+  },
+  groups: {
+    type: Array,
+    required: false,
+  },
+  expanded: {
+    type: [String, Array],
+    required: false,
+  },
+  showGroupRows: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  showGroupFooters: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  showGrandFooter: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  footerPlacement: {
+    type: String,
+    required: false,
+  },
+})
+
 export const Rect = createDataTableDslMarker('Rect', commonPrimitiveProps)
 export const Surface = createDataTableDslMarker('Surface', commonPrimitiveProps)
 export const Text = createDataTableDslMarker('Text', commonPrimitiveProps)
