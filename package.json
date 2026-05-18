@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "private": false,
-  "version": "0.7.1",
+  "version": "0.7.2",
   "type": "module",
   "module": "./dist/nova-datatable.js",
   "types": "./dist/main.d.ts",

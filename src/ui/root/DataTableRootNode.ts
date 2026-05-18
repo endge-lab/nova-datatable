@@ -563,6 +563,7 @@ export class DataTableRootNode<
     const nextY = this.viewport.contentHeight * anchorYRatio - relativeY
     this.setScroll(nextX, nextY)
     this.refresh(['layout', 'viewport'])
+    this.props.onZoomChange?.(this.getZoomState())
   }
 
   private tableData(rows?: Array<Row>): Array<Row> {
@@ -893,7 +894,8 @@ export class DataTableRootNode<
     return true
   }
 
-  private isWheelModifierActive(event: WheelEvent, modifier: TooltipModifier): boolean {
+  private isWheelModifierActive(event: WheelEvent, modifier: TooltipModifier | Array<TooltipModifier>): boolean {
+    if (Array.isArray(modifier)) return modifier.some(item => this.isWheelModifierActive(event, item))
     if (modifier === 'ctrl') return event.ctrlKey
     if (modifier === 'meta') return event.metaKey
     if (modifier === 'shift') return event.shiftKey

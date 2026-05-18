@@ -37,6 +37,7 @@ import {
   type DataTableViewState,
   type DataTableViewport,
   type DataTableZoomOptions,
+  type DataTableZoomState,
   NovaDataTableSchema,
   type NovaDataTableRef,
 } from '@/model/types/datatable.types'
@@ -82,6 +83,7 @@ interface DataTableVueProps {
   onCellLeave?: (context: DataTableCellContext<BaseRow>) => void
   onCellClick?: (context: DataTableCellContext<BaseRow>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onZoomChange?: (state: DataTableZoomState) => void
   width?: number | string
   height?: number | string
   maxDpr?: number
@@ -129,6 +131,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onCellLeave: undefined,
   onCellClick: undefined,
   onSelectionChange: undefined,
+  onZoomChange: undefined,
   devtools: undefined,
   columns: () => [],
   pinnedColumns: () => ({}),
@@ -151,6 +154,7 @@ const emit = defineEmits<{
   (event: 'cell-leave', context: DataTableCellContext<BaseRow>): void
   (event: 'cell-click', context: DataTableCellContext<BaseRow>): void
   (event: 'selection-change', selection: DataTableSelectionState | null): void
+  (event: 'zoom-change', state: DataTableZoomState): void
 }>()
 
 const slots = useSlots()
@@ -302,6 +306,11 @@ function handleSelectionChange(selection: DataTableSelectionState | null): void 
   emit('selection-change', selection)
 }
 
+function handleZoomChange(state: DataTableZoomState): void {
+  props.onZoomChange?.(state)
+  emit('zoom-change', state)
+}
+
 function getRootApi(): NovaDataTableRef<BaseRow> {
   return dataTableRoot
 }
@@ -400,6 +409,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
       :on-cell-leave="handleCellLeave"
       :on-cell-click="handleCellClick"
       :on-selection-change="handleSelectionChange"
+      :on-zoom-change="handleZoomChange"
       :layout="{ width: '100%', height: '100%' }"
     />
   </NovaCanvas>

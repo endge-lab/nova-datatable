@@ -350,8 +350,14 @@ export interface DataTableResolvedTooltipOptions<Row extends Record<string, any>
 
 export interface DataTableZoomWheelOptions {
   enabled?: boolean
-  modifier?: TooltipModifier | false
+  modifier?: TooltipModifier | Array<TooltipModifier> | false
   step?: number
+}
+
+export interface DataTableResolvedZoomWheelOptions {
+  enabled: boolean
+  modifier: TooltipModifier | Array<TooltipModifier> | false
+  step: number
 }
 
 export interface DataTableZoomOptions {
@@ -381,7 +387,7 @@ export interface DataTableResolvedZoomOptions {
   textScale: number
   iconScale: number
   preserveAnchor: 'viewport' | 'pointer'
-  wheel: false | Required<DataTableZoomWheelOptions>
+  wheel: false | DataTableResolvedZoomWheelOptions
 }
 
 export interface DataTableZoomState {
@@ -757,6 +763,7 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onZoomChange?: (state: DataTableZoomState) => void
 }
 
 export interface DataTableRootResolvedProps<Row extends Record<string, any> = Record<string, any>>
@@ -796,6 +803,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onZoomChange?: (state: DataTableZoomState) => void
 }
 
 export interface DataTableColumnResizePayload<Row extends Record<string, any> = Record<string, any>> {
