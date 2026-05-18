@@ -15,7 +15,7 @@ import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
-import { normalizeDataTablePerformance, normalizeDataTableScrollbars, normalizeDataTableView } from '@/ui/root/datatable-root.config'
+import { normalizeDataTableEditing, normalizeDataTablePerformance, normalizeDataTableScrollbars, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, DataTableScrollbarLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
@@ -513,6 +513,125 @@ describe('DataTable scrollbars', () => {
   })
 })
 
+describe('DataTable editing', () => {
+  it('normalizes DOM overlay editing defaults and disabled mode', () => {
+    const defaults = normalizeDataTableEditing(undefined)
+    const disabled = normalizeDataTableEditing(false)
+
+    expect(defaults).not.toBe(false)
+    if (defaults === false) return
+    expect(defaults.renderer).toBe('dom-overlay')
+    expect(defaults.mode).toBe('cell')
+    expect(defaults.trigger).toEqual(['doubleClick', 'enter', 'programmatic'])
+    expect(defaults.commitOnBlur).toBe(true)
+    expect(defaults.selectTextOnStart).toBe(true)
+    expect(disabled).toBe(false)
+  })
+
+  it('starts editing editable cells and commits through the store', async () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+
+    root.setProps({
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', editable: true, editor: 'text' },
+        { id: 'status', title: 'Status', field: 'status', width: 120 },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().startEdit('row-2', 'name')).toBe(true)
+    expect(root.getApi().getEditingState()?.value).toBe('Row 2')
+
+    await root.getApi().commitEdit('Edited row')
+
+    expect(root.store.getRow('row-2')?.name).toBe('Edited row')
+    expect(root.getApi().getEditingState()).toBeNull()
+    app.destroy()
+  })
+
+  it('keeps the editor open on validation failure', async () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+
+    root.setProps({
+      columns: [
+        {
+          id: 'name',
+          title: 'Name',
+          field: 'name',
+          width: 180,
+          pinned: 'left',
+          editable: true,
+          editor: 'text',
+          validateEditValue: value => String(value).trim() ? true : 'Name is required',
+        },
+        { id: 'status', title: 'Status', field: 'status', width: 120 },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().startEdit('row-1', 'name')).toBe(true)
+    await root.getApi().commitEdit('')
+
+    expect(root.store.getRow('row-1')?.name).toBe('Row 1')
+    expect(root.getApi().getEditingState()?.invalid).toBe(true)
+    expect(root.getApi().getEditingState()?.message).toBe('Name is required')
+    app.destroy()
+  })
+
+  it('does not start editing disabled or non-editable cells', () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+
+    expect(root.getApi().startEdit('row-1', 'status')).toBe(false)
+
+    root.setProps({
+      editing: false,
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', editable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 120 },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().startEdit('row-1', 'name')).toBe(false)
+    app.destroy()
+  })
+
+  it('emits async commit errors and leaves the editor active', async () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+    const onEditError = vi.fn()
+
+    root.setProps({
+      editing: {
+        onEditCommit: async () => {
+          throw new Error('Server rejected edit')
+        },
+        onEditError,
+      },
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', editable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 120 },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right' },
+      ],
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().startEdit('row-1', 'name')).toBe(true)
+    await root.getApi().commitEdit('Rejected')
+
+    expect(root.store.getRow('row-1')?.name).toBe('Row 1')
+    expect(root.getApi().getEditingState()?.invalid).toBe(true)
+    expect(onEditError).toHaveBeenCalledTimes(1)
+    app.destroy()
+  })
+})
+
 describe('DataTableViewPipeline', () => {
   function createPipelineStore(): ReturnType<typeof createDataTableStore<Row>> {
     return createDataTableStore<Row>({
@@ -895,8 +1014,22 @@ describe('DataTable DSL templates', () => {
         h(TextBlock, { text: String(context.value), ellipsis: true }),
       ]),
     ]
+    const editorSlot = () => [h('input', { value: 'Draft' })]
     const dsl = compileDataTableDslNodes<Row>([
-      h(DataTableColumn, { id: 'name', title: 'Name', field: 'name', resizable: true, sortable: true, filter: 'text', reorderable: true }, { cell: cellSlot }),
+      h(DataTableColumn, {
+        id: 'name',
+        title: 'Name',
+        field: 'name',
+        resizable: true,
+        sortable: true,
+        filter: 'text',
+        reorderable: true,
+        editable: true,
+        editor: 'text',
+      }, {
+        cell: cellSlot,
+        editor: editorSlot,
+      }),
     ])
 
     expect(dsl.columns).toHaveLength(1)
@@ -905,7 +1038,10 @@ describe('DataTable DSL templates', () => {
     expect(dsl.columns[0].sortable).toBe(true)
     expect(dsl.columns[0].filter).toBe('text')
     expect(dsl.columns[0].reorderable).toBe(true)
+    expect(dsl.columns[0].editable).toBe(true)
+    expect(dsl.columns[0].editor).toBe('text')
     expect(dsl.columns[0].cellTemplate).toBeTypeOf('function')
+    expect(dsl.columns[0].editorTemplate).toBeTypeOf('function')
   })
 
   it('turns scoped slots into primitive Nova schemas', () => {
@@ -947,6 +1083,9 @@ describe('DataTable DSL templates', () => {
         searchActive: false,
         searchRowMatched: false,
         searchRowActive: false,
+        editing: false,
+        editingInvalid: false,
+        editingDirty: false,
       },
       zone: 'body',
       store: createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) }),

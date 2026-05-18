@@ -34,6 +34,9 @@ import type {
   DataTableCellRect,
   DataTableDelta,
   DataTableDirtyState,
+  DataTableEditContext,
+  DataTableEditingState,
+  DataTableEditorType,
   DataTableGroupNode,
   DataTableGroupTemplateContext,
   DataTableHoverMode,
@@ -162,9 +165,11 @@ export class DataTableRootNode<
   private tooltipTarget: DataTableInteractionTarget<Row> | null = null
   private tooltipOpenTimer: ReturnType<typeof setTimeout> | null = null
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
+  private editingState: DataTableEditingState<Row> | null = null
   private gestureStartZoomValue = 1
   private gestureActive = false
   private deltaFlushQueued = false
+  private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
   private readonly handleGestureChange = (event: Event) => this.handleTrackpadGestureChange(event as DataTableGestureEvent)
@@ -206,11 +211,13 @@ export class DataTableRootNode<
     })
     this.setupEvents()
     this.setupTooltipKeyboardEvents()
+    this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
       this.teardownTrackpadGestureEvents()
       this.clearScrollbarHideTimer()
       this.clearTooltipTimers()
+      this.teardownEditingKeyboardEvents()
     })
 
     this.api = {
@@ -232,6 +239,10 @@ export class DataTableRootNode<
       getZoom: () => this.getZoomState(),
       setZoom: value => this.setZoom(value),
       resetZoom: () => this.resetZoom(),
+      startEdit: (rowId, columnId) => this.startEdit(rowId, columnId),
+      commitEdit: value => this.commitEdit(value),
+      cancelEdit: () => this.cancelEdit(),
+      getEditingState: () => this.cloneEditingState(),
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
@@ -423,6 +434,7 @@ export class DataTableRootNode<
       this.scrollY = 0
       this.hoverTarget = null
       this.selection = null
+      this.cancelEdit()
     }
     if (changedKeys.includes('scrollbars')) {
       this.clearScrollbarHideTimer()
@@ -435,6 +447,7 @@ export class DataTableRootNode<
       this.tooltipTarget = null
       this.tooltipAlpha = 0
     }
+    if (changedKeys.includes('editing') && this.props.editing === false) this.cancelEdit()
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
   }
@@ -452,6 +465,7 @@ export class DataTableRootNode<
     if (delta > this.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
+    this.syncEditingRect()
     this.refresh(['viewport'])
   }
 
@@ -543,6 +557,7 @@ export class DataTableRootNode<
         scrollbars: this.props.scrollbars,
         tooltip: this.props.tooltip,
         zoom: this.props.zoom,
+        editing: this.props.editing,
         performance: this.props.performance,
       }
     }
@@ -908,6 +923,7 @@ export class DataTableRootNode<
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
     this.viewport = this.createViewport()
+    this.syncEditingRect()
     this.dirty({ update: true, render: true })
     this.nova.invalidate()
   }
@@ -1029,6 +1045,16 @@ export class DataTableRootNode<
         if (context) this.props.onCellClick?.(context)
       }
       event.cancelBubble = true
+    })
+
+    this.on('dblclick', event => {
+      this.trackTooltipModifiers(event)
+      const [x, y] = this.trackPointerPosition(event)
+      if (this.hitScrollbar(x, y) || this.hitResizeHandle(x, y)) return
+      const target = this.resolveInteractionTargetAt(x, y)
+      if (target && this.startEditFromTarget(target, 'doubleClick')) {
+        event.cancelBubble = true
+      }
     })
 
     this.on('dragmove', (event, dx, dy) => {
@@ -1567,6 +1593,11 @@ export class DataTableRootNode<
     const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
     const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
     const searchRowHit = this.viewPipeline.getSearchMatchForRow(rowId)
+    const editing = this.editingState
+    const editingActive = !!editing
+      && editing.rowId === rowId
+      && editing.column.id === columnRect.column.id
+      && editing.zone === zone
     const hoverAffectsCells = !!hover && !isGroupInteractionZone(hover.zone)
     const hovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
     const rowHovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId
@@ -1615,6 +1646,10 @@ export class DataTableRootNode<
       searchRowActive: !!searchRowHit && viewState.search.activeIndex === searchRowHit.index,
       searchMatchIndex: searchHit?.index,
       searchRanges: searchHit?.match.ranges,
+      editing: editingActive,
+      editingInvalid: editingActive ? editing.invalid : false,
+      editingDirty: editingActive ? editing.dirty : false,
+      editingMessage: editingActive ? editing.message : undefined,
     }
   }
 
@@ -2480,6 +2515,351 @@ export class DataTableRootNode<
     this.animateInteractionAlpha('selectionAlpha', 0)
     this.props.onSelectionChange?.(null)
     this.refresh(['interaction'])
+  }
+
+  private setupEditingKeyboardEvents(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('keydown', this.handleEditingKeydown)
+  }
+
+  private teardownEditingKeyboardEvents(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('keydown', this.handleEditingKeydown)
+  }
+
+  private handleEditingKeydownEvent(event: KeyboardEvent): void {
+    if (event.key !== 'Enter' || this.editingState || !this.selectionActive || !this.selection) return
+    if (!this.isEditTriggerEnabled('enter')) return
+    if (this.selection.rowId === undefined || !this.selection.columnId) return
+    if (!this.startEdit(this.selection.rowId, this.selection.columnId)) return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  private isEditTriggerEnabled(trigger: 'doubleClick' | 'enter' | 'programmatic'): boolean {
+    return this.props.editing !== false && this.props.editing.trigger.includes(trigger)
+  }
+
+  private startEditFromTarget(target: DataTableInteractionTarget<Row>, trigger: 'doubleClick' | 'enter' | 'programmatic'): boolean {
+    if (!this.isEditTriggerEnabled(trigger)) return false
+    const context = this.createCellContext(target)
+    if (!context || !this.canEditCell(context)) return false
+    return this.openEditor(context)
+  }
+
+  private startEdit(rowId: DataTableRowId, columnId: string): boolean {
+    if (this.props.editing === false) return false
+
+    const target = this.resolveEditTarget(rowId, columnId, true)
+    if (!target) return false
+    const context = this.createCellContext(target)
+    if (!context || !this.canEditCell(context)) return false
+    return this.openEditor(context)
+  }
+
+  private resolveEditTarget(rowId: DataTableRowId, columnId: string, ensureVisible = false): DataTableInteractionTarget<Row> | null {
+    const column = this.resolvedColumns.find(item => item.id === columnId)
+    if (!column) return null
+
+    const pinnedTarget = this.resolvePinnedEditTarget(rowId, column)
+    if (pinnedTarget) return pinnedTarget
+
+    const rowIndex = this.viewPipeline.findViewIndexByRowId(rowId)
+    if (rowIndex === undefined) return null
+
+    if (ensureVisible) this.scrollCellIntoView(rowIndex, column)
+    const row = this.viewPipeline.getRowAt(rowIndex) ?? this.store.getRow(rowId)
+    if (!row) return null
+
+    const columnRect = this.visibleColumnRects().find(item => item.column.id === column.id)
+    if (!columnRect) return null
+
+    const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+    if (y + this.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight) return null
+
+    const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
+    const rect = {
+      x: columnRect.x,
+      y,
+      width: columnRect.width,
+      height: this.rowHeight,
+    }
+    return {
+      row,
+      rowId,
+      rowIndex,
+      storeIndex,
+      column,
+      columnIndex: columnRect.columnIndex,
+      rect,
+      zone: 'body',
+      value: resolveDataTableValue(row, storeIndex ?? rowIndex, column),
+    }
+  }
+
+  private resolvePinnedEditTarget(rowId: DataTableRowId, column: DataTableResolvedColumn<Row>): DataTableInteractionTarget<Row> | null {
+    const zones: Array<{ zone: 'pinned-top' | 'pinned-bottom'; rows: Array<Row>; y: (index: number) => number }> = [
+      {
+        zone: 'pinned-top',
+        rows: this.props.pinnedRows.top ?? [],
+        y: index => this.headerHeight + index * this.rowHeight,
+      },
+      {
+        zone: 'pinned-bottom',
+        rows: this.props.pinnedRows.bottom ?? [],
+        y: index => this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight + index * this.rowHeight,
+      },
+    ]
+
+    const columnRect = this.visibleColumnRects().find(item => item.column.id === column.id)
+    if (!columnRect) return null
+
+    for (const zone of zones) {
+      const rowIndex = zone.rows.findIndex((row, index) => this.resolveRenderedRowId(zone.zone, row, index) === rowId)
+      const row = zone.rows[rowIndex]
+      if (!row) continue
+      const rect = {
+        x: columnRect.x,
+        y: zone.y(rowIndex),
+        width: columnRect.width,
+        height: this.rowHeight,
+      }
+      return {
+        row,
+        rowId,
+        rowIndex,
+        column,
+        columnIndex: columnRect.columnIndex,
+        rect,
+        zone: zone.zone,
+        value: resolveDataTableValue(row, rowIndex, column),
+      }
+    }
+
+    return null
+  }
+
+  private scrollCellIntoView(rowIndex: number, column: DataTableResolvedColumn<Row>): void {
+    let nextX = this.scrollX
+    if (!column.pinned) {
+      const centerColumns = this.resolvedColumns.filter(item => !item.pinned)
+      let columnX = 0
+      for (const item of centerColumns) {
+        if (item.id === column.id) break
+        columnX += item.resolvedWidth
+      }
+      if (columnX < this.scrollX) nextX = columnX
+      else if (columnX + column.resolvedWidth > this.scrollX + this.viewport.bodyWidth) {
+        nextX = columnX + column.resolvedWidth - this.viewport.bodyWidth
+      }
+    }
+
+    let nextY = this.scrollY
+    const rowTop = rowIndex * this.rowHeight
+    const rowBottom = rowTop + this.rowHeight
+    if (rowTop < this.scrollY) nextY = rowTop
+    else if (rowBottom > this.scrollY + this.viewport.bodyHeight) nextY = rowBottom - this.viewport.bodyHeight
+
+    if (nextX !== this.scrollX || nextY !== this.scrollY) {
+      this.setScroll(nextX, nextY)
+    }
+  }
+
+  private canEditCell(context: DataTableCellContext<Row>): boolean {
+    if (this.props.editing === false) return false
+    if (context.zone !== 'body' && context.zone !== 'pinned-top' && context.zone !== 'pinned-bottom') return false
+
+    const editable = context.column.editable
+    const allowed = typeof editable === 'function' ? editable(context) : editable === true
+    if (!allowed) return false
+
+    return this.props.editing.onBeforeEditStart?.(context) !== false
+  }
+
+  private openEditor(context: DataTableCellContext<Row>): boolean {
+    if (this.props.editing === false) return false
+    if (this.editingState) this.cancelEdit()
+
+    const initialValue = context.value
+    const draft = this.formatEditValue(initialValue, context)
+    this.editingState = {
+      ...context,
+      renderer: 'dom-overlay',
+      mode: 'cell',
+      active: true,
+      initialValue,
+      value: initialValue,
+      draft,
+      dirty: false,
+      invalid: false,
+    }
+    this.props.editing.onEditStart?.(this.editingState)
+    this.emitEditingChange()
+    this.refresh(['interaction'])
+    return true
+  }
+
+  private async commitEdit(value?: unknown): Promise<void> {
+    if (!this.editingState || this.props.editing === false) return
+
+    const state = this.editingState
+    const draft = value === undefined ? state.draft : value
+    const context = {
+      ...state,
+      draft,
+    } satisfies DataTableEditContext<Row>
+
+    let parsed: unknown
+    try {
+      parsed = this.parseEditValue(draft, context)
+      const validation = await this.validateEditValue(parsed, context)
+      if (validation !== true) {
+        this.setEditingInvalid(validation)
+        return
+      }
+
+      state.draft = draft
+      state.dirty = !Object.is(parsed, state.initialValue)
+      state.invalid = false
+      state.message = undefined
+
+      await this.props.editing.onEditCommit?.({
+        state,
+        value: parsed,
+        previousValue: state.initialValue,
+      })
+
+      if (this.props.editing.optimistic) this.applyCommittedEditValue(state, parsed)
+      this.editingState = null
+      this.emitEditingChange()
+      this.refresh(['data', 'interaction'])
+    } catch (error) {
+      this.setEditingInvalid(error instanceof Error ? error.message : 'Edit commit failed')
+      const nextState = this.editingState ?? state
+      this.props.editing.onEditError?.({
+        state: nextState,
+        error,
+        message: nextState.message,
+      })
+    }
+  }
+
+  private cancelEdit(): void {
+    const state = this.editingState
+    if (!state) return
+
+    this.editingState = null
+    if (this.props.editing !== false) this.props.editing.onEditCancel?.(state)
+    this.emitEditingChange()
+    this.refresh(['interaction'])
+  }
+
+  private cloneEditingState(): DataTableEditingState<Row> | null {
+    return this.editingState ? { ...this.editingState } : null
+  }
+
+  private emitEditingChange(): void {
+    this.props.onEditingChange?.(this.cloneEditingState())
+  }
+
+  private setEditingInvalid(message: string): void {
+    if (!this.editingState) return
+
+    this.editingState = {
+      ...this.editingState,
+      invalid: true,
+      message,
+    }
+    this.emitEditingChange()
+    this.refresh(['interaction'])
+  }
+
+  private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): void {
+    if (state.zone === 'body') {
+      this.store.setCell(state.rowId, state.column.id, value)
+      return
+    }
+
+    const key = typeof state.column.field === 'string'
+      ? state.column.field
+      : state.column.id
+    state.row[key as keyof Row] = value as Row[keyof Row]
+  }
+
+  private parseEditValue(raw: unknown, context: DataTableEditContext<Row>): unknown {
+    const editor = this.resolveEditorType(context.column)
+    if (context.column.parseEditValue) return context.column.parseEditValue(raw, context)
+    if (typeof context.column.editor === 'object' && context.column.editor.parse) {
+      return context.column.editor.parse(raw, context)
+    }
+    if (editor === 'number') return raw === '' || raw === null || raw === undefined ? null : Number(raw)
+    if (editor === 'checkbox') return Boolean(raw)
+    return raw
+  }
+
+  private formatEditValue(value: unknown, context: DataTableCellContext<Row>): unknown {
+    const editContext = {
+      ...context,
+      initialValue: value,
+      draft: value,
+    } as DataTableEditContext<Row>
+    if (context.column.formatEditValue) return context.column.formatEditValue(value, editContext)
+    if (typeof context.column.editor === 'object' && context.column.editor.format) {
+      return context.column.editor.format(value, editContext)
+    }
+    return value
+  }
+
+  private async validateEditValue(value: unknown, context: DataTableEditContext<Row>): Promise<true | string> {
+    if (context.column.validateEditValue) return context.column.validateEditValue(value, context)
+    if (typeof context.column.editor === 'object' && context.column.editor.validate) {
+      return context.column.editor.validate(value, context)
+    }
+    return true
+  }
+
+  private resolveEditorType(column: DataTableResolvedColumn<Row>): DataTableEditorType {
+    if (typeof column.editor === 'string') return column.editor
+    if (typeof column.editor === 'object') return column.editor.type
+    return 'text'
+  }
+
+  private syncEditingRect(): void {
+    if (!this.editingState) return
+
+    const target = this.resolveEditTarget(this.editingState.rowId, this.editingState.column.id)
+    if (!target) {
+      this.cancelEdit()
+      return
+    }
+
+    const context = this.createCellContext(target)
+    if (!context) {
+      this.cancelEdit()
+      return
+    }
+
+    this.editingState = {
+      ...this.editingState,
+      row: context.row,
+      rowIndex: context.rowIndex,
+      viewRowIndex: context.viewRowIndex,
+      storeIndex: context.storeIndex,
+      column: context.column,
+      columnIndex: context.columnIndex,
+      rect: context.rect,
+      state: {
+        ...context.state,
+        editing: true,
+        editingInvalid: this.editingState.invalid,
+        editingDirty: this.editingState.dirty,
+        editingMessage: this.editingState.message,
+      },
+      zone: context.zone,
+      store: context.store,
+      api: context.api,
+    }
+    this.emitEditingChange()
   }
 
   private getInteractionState(): DataTableInteractionState<Row> {

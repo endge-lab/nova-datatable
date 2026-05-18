@@ -97,6 +97,31 @@ export const DataTableColumn = createDataTableDslMarker('DataTableColumn', {
     required: false,
     default: false,
   },
+  editable: {
+    type: [Boolean, Function],
+    required: false,
+    default: false,
+  },
+  editor: {
+    type: [String, Object],
+    required: false,
+  },
+  editorOptions: {
+    type: null,
+    required: false,
+  },
+  parseEditValue: {
+    type: Function,
+    required: false,
+  },
+  formatEditValue: {
+    type: Function,
+    required: false,
+  },
+  validateEditValue: {
+    type: Function,
+    required: false,
+  },
   tooltip: {
     type: [Boolean, String, Object, Function],
     required: false,

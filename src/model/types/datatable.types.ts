@@ -51,6 +51,8 @@ export type DataTableScrollbarVisibility = Extract<NovaScrollbarVisibility, 'alw
 export type DataTableScrollbarAxis = NovaScrollbarAxis
 export type DataTableZoomMode = 'density' | 'layout' | 'text' | 'custom'
 export type DataTableZoomAffect = 'rows' | 'headers' | 'columns' | 'text' | 'icons'
+export type DataTableEditTrigger = 'doubleClick' | 'enter' | 'programmatic'
+export type DataTableEditorType = 'text' | 'number' | 'select' | 'checkbox' | 'date'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -292,6 +294,10 @@ export interface DataTableCellState {
   searchRowActive: boolean
   searchMatchIndex?: number
   searchRanges?: Array<DataTableSearchRange>
+  editing: boolean
+  editingInvalid: boolean
+  editingDirty: boolean
+  editingMessage?: string
   dragging?: boolean
 }
 
@@ -321,6 +327,99 @@ export interface DataTableCellContext<Row extends Record<string, any> = Record<s
 export type DataTableTemplate<Row extends Record<string, any> = Record<string, any>> = (
   context: DataTableCellContext<Row>,
 ) => NovaSchema
+
+export interface DataTableEditorConfig<Row extends Record<string, any> = Record<string, any>> {
+  type: DataTableEditorType
+  options?: unknown
+  parse?: (raw: unknown, context: DataTableEditContext<Row>) => unknown
+  format?: (value: unknown, context: DataTableEditContext<Row>) => string
+  validate?: (value: unknown, context: DataTableEditContext<Row>) => true | string | Promise<true | string>
+}
+
+export interface DataTableEditContext<Row extends Record<string, any> = Record<string, any>> {
+  row: Row
+  rowId: DataTableRowId
+  rowIndex: number
+  viewRowIndex: number
+  storeIndex?: number
+  column: DataTableResolvedColumn<Row>
+  columnIndex: number
+  value: unknown
+  initialValue: unknown
+  draft: unknown
+  rect: DataTableCellRect
+  state: DataTableCellState
+  zone: DataTableCellContext<Row>['zone']
+  store: DataTableStoreApi<Row>
+  api: DataTableRootApi<Row>
+}
+
+export interface DataTableEditingState<Row extends Record<string, any> = Record<string, any>>
+  extends DataTableEditContext<Row> {
+  renderer: 'dom-overlay'
+  mode: 'cell'
+  active: true
+  dirty: boolean
+  invalid: boolean
+  message?: string
+}
+
+export interface DataTableEditCommitPayload<Row extends Record<string, any> = Record<string, any>> {
+  state: DataTableEditingState<Row>
+  value: unknown
+  previousValue: unknown
+}
+
+export interface DataTableEditError<Row extends Record<string, any> = Record<string, any>> {
+  state: DataTableEditingState<Row>
+  error: unknown
+  message?: string
+}
+
+export interface DataTableDomEditorContext<Row extends Record<string, any> = Record<string, any>>
+  extends DataTableEditingState<Row> {
+  setDraft: (value: unknown) => void
+  commit: (value?: unknown) => void | Promise<void>
+  cancel: () => void
+}
+
+export type DataTableDomEditorTemplate<Row extends Record<string, any> = Record<string, any>> = (
+  context: DataTableDomEditorContext<Row>,
+) => unknown
+
+export interface DataTableEditingOptions<Row extends Record<string, any> = Record<string, any>> {
+  renderer?: 'dom-overlay'
+  mode?: 'cell'
+  trigger?: DataTableEditTrigger | Array<DataTableEditTrigger>
+  commitOnBlur?: boolean
+  commitOnEnter?: boolean
+  cancelOnEscape?: boolean
+  selectTextOnStart?: boolean
+  optimistic?: boolean
+  className?: string
+  onBeforeEditStart?: (context: DataTableCellContext<Row>) => boolean | void
+  onEditStart?: (state: DataTableEditingState<Row>) => void
+  onEditCommit?: (payload: DataTableEditCommitPayload<Row>) => void | Promise<void>
+  onEditCancel?: (state: DataTableEditingState<Row>) => void
+  onEditError?: (error: DataTableEditError<Row>) => void
+}
+
+export interface DataTableResolvedEditingOptions<Row extends Record<string, any> = Record<string, any>> {
+  renderer: 'dom-overlay'
+  mode: 'cell'
+  trigger: Array<DataTableEditTrigger>
+  commitOnBlur: boolean
+  commitOnEnter: boolean
+  cancelOnEscape: boolean
+  selectTextOnStart: boolean
+  optimistic: boolean
+  className: string
+  onBeforeEditStart?: (context: DataTableCellContext<Row>) => boolean | void
+  onEditStart?: (state: DataTableEditingState<Row>) => void
+  onEditCommit?: (payload: DataTableEditCommitPayload<Row>) => void | Promise<void>
+  onEditCancel?: (state: DataTableEditingState<Row>) => void
+  onEditError?: (error: DataTableEditError<Row>) => void
+}
 
 export interface DataTableInteractionHoverOptions {
   mode?: DataTableHoverMode
@@ -779,6 +878,13 @@ export interface DataTableColumnInput<Row extends Record<string, any> = Record<s
   reorderable?: boolean
   animated?: boolean
   tooltip?: false | DataTableCellTooltip<Row>
+  editable?: boolean | ((context: DataTableCellContext<Row>) => boolean)
+  editor?: DataTableEditorType | DataTableEditorConfig<Row>
+  editorOptions?: unknown
+  editorTemplate?: DataTableDomEditorTemplate<Row>
+  parseEditValue?: (raw: unknown, context: DataTableEditContext<Row>) => unknown
+  formatEditValue?: (value: unknown, context: DataTableEditContext<Row>) => string
+  validateEditValue?: (value: unknown, context: DataTableEditContext<Row>) => true | string | Promise<true | string>
   cellTemplate?: DataTableTemplate<Row>
   headerTemplate?: DataTableTemplate<Row>
   filterTemplate?: DataTableTemplate<Row>
@@ -848,6 +954,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<Row>
   zoom?: false | DataTableZoomOptions
+  editing?: false | DataTableEditingOptions<Row>
   performance?: DataTablePerformanceOptions
 }
 
@@ -879,6 +986,7 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
   onZoomChange?: (state: DataTableZoomState) => void
+  onEditingChange?: (state: DataTableEditingState<Row> | null) => void
 }
 
 export interface DataTableRootResolvedProps<Row extends Record<string, any> = Record<string, any>>
@@ -894,6 +1002,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   scrollbars: false | DataTableResolvedScrollbarOptions
   tooltip: false | DataTableResolvedTooltipOptions<Row>
   zoom: false | DataTableResolvedZoomOptions
+  editing: false | DataTableResolvedEditingOptions<Row>
   performance: DataTableResolvedPerformanceOptions
   hoverAlpha: number
   selectionAlpha: number
@@ -921,6 +1030,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
   onZoomChange?: (state: DataTableZoomState) => void
+  onEditingChange?: (state: DataTableEditingState<Row> | null) => void
 }
 
 export interface DataTableColumnResizePayload<Row extends Record<string, any> = Record<string, any>> {
@@ -948,6 +1058,10 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   getZoom: () => DataTableZoomState
   setZoom: (value: number | DataTableZoomOptions) => void
   resetZoom: () => void
+  startEdit: (rowId: DataTableRowId, columnId: string) => boolean
+  commitEdit: (value?: unknown) => Promise<void>
+  cancelEdit: () => void
+  getEditingState: () => DataTableEditingState<Row> | null
   refresh: () => void
   batch: (callback: (api: DataTableRootApi<Row>) => void) => void
   getViewport: () => DataTableViewport

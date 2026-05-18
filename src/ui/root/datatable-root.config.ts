@@ -3,9 +3,12 @@ import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
   DataTablePerformanceOptions,
+  DataTableEditingOptions,
+  DataTableEditTrigger,
   DataTableScrollbarAxisOptions,
   DataTableResolvedInteractionOptions,
   DataTableResolvedPerformanceOptions,
+  DataTableResolvedEditingOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
   DataTableResolvedTooltipOptions,
@@ -45,6 +48,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   scrollbars: { type: 'any' },
   tooltip: { type: 'any' },
   zoom: { type: 'any' },
+  editing: { type: 'any' },
   performance: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
@@ -71,6 +75,8 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   onCellLeave: { type: 'function' },
   onCellClick: { type: 'function' },
   onSelectionChange: { type: 'function' },
+  onZoomChange: { type: 'function' },
+  onEditingChange: { type: 'function' },
 } as const
 
 /**
@@ -113,6 +119,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     }),
     tooltip: normalizeDataTableTooltip(props.tooltip),
     zoom: normalizeDataTableZoom(props.zoom),
+    editing: normalizeDataTableEditing(props.editing),
     performance: normalizeDataTablePerformance(props.performance),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
@@ -139,6 +146,31 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onCellLeave: props.onCellLeave,
     onCellClick: props.onCellClick,
     onSelectionChange: props.onSelectionChange,
+    onZoomChange: props.onZoomChange,
+    onEditingChange: props.onEditingChange,
+  }
+}
+
+export function normalizeDataTableEditing<Row extends Record<string, any>>(
+  editing: false | DataTableEditingOptions<Row> | undefined,
+): false | DataTableResolvedEditingOptions<Row> {
+  if (editing === false) return false
+
+  return {
+    renderer: 'dom-overlay',
+    mode: 'cell',
+    trigger: normalizeEditTriggers(editing?.trigger),
+    commitOnBlur: editing?.commitOnBlur ?? true,
+    commitOnEnter: editing?.commitOnEnter ?? true,
+    cancelOnEscape: editing?.cancelOnEscape ?? true,
+    selectTextOnStart: editing?.selectTextOnStart ?? true,
+    optimistic: editing?.optimistic ?? true,
+    className: editing?.className ?? '',
+    onBeforeEditStart: editing?.onBeforeEditStart,
+    onEditStart: editing?.onEditStart,
+    onEditCommit: editing?.onEditCommit,
+    onEditCancel: editing?.onEditCancel,
+    onEditError: editing?.onEditError,
   }
 }
 
@@ -442,6 +474,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'scrollbars',
         'tooltip',
         'zoom',
+        'editing',
         'performance',
       ],
       render: [
@@ -485,6 +518,14 @@ function finiteUnit(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value)
     ? Math.max(0, Math.min(1, value))
     : fallback
+}
+
+function normalizeEditTriggers(trigger: DataTableEditingOptions['trigger']): Array<DataTableEditTrigger> {
+  const defaults: Array<DataTableEditTrigger> = ['doubleClick', 'enter', 'programmatic']
+  const source = Array.isArray(trigger) ? trigger : trigger ? [trigger] : defaults
+  const allowed = new Set<DataTableEditTrigger>(defaults)
+  const normalized = source.filter((item): item is DataTableEditTrigger => allowed.has(item as DataTableEditTrigger))
+  return normalized.length > 0 ? [...new Set(normalized)] : defaults
 }
 
 function finiteNumber(value: unknown, fallback: number): number {

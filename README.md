@@ -35,3 +35,41 @@ store.batch(api => {
 ```
 
 Если template ячейки не задан, колонка рендерит значение встроенным text fallback с `ellipsis`. Порядок templates: column `#cell`, table `#cell`, default text fallback.
+
+## DOM overlay editing
+
+V1 редактирует одну активную ячейку через DOM-элемент поверх Canvas. Canvas/Nova DSL остается renderer для таблицы, а `#editor` является обычным Vue/DOM slot.
+
+```vue
+<NovaDataTable
+  ref="table"
+  :store="store"
+  :columns="columns"
+  :editing="{ renderer: 'dom-overlay', trigger: ['doubleClick', 'enter'] }"
+/>
+```
+
+```ts
+const columns = [
+  {
+    id: 'name',
+    field: 'name',
+    title: 'Name',
+    editable: true,
+    editor: 'text',
+    validateEditValue: value => String(value).trim() ? true : 'Name is required',
+  },
+]
+```
+
+```vue
+<DataTableColumn id="status" field="status" editable editor="select" :editor-options="{ options: ['active', 'review', 'blocked'] }">
+  <template #editor="{ draft, setDraft, commit, cancel }">
+    <select :value="draft" @change="setDraft(($event.target as HTMLSelectElement).value)" @keydown.enter="commit" @keydown.esc="cancel">
+      <option value="active">active</option>
+      <option value="review">review</option>
+      <option value="blocked">blocked</option>
+    </select>
+  </template>
+</DataTableColumn>
+```

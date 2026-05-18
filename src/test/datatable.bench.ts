@@ -57,6 +57,15 @@ describe('NovaDataTable benchmarks', () => {
     })
   }, { iterations: 8 })
 
+  bench('10k edit commits through setCell path', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(20_000) })
+    store.batch(api => {
+      for (let index = 0; index < 10_000; index += 1) {
+        api.setCell(`row-${index}`, 'name', `Edited ${index}`)
+      }
+    })
+  }, { iterations: 8 })
+
   bench('100k cell patches in one delta batch', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(120_000) })
     store.applyDeltaBatch(Array.from({ length: 100_000 }, (_item, index) => ({

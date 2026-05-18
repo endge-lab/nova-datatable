@@ -4,6 +4,8 @@ import type {
   DataTableCellContext,
   DataTableCellRect,
   DataTableColumnInput,
+  DataTableDomEditorContext,
+  DataTableDomEditorTemplate,
   DataTableGroupTemplate,
   DataTableGroupTemplateContext,
   DataTableInteractionLayerContext,
@@ -187,12 +189,28 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
     reorderable: readBooleanProp(node, 'reorderable'),
     animated: readBooleanProp(node, 'animated'),
     tooltip: tooltip === true ? undefined : tooltip as DataTableColumnInput<Row>['tooltip'],
+    editable: readProp(node, 'editable') as DataTableColumnInput<Row>['editable'],
+    editor: readProp(node, 'editor') as DataTableColumnInput<Row>['editor'],
+    editorOptions: readProp(node, 'editorOptions'),
+    parseEditValue: readFunctionProp(node, 'parseEditValue') as DataTableColumnInput<Row>['parseEditValue'],
+    formatEditValue: readFunctionProp(node, 'formatEditValue') as DataTableColumnInput<Row>['formatEditValue'],
+    validateEditValue: readFunctionProp(node, 'validateEditValue') as DataTableColumnInput<Row>['validateEditValue'],
+    editorTemplate: createDomEditorTemplate<Row>(
+      slots.editor as ((context: DataTableDomEditorContext<Row>) => Array<VNode>) | undefined,
+    ),
     cellTemplate: createSlotTemplate<Row>(slots.cell as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     headerTemplate: createSlotTemplate<Row>(slots.header as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
     filterTemplate: createSlotTemplate<Row>(slots.filter as ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined),
   }
 
   return dropUndefined(column)
+}
+
+export function createDomEditorTemplate<Row extends Record<string, any>>(
+  slot: ((context: DataTableDomEditorContext<Row>) => Array<VNode>) | undefined,
+): DataTableDomEditorTemplate<Row> | undefined {
+  if (!slot) return undefined
+  return context => slot(context)
 }
 
 function compileGroupingNode<Row extends Record<string, any>>(node: VNode): DataTableViewGroupingOptions<Row> {
