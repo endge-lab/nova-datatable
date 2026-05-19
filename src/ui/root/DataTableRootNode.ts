@@ -207,6 +207,8 @@ export class DataTableRootNode<
   private cellEnterStartedAt = new Map<string, number>()
   private cellEnterRenderCount = 0
   private suppressCellEnterUntil = 0
+  private suppressTextSelectionIndexUntil = 0
+  private textRefinementUntil = 0
   private visibleAnimatedCells = false
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
@@ -493,6 +495,7 @@ export class DataTableRootNode<
     this.textSelection.configure(resolveCoreTextSelectionOptions(this.props.textSelection))
     this.textSelection.beginFrame()
     this.renderGrid()
+    this.continueTextRefinementIfNeeded()
   }
 
   /**
@@ -546,6 +549,10 @@ export class DataTableRootNode<
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
     if (delta > this.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
+    if (delta > 0) {
+      this.suppressTextSelectionIndexFor('scroll')
+      this.requestTextRefinement('scroll')
+    }
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
     this.syncEditingRect()
@@ -709,6 +716,8 @@ export class DataTableRootNode<
     const nextY = this.viewport.contentHeight * anchorYRatio - relativeY
     this.setScroll(nextX, nextY)
     this.refresh(['layout', 'viewport'])
+    this.suppressTextSelectionIndexFor('zoom')
+    this.requestTextRefinement('zoom')
     this.props.onZoomChange?.(this.getZoomState())
   }
 
@@ -1034,6 +1043,32 @@ export class DataTableRootNode<
     this.viewport = this.createViewport()
     this.syncEditingRect()
     this.dirty({ update: true, render: true })
+    this.nova.invalidate()
+  }
+
+  private suppressTextSelectionIndexFor(reason: 'scroll' | 'zoom'): void {
+    const text = this.props.performance.text
+    if (!text || !text.disableTextSelectionIndexOnScroll || this.textSelectionActive) return
+
+    const duration = reason === 'zoom'
+      ? Math.max(text.refineAfterZoomMs, 120)
+      : Math.max(text.refineAfterScrollMs, 80)
+    this.suppressTextSelectionIndexUntil = Math.max(this.suppressTextSelectionIndexUntil, performance.now() + duration)
+  }
+
+  private requestTextRefinement(reason: 'scroll' | 'zoom'): void {
+    const text = this.props.performance.text
+    if (!text || text.raster !== 'deferred') return
+
+    const duration = reason === 'zoom' ? text.refineAfterZoomMs : text.refineAfterScrollMs
+    if (duration <= 0) return
+
+    this.textRefinementUntil = Math.max(this.textRefinementUntil, performance.now() + duration)
+    this.nova.invalidate()
+  }
+
+  private continueTextRefinementIfNeeded(): void {
+    if (performance.now() >= this.textRefinementUntil) return
     this.nova.invalidate()
   }
 
@@ -2002,6 +2037,7 @@ export class DataTableRootNode<
 
     if (template) {
       schema.push(...template(context))
+      this.applyTextPerformanceHints(schema, startIndex)
       this.applyCellEnterOpacity(schema, context, startIndex)
       this.applyColumnDragCellOpacity(schema, context, startIndex)
       this.registerTextSelectionTargets(schema, context, startIndex)
@@ -2009,9 +2045,42 @@ export class DataTableRootNode<
     }
 
     this.renderDefaultCell(schema, context)
+    this.applyTextPerformanceHints(schema, startIndex)
     this.applyCellEnterOpacity(schema, context, startIndex)
     this.applyColumnDragCellOpacity(schema, context, startIndex)
     this.registerTextSelectionTargets(schema, context, startIndex)
+  }
+
+  private applyTextPerformanceHints(schema: NovaSchema, startIndex: number): void {
+    const textOptions = this.props.performance.text
+    if (!textOptions) return
+
+    for (let index = startIndex; index < schema.length; index += 1) {
+      const item = schema[index]
+      if (!item || item.type !== 'text') continue
+
+      item.meta = {
+        ...item.meta,
+        textMode: item.meta?.textMode ?? 'run-atlas',
+        textRole: item.meta?.textRole ?? 'ui-label',
+        textLod: item.meta?.textLod ?? 'always',
+      }
+
+      if (textOptions.skipSubpixelText) {
+        item.x = Math.round(item.x)
+        item.y = Math.round(item.y)
+      }
+
+      if (textOptions.truncate === 'clip') {
+        item.clip = item.clip ?? true
+        if (item.styles?.ellipsis) {
+          item.styles = {
+            ...item.styles,
+            ellipsis: false,
+          }
+        }
+      }
+    }
   }
 
   private applyColumnDragCellOpacity(
@@ -2209,6 +2278,7 @@ export class DataTableRootNode<
 
   private registerTextSelectionTargets(schema: NovaSchema, context: DataTableCellContext<Row>, startIndex: number): void {
     if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    if (this.isTextSelectionIndexSuppressed()) return
     if (!this.isTextSelectionZoneEnabled(context.zone)) return
 
     for (let index = startIndex; index < schema.length; index += 1) {
@@ -2244,6 +2314,10 @@ export class DataTableRootNode<
         copyText: item.text,
       })
     }
+  }
+
+  private isTextSelectionIndexSuppressed(): boolean {
+    return !this.textSelectionActive && performance.now() < this.suppressTextSelectionIndexUntil
   }
 
   private isTextSelectionZoneEnabled(zone: DataTableCellContext<Row>['zone']): boolean {

@@ -5,6 +5,7 @@ import {
   RaphSchedulerType,
   RendererType,
   type NovaAppCreateOptions,
+  type NovaRendererConfigInput,
   type NovaSchemaPlugin,
 } from '@endge/nova'
 import { NovaCanvas, type NovaCanvasReadyPayload } from '@endge/nova-vue'
@@ -22,6 +23,8 @@ import {
   type DataTableClipboardOptions,
   type DataTablePinnedColumns,
   type DataTablePinnedRows,
+  type DataTablePerformanceOptions,
+  type DataTableTextPerformanceMode,
   type DataTableColumnReorderPayload,
   type DataTableFilterExpression,
   type DataTableFilterState,
@@ -79,6 +82,7 @@ interface DataTableVueProps {
   textSelection?: false | DataTableTextSelectionOptions
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<BaseRow>
+  performance?: DataTablePerformanceOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
   scrollbarLayerTemplate?: DataTableScrollbarLayerTemplate<BaseRow>
@@ -140,6 +144,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   textSelection: undefined,
   zoom: undefined,
   editing: undefined,
+  performance: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
   scrollbarLayerTemplate: undefined,
@@ -360,6 +365,7 @@ const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
   },
   renderer: {
     main: resolveRendererType(props.renderer),
+    config: resolveRendererConfig(props.performance),
   },
   scheduler: {
     type: RaphSchedulerType.AnimationFrame,
@@ -370,6 +376,54 @@ const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
     telemetry: false,
   },
 }))
+
+function resolveRendererConfig(performance: DataTablePerformanceOptions | undefined): NovaRendererConfigInput | undefined {
+  const text = performance?.text
+  if (!text) return undefined
+
+  const mode = text.mode ?? 'balanced'
+  const rasterBudgetMs = resolveTextRasterBudgetMs(mode, text.maxTextRasterPerFrame)
+  const interactionBudgetMs = text.raster === 'sync'
+    ? rasterBudgetMs
+    : Math.min(rasterBudgetMs, mode === 'ultra-fast' ? 1.2 : 2.5)
+
+  return {
+    text: {
+      quality: mode === 'quality' ? 'quality' : mode === 'balanced' ? 'balanced' : 'performance',
+      mode: 'run-atlas',
+      dynamicBuckets: mode === 'quality' || mode === 'balanced',
+      fallbackPreviousScale: true,
+      prewarmAdjacentBuckets: mode === 'quality',
+      rasterBudgetMs,
+      bucketThrottleMs: mode === 'quality' ? 40 : mode === 'balanced' ? 60 : 0,
+      visibleOnlyRaster: true,
+      maxAtlasMemoryMB: mode === 'ultra-fast' ? 96 : 160,
+      zoomBuckets: mode === 'quality'
+        ? [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
+        : [1],
+      interaction: {
+        mode: mode === 'quality' ? 'stable-quality' : 'performance',
+        idleMs: mode === 'quality' ? 80 : 140,
+        rasterBudgetMs: interactionBudgetMs,
+        maxRasterScale: mode === 'quality' ? 4 : 1,
+        freezeBuckets: mode !== 'quality',
+        prewarm: false,
+      },
+      lod: {
+        enabled: true,
+        minScreenWidthPx: mode === 'ultra-fast' ? 10 : 7,
+        minScreenHeightPx: mode === 'ultra-fast' ? 9 : 6,
+        maxVisibleRuns: mode === 'ultra-fast' ? 6_000 : mode === 'fast' ? 12_000 : 18_000,
+      },
+    },
+  }
+}
+
+function resolveTextRasterBudgetMs(mode: DataTableTextPerformanceMode, maxTextRasterPerFrame: number | undefined): number {
+  if (mode === 'quality') return 12
+  const normalized = Math.max(50, Math.min(20_000, Math.floor(Number.isFinite(maxTextRasterPerFrame) ? Number(maxTextRasterPerFrame) : 1_000)))
+  return Math.max(1, Math.min(16, normalized / 250))
+}
 
 function resolveRendererType(renderer: DataTableVueProps['renderer']): RendererType {
   const rendererValue = String(renderer)
@@ -687,6 +741,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :text-selection="textSelection"
         :zoom="zoom"
         :editing="rootEditing"
+        :performance="performance"
         :cell-template="rootCellTemplate"
         :header-template="rootHeaderTemplate"
         :interaction-layer-template="rootInteractionLayerTemplate"

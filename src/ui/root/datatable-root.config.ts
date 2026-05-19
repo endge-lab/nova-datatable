@@ -4,6 +4,7 @@ import type {
   DataTableInteractionOptions,
   DataTableClipboardOptions,
   DataTablePerformanceOptions,
+  DataTableResolvedTextPerformanceOptions,
   DataTableEditingOptions,
   DataTableEditTrigger,
   DataTableScrollbarAxisOptions,
@@ -208,7 +209,34 @@ export function normalizeDataTablePerformance(
     maxClientRows: Math.max(1_000, Math.floor(finiteNumber(performance?.maxClientRows, 100_000))),
     deltaFrameBudgetMs: finiteClamp(performance?.deltaFrameBudgetMs, 1, 32, 6),
     workerPipeline: performance?.workerPipeline ?? true,
+    text: normalizeDataTableTextPerformance(performance?.text),
   }
+}
+
+function normalizeDataTableTextPerformance(
+  text: DataTablePerformanceOptions['text'] | undefined,
+): false | DataTableResolvedTextPerformanceOptions {
+  if (text === undefined) return false
+  if (text === false) return false
+
+  const mode = normalizeTextPerformanceMode(text?.mode)
+  return {
+    mode,
+    cache: text?.cache === 'none' ? 'none' : 'visible-reuse',
+    raster: text?.raster ?? (mode === 'quality' ? 'sync' : 'deferred'),
+    batchDefaultCells: text?.batchDefaultCells ?? true,
+    maxTextRasterPerFrame: Math.max(50, Math.min(20_000, Math.floor(finiteNumber(text?.maxTextRasterPerFrame, mode === 'ultra-fast' ? 500 : 1_000)))),
+    skipSubpixelText: text?.skipSubpixelText ?? mode !== 'quality',
+    disableTextSelectionIndexOnScroll: text?.disableTextSelectionIndexOnScroll ?? mode !== 'quality',
+    truncate: text?.truncate ?? (mode === 'quality' ? 'ellipsis' : 'clip'),
+    refineAfterZoomMs: finiteClamp(text?.refineAfterZoomMs, 0, 2_000, mode === 'quality' ? 600 : 220),
+    refineAfterScrollMs: finiteClamp(text?.refineAfterScrollMs, 0, 1_000, mode === 'quality' ? 280 : 120),
+  }
+}
+
+function normalizeTextPerformanceMode(value: unknown): DataTableResolvedTextPerformanceOptions['mode'] {
+  if (value === 'quality' || value === 'balanced' || value === 'fast' || value === 'ultra-fast') return value
+  return 'balanced'
 }
 
 export function normalizeDataTableView(view: DataTableViewOptions | undefined): DataTableResolvedViewOptions {

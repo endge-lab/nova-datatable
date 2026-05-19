@@ -402,6 +402,7 @@ export interface DataTablePerformanceOptions {
   maxClientRows?: number
   deltaFrameBudgetMs?: number
   workerPipeline?: boolean
+  text?: false | DataTableTextPerformanceOptions
 }
 
 export interface DataTableResolvedPerformanceOptions {
@@ -409,6 +410,38 @@ export interface DataTableResolvedPerformanceOptions {
   maxClientRows: number
   deltaFrameBudgetMs: number
   workerPipeline: boolean
+  text: false | DataTableResolvedTextPerformanceOptions
+}
+
+export type DataTableTextPerformanceMode = 'quality' | 'balanced' | 'fast' | 'ultra-fast'
+export type DataTableTextPerformanceCache = 'none' | 'visible-reuse'
+export type DataTableTextPerformanceRaster = 'sync' | 'deferred'
+export type DataTableTextPerformanceTruncate = 'ellipsis' | 'clip'
+
+export interface DataTableTextPerformanceOptions {
+  mode?: DataTableTextPerformanceMode
+  cache?: DataTableTextPerformanceCache
+  raster?: DataTableTextPerformanceRaster
+  batchDefaultCells?: boolean
+  maxTextRasterPerFrame?: number
+  skipSubpixelText?: boolean
+  disableTextSelectionIndexOnScroll?: boolean
+  truncate?: DataTableTextPerformanceTruncate
+  refineAfterZoomMs?: number
+  refineAfterScrollMs?: number
+}
+
+export interface DataTableResolvedTextPerformanceOptions {
+  mode: DataTableTextPerformanceMode
+  cache: DataTableTextPerformanceCache
+  raster: DataTableTextPerformanceRaster
+  batchDefaultCells: boolean
+  maxTextRasterPerFrame: number
+  skipSubpixelText: boolean
+  disableTextSelectionIndexOnScroll: boolean
+  truncate: DataTableTextPerformanceTruncate
+  refineAfterZoomMs: number
+  refineAfterScrollMs: number
 }
 
 export interface DataTableLazySource<Row extends Record<string, any>> {
