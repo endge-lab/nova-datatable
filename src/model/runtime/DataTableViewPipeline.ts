@@ -411,7 +411,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const toIndex = clampInteger(payload.toIndex, 0, Math.max(0, ids.length - 1))
     const [id] = ids.splice(fromIndex, 1)
     if (id !== undefined) ids.splice(toIndex, 0, id)
-    this.columnOrder = payload.order ? [...payload.order] : ids
+    this.columnOrder = payload.order ? normalizeColumnOrder(payload.order, columns) : ids
     return {
       ...payload,
       columnId: payload.columnId || id || '',
@@ -419,6 +419,15 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       toIndex,
       order: [...this.columnOrder],
     }
+  }
+
+  setColumnOrder(order: Array<string>, columns: Array<DataTableColumnInput<Row>>): Array<string> {
+    this.columnOrder = normalizeColumnOrder(order, columns)
+    return [...this.columnOrder]
+  }
+
+  resetColumnOrder(): void {
+    this.columnOrder = []
   }
 
   reset(): void {
@@ -891,6 +900,29 @@ function cloneExpanded(value: 'all' | 'none' | Array<string>): 'all' | 'none' | 
 
 function normalizeSort(sort: DataTableSortState): DataTableSortState {
   return sort.map((rule, index) => ({ ...rule, priority: index }))
+}
+
+function normalizeColumnOrder<Row extends Record<string, any>>(
+  order: Array<string>,
+  columns: Array<DataTableColumnInput<Row>>,
+): Array<string> {
+  const columnIds = columns.map(column => column.id)
+  const columnSet = new Set(columnIds)
+  const seen = new Set<string>()
+  const next: Array<string> = []
+
+  for (const id of order) {
+    if (!columnSet.has(id) || seen.has(id)) continue
+    seen.add(id)
+    next.push(id)
+  }
+
+  for (const id of columnIds) {
+    if (seen.has(id)) continue
+    next.push(id)
+  }
+
+  return next
 }
 
 function cloneFilters(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState | DataTableFilterExpression {

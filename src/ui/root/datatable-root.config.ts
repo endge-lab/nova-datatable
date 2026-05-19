@@ -11,12 +11,14 @@ import type {
   DataTableResolvedEditingOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
+  DataTableResolvedTextSelectionOptions,
   DataTableResolvedTooltipOptions,
   DataTableResolvedViewOptions,
   DataTableResolvedZoomOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableScrollbarOptions,
+  DataTableTextSelectionOptions,
   DataTableTooltipOptions,
   DataTableViewOptions,
   DataTableZoomAffect,
@@ -47,6 +49,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   view: { type: 'object' },
   scrollbars: { type: 'any' },
   tooltip: { type: 'any' },
+  textSelection: { type: 'any' },
   zoom: { type: 'any' },
   editing: { type: 'any' },
   performance: { type: 'object' },
@@ -118,6 +121,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
       thumbHoverColor: common.hoverBackground,
     }),
     tooltip: normalizeDataTableTooltip(props.tooltip),
+    textSelection: normalizeDataTableTextSelection(props.textSelection),
     zoom: normalizeDataTableZoom(props.zoom),
     editing: normalizeDataTableEditing(props.editing),
     performance: normalizeDataTablePerformance(props.performance),
@@ -321,6 +325,22 @@ export function normalizeDataTableTooltip<Row extends Record<string, any>>(
   }
 }
 
+export function normalizeDataTableTextSelection(
+  textSelection: false | DataTableTextSelectionOptions | undefined,
+): false | DataTableResolvedTextSelectionOptions {
+  if (textSelection === false) return false
+
+  return {
+    enabled: textSelection?.enabled ?? false,
+    mode: textSelection?.mode ?? 'visible-cells',
+    cellText: textSelection?.cellText ?? true,
+    headerText: textSelection?.headerText ?? true,
+    pinnedRows: textSelection?.pinnedRows ?? true,
+    copyFormat: textSelection?.copyFormat ?? 'tsv',
+    selectionColor: textSelection?.selectionColor ?? 'rgba(37, 99, 235, 0.24)',
+  }
+}
+
 export function normalizeDataTableZoom(
   zoom: false | DataTableZoomOptions | undefined,
 ): false | DataTableResolvedZoomOptions {
@@ -473,6 +493,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'view',
         'scrollbars',
         'tooltip',
+        'textSelection',
         'zoom',
         'editing',
         'performance',

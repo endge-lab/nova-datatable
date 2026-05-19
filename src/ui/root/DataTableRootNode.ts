@@ -11,7 +11,14 @@ import {
   hitNovaScrollbarRect,
   mapNovaScrollbarDragValue,
 } from '@endge/nova-ui-kit'
-import type { NovaApp, NovaSchema, NovaSurface } from '@endge/nova'
+import {
+  NovaTextSelectionService,
+  type NovaTextSelectionRange,
+  type NovaApp,
+  type NovaDragEventMeta,
+  type NovaSchema,
+  type NovaSurface,
+} from '@endge/nova'
 import type { EventList } from '@endge/utils'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import {
@@ -74,6 +81,13 @@ interface ResizeState<Row extends Record<string, any>> {
   startWidth: number
 }
 
+interface ColumnDragState<Row extends Record<string, any>> {
+  column: DataTableResolvedColumn<Row>
+  targetIndex: number
+  pinned: DataTableResolvedColumn<Row>['pinned']
+  active: boolean
+}
+
 interface VisibleColumnRect<Row extends Record<string, any>> {
   column: DataTableResolvedColumn<Row>
   columnIndex: number
@@ -88,6 +102,14 @@ interface ScrollbarDragState {
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
+
+interface DataTableTextSelectionContext {
+  rowId?: DataTableRowId
+  rowIndex: number
+  columnId: string
+  columnIndex: number
+  zone: DataTableCellContext['zone']
+}
 
 interface DataTableGestureEvent extends Event {
   scale?: number
@@ -138,12 +160,16 @@ export class DataTableRootNode<
 
   private readonly api: DataTableRootApi<Row>
   private viewPipeline: DataTableViewPipeline<Row>
+  private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
   private readonly widthOverrides = new Map<string, number>()
   private readonly columnIndexById = new Map<string, number>()
   private readonly pendingDeltas: Array<DataTableDelta<Row>> = []
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
   private resizeState: ResizeState<Row> | null = null
+  private columnDragState: ColumnDragState<Row> | null = null
+  private textSelectionActive = false
+  private suppressNextHeaderClick = false
   private hoverTarget: DataTableInteractionTarget<Row> | null = null
   private hoverActive = false
   private selection: DataTableSelectionState | null = null
@@ -170,6 +196,7 @@ export class DataTableRootNode<
   private gestureActive = false
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
+  private readonly handleTextSelectionKeydown = (event: KeyboardEvent) => this.handleTextSelectionKeydownEvent(event)
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
   private readonly handleGestureChange = (event: Event) => this.handleTrackpadGestureChange(event as DataTableGestureEvent)
@@ -202,6 +229,7 @@ export class DataTableRootNode<
       performance: props.performance,
     })
     this.viewPipeline = new DataTableViewPipeline(this.store)
+    this.textSelection.configure(resolveCoreTextSelectionOptions(props.textSelection))
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
     this.viewport = this.createViewport()
@@ -210,11 +238,13 @@ export class DataTableRootNode<
       cursor: { hover: 'default', dragging: 'col-resize' },
     })
     this.setupEvents()
+    this.setupTextSelectionKeyboardEvents()
     this.setupTooltipKeyboardEvents()
     this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
       this.teardownTrackpadGestureEvents()
+      this.teardownTextSelectionKeyboardEvents()
       this.clearScrollbarHideTimer()
       this.clearTooltipTimers()
       this.teardownEditingKeyboardEvents()
@@ -266,6 +296,8 @@ export class DataTableRootNode<
       getSearchState: () => this.viewPipeline.getSearchState(),
       reorderRows: payload => this.reorderRows(payload),
       reorderColumns: payload => this.reorderColumns(payload),
+      setColumnOrder: order => this.setColumnOrder(order, 'api'),
+      resetColumnOrder: () => this.resetColumnOrder(),
       getGroupingState: () => this.viewPipeline.getGroupingState(),
       setGrouping: groups => this.setGrouping(groups),
       clearGrouping: () => this.clearGrouping(),
@@ -418,6 +450,8 @@ export class DataTableRootNode<
   override render(): void {
     const rootSchema = buildBoxSchema(this.props, this.width, this.height)
     if (rootSchema.length > 0) this.renderer.schema(rootSchema)
+    this.textSelection.configure(resolveCoreTextSelectionOptions(this.props.textSelection))
+    this.textSelection.beginFrame()
     this.renderGrid()
   }
 
@@ -426,6 +460,7 @@ export class DataTableRootNode<
    */
   protected override onPropsChanged(changedKeys: Array<keyof DataTableRootResolvedProps<Row>>): void {
     this.props = normalizeDataTableRootProps(this.props)
+    this.textSelection.configure(resolveCoreTextSelectionOptions(this.props.textSelection))
     this.applyCommonPropsChanged(changedKeys)
     if (changedKeys.includes('store') && this.props.store && this.props.store !== this.store) {
       this.store = this.props.store
@@ -853,6 +888,32 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  private setColumnOrder(order: Array<string>, reason: 'drag' | 'api' = 'api'): void {
+    const nextOrder = this.viewPipeline.setColumnOrder(order, this.props.columns)
+    this.props.onColumnOrderChange?.({
+      columnId: '',
+      fromIndex: -1,
+      toIndex: -1,
+      order: nextOrder,
+      reason,
+    })
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  private resetColumnOrder(): void {
+    this.viewPipeline.resetColumnOrder()
+    this.props.onColumnOrderChange?.({
+      columnId: '',
+      fromIndex: -1,
+      toIndex: -1,
+      order: [],
+      reason: 'reset',
+    })
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
   private setGrouping(groups: Parameters<DataTableRootApi<Row>['setGrouping']>[0]): void {
     this.viewPipeline.setGrouping(groups)
     this.emitViewQuery('grouping')
@@ -1031,6 +1092,10 @@ export class DataTableRootNode<
       const target = this.resolveInteractionTargetAt(x, y)
       if (target) {
         if (target.zone === 'header') {
+          if (this.startColumnDrag(target, event)) {
+            event.cancelBubble = true
+            return
+          }
           this.handleHeaderAction(target, event)
           event.cancelBubble = true
           return
@@ -1040,10 +1105,34 @@ export class DataTableRootNode<
           event.cancelBubble = true
           return
         }
+        if (this.startTextSelectionAt(x, y, event)) {
+          event.cancelBubble = true
+          return
+        }
         this.updateSelection(target)
         const context = this.createCellContext(target)
         if (context) this.props.onCellClick?.(context)
       }
+      event.cancelBubble = true
+    })
+
+    this.on('click', event => {
+      if (!this.props.view.columnOrdering || !this.props.view.columnOrdering.enabled) return
+      this.trackTooltipModifiers(event)
+      const [x, y] = this.trackPointerPosition(event)
+      const target = this.resolveInteractionTargetAt(x, y)
+      if (!target || target.zone !== 'header') return
+
+      if (this.suppressNextHeaderClick) {
+        this.suppressNextHeaderClick = false
+        event.cancelBubble = true
+        return
+      }
+
+      if (!this.columnDragState) return
+      this.columnDragState = null
+      this.releasePointerCapture(event)
+      this.handleHeaderAction(target, event)
       event.cancelBubble = true
     })
 
@@ -1057,23 +1146,47 @@ export class DataTableRootNode<
       }
     })
 
-    this.on('dragmove', (event, dx, dy) => {
+    this.on('dragmove', (event, dx, dy, meta) => {
       if (this.scrollbarDragState) {
         this.updateScrollbarDrag(dx, dy)
         event.cancelBubble = true
         return
       }
+      if (this.columnDragState) {
+        this.updateColumnDrag(meta)
+        event.cancelBubble = true
+        return
+      }
+      if (this.textSelectionActive) {
+        this.updateTextSelectionAt(meta.x, meta.y)
+        event.cancelBubble = true
+        return
+      }
       if (!this.resizeState) return
-      const nextWidth = this.resizeState.startWidth + dx
+      const nextWidth = this.resizeState.startWidth + meta.totalDx
       this.applyColumnWidth(this.resizeState.column.id, nextWidth)
       event.cancelBubble = true
     })
 
-    this.on('dragend', event => {
+    this.on('dragend', (event, meta) => {
       if (this.scrollbarDragState) {
         this.scrollbarDragState = null
         this.releasePointerCapture(event)
         this.scheduleScrollbarHide('scroll')
+        event.cancelBubble = true
+        return
+      }
+      if (this.columnDragState) {
+        this.commitColumnDrag(meta)
+        this.releasePointerCapture(event)
+        event.cancelBubble = true
+        return
+      }
+      if (this.textSelectionActive) {
+        this.textSelectionActive = false
+        this.textSelection.end()
+        this.releasePointerCapture(event)
+        this.refresh(['interaction'])
         event.cancelBubble = true
         return
       }
@@ -1237,6 +1350,93 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  private startColumnDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
+    if (!this.canDragColumn(target)) return false
+
+    this.columnDragState = {
+      column: target.column,
+      targetIndex: this.resolvedColumns.findIndex(column => column.id === target.column.id),
+      pinned: target.column.pinned,
+      active: false,
+    }
+    this.capturePointer(event)
+    return true
+  }
+
+  private canDragColumn(target: DataTableInteractionTarget<Row>): boolean {
+    return target.zone === 'header'
+      && !!this.props.view.columnOrdering
+      && this.props.view.columnOrdering.enabled
+      && target.column.reorderable !== false
+  }
+
+  private updateColumnDrag(meta: NovaDragEventMeta): void {
+    const drag = this.columnDragState
+    if (!drag) return
+
+    if (!drag.active && Math.abs(meta.totalDx) < 6) return
+    drag.active = true
+    const targetIndex = this.resolveColumnDragTargetIndex(meta)
+    if (targetIndex === undefined || targetIndex === drag.targetIndex) return
+
+    drag.targetIndex = targetIndex
+    this.refresh(['interaction'])
+  }
+
+  private commitColumnDrag(meta: NovaDragEventMeta): void {
+    const drag = this.columnDragState
+    if (!drag) return
+
+    if (drag.active) this.suppressNextHeaderClickOnce()
+    if (!drag.active) {
+      this.columnDragState = null
+      return
+    }
+
+    const fromIndex = this.resolvedColumns.findIndex(column => column.id === drag.column.id)
+    const toIndex = this.resolveColumnDragTargetIndex(meta) ?? drag.targetIndex
+    this.columnDragState = null
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
+
+    const order = this.resolvedColumns.map(column => column.id)
+    const [id] = order.splice(fromIndex, 1)
+    if (!id) return
+    order.splice(toIndex, 0, id)
+
+    const next = this.viewPipeline.reorderColumns({
+      columnId: drag.column.id,
+      fromIndex,
+      toIndex,
+      order,
+      reason: 'drag',
+    }, this.props.columns)
+    this.props.onColumnOrderChange?.(next)
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  private suppressNextHeaderClickOnce(): void {
+    this.suppressNextHeaderClick = true
+    setTimeout(() => {
+      this.suppressNextHeaderClick = false
+    }, 0)
+  }
+
+  private resolveColumnDragTargetIndex(meta: NovaDragEventMeta): number | undefined {
+    const drag = this.columnDragState
+    if (!drag) return undefined
+
+    const [x] = this.toLocal(meta.x, meta.y)
+    const target = this.resolveColumnAt(x)
+    if (!target) return drag.targetIndex
+
+    const allowCrossPinned = !!(this.props.view.columnOrdering && this.props.view.columnOrdering.allowCrossPinned)
+    if (!allowCrossPinned && target.column.pinned !== drag.pinned) return drag.targetIndex
+    if (target.column.reorderable === false) return drag.targetIndex
+
+    return this.resolvedColumns.findIndex(column => column.id === target.column.id)
+  }
+
   private renderGrid(): void {
     const headerY = 0
     const topRows = this.props.pinnedRows.top ?? []
@@ -1263,6 +1463,7 @@ export class DataTableRootNode<
 
     this.renderPinnedBottomGroupPanel()
     this.renderSearchOverlay()
+    this.renderTextSelectionOverlay()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
     this.renderTooltipLayer()
@@ -1594,6 +1795,7 @@ export class DataTableRootNode<
     const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
     const searchRowHit = this.viewPipeline.getSearchMatchForRow(rowId)
     const editing = this.editingState
+    const columnDrag = this.columnDragState
     const editingActive = !!editing
       && editing.rowId === rowId
       && editing.column.id === columnRect.column.id
@@ -1650,6 +1852,7 @@ export class DataTableRootNode<
       editingInvalid: editingActive ? editing.invalid : false,
       editingDirty: editingActive ? editing.dirty : false,
       editingMessage: editingActive ? editing.message : undefined,
+      dragging: zone === 'header' && !!columnDrag?.active && columnDrag.column.id === columnRect.column.id,
     }
   }
 
@@ -1663,11 +1866,13 @@ export class DataTableRootNode<
     if (template) {
       schema.push(...template(context))
       this.applyCellEnterOpacity(schema, context, startIndex)
+      this.registerTextSelectionTargets(schema, context, startIndex)
       return
     }
 
     this.renderDefaultCell(schema, context)
     this.applyCellEnterOpacity(schema, context, startIndex)
+    this.registerTextSelectionTargets(schema, context, startIndex)
   }
 
   private applyCellEnterOpacity(
@@ -1755,7 +1960,9 @@ export class DataTableRootNode<
     const cellSearchHighlighted = !isHeader
       && context.state.searchMatched
       && searchHighlightHasCell(searchHighlight)
-    const background = cellSearchHighlighted
+    const background = isHeader && context.state.dragging
+      ? '#dbeafe'
+      : cellSearchHighlighted
       ? context.state.searchActive ? '#fff1f2' : '#fef3c7'
       : this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
     const color = isHeader ? '#172033' : '#263142'
@@ -1842,6 +2049,83 @@ export class DataTableRootNode<
         },
       })
     }
+  }
+
+  private registerTextSelectionTargets(schema: NovaSchema, context: DataTableCellContext<Row>, startIndex: number): void {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    if (!this.isTextSelectionZoneEnabled(context.zone)) return
+
+    for (let index = startIndex; index < schema.length; index += 1) {
+      const item = schema[index]
+      if (!item || item.type !== 'text' || typeof item.text !== 'string' || item.text.length === 0) continue
+      const metaSelection = item.meta?.textSelection as { selectable?: boolean; copyable?: boolean; scope?: string } | undefined
+      const selectable = this.props.textSelection.mode === 'visible-cells'
+        ? true
+        : metaSelection?.selectable === true
+      if (!selectable) continue
+
+      this.textSelection.register({
+        id: `${context.zone}:${String(context.rowId)}:${context.column.id}:${index}`,
+        text: item.text,
+        rect: {
+          x: item.x,
+          y: item.y,
+          width: item.width,
+          height: item.height,
+        },
+        selectable,
+        copyable: metaSelection?.copyable ?? true,
+        scope: metaSelection?.scope ?? `${context.zone}:${context.column.id}`,
+        ownerId: `${String(context.rowId)}:${context.column.id}`,
+        order: context.rowIndex * 100_000 + context.columnIndex * 100 + index,
+        context: {
+          rowId: context.rowId,
+          rowIndex: context.rowIndex,
+          columnId: context.column.id,
+          columnIndex: context.columnIndex,
+          zone: context.zone,
+        },
+        copyText: item.text,
+      })
+    }
+  }
+
+  private isTextSelectionZoneEnabled(zone: DataTableCellContext<Row>['zone']): boolean {
+    const options = this.props.textSelection
+    if (!options || !options.enabled) return false
+    if (zone === 'header') return options.headerText
+    if (zone === 'body') return options.cellText
+    if (zone === 'pinned-top' || zone === 'pinned-bottom') return options.pinnedRows
+    return false
+  }
+
+  private renderTextSelectionOverlay(): void {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    const ranges = this.textSelection.getRanges()
+    if (ranges.length === 0) return
+
+    const color = this.props.textSelection.selectionColor
+    const schema: NovaSchema = ranges.flatMap(item => {
+      const start = Math.max(0, Math.min(item.target.text.length, item.range.start))
+      const end = Math.max(start, Math.min(item.target.text.length, item.range.end))
+      if (start === end) return []
+
+      const ratioStart = start / Math.max(1, item.target.text.length)
+      const ratioEnd = end / Math.max(1, item.target.text.length)
+      const x = item.target.rect.x + item.target.rect.width * ratioStart
+      const width = Math.max(2, item.target.rect.width * (ratioEnd - ratioStart))
+      return [{
+        type: 'rect',
+        x,
+        y: item.target.rect.y,
+        width,
+        height: item.target.rect.height,
+        styles: {
+          background: color,
+        },
+      }]
+    })
+    if (schema.length > 0) this.renderer.schema(schema)
   }
 
   private renderDefaultCellSearchTextHighlights(
@@ -2517,6 +2801,65 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  private startTextSelectionAt(x: number, y: number, event: MouseEvent): boolean {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return false
+    if (!this.textSelection.start(x, y)) return false
+
+    this.textSelectionActive = true
+    this.clearSelection()
+    this.capturePointer(event)
+    this.refresh(['interaction'])
+    return true
+  }
+
+  private updateTextSelectionAt(globalX: number, globalY: number): void {
+    const [x, y] = this.toLocal(globalX, globalY)
+    if (!this.textSelection.update(x, y)) return
+    this.refresh(['interaction'])
+  }
+
+  private setupTextSelectionKeyboardEvents(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('keydown', this.handleTextSelectionKeydown)
+  }
+
+  private teardownTextSelectionKeyboardEvents(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('keydown', this.handleTextSelectionKeydown)
+  }
+
+  private handleTextSelectionKeydownEvent(event: KeyboardEvent): void {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    const copy = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c'
+    if (!copy || !this.textSelection.hasSelection()) return
+    event.preventDefault()
+    void this.textSelection.copy(ranges => this.formatTextSelectionCopy(ranges))
+  }
+
+  private formatTextSelectionCopy(ranges: Array<NovaTextSelectionRange<DataTableTextSelectionContext>>): string {
+    if (!this.props.textSelection || this.props.textSelection.copyFormat !== 'tsv' || ranges.length <= 1) {
+      return ranges
+        .map(item => item.target.text.slice(item.range.start, item.range.end))
+        .join('\n')
+    }
+
+    const rows = new Map<string, Array<NovaTextSelectionRange<DataTableTextSelectionContext>>>()
+    for (const range of ranges) {
+      const context = range.target.context
+      const rowKey = `${context?.zone ?? 'body'}:${context?.rowIndex ?? 0}:${String(context?.rowId ?? '')}`
+      const items = rows.get(rowKey) ?? []
+      items.push(range)
+      rows.set(rowKey, items)
+    }
+
+    return [...rows.values()]
+      .map(items => items
+        .sort((first, second) => (first.target.context?.columnIndex ?? 0) - (second.target.context?.columnIndex ?? 0))
+        .map(item => item.target.text.slice(item.range.start, item.range.end))
+        .join('\t'))
+      .join('\n')
+  }
+
   private setupEditingKeyboardEvents(): void {
     if (typeof window === 'undefined') return
     window.addEventListener('keydown', this.handleEditingKeydown)
@@ -3103,7 +3446,7 @@ export class DataTableRootNode<
   }
 
   private hitResizeHandle(x: number, y: number): VisibleColumnRect<Row> | null {
-    if (y < 0 || y > this.height) return null
+    if (y < 0 || y > this.headerHeight) return null
 
     for (const rect of this.visibleColumnRects()) {
       if (!rect.column.resizable) continue
@@ -3333,6 +3676,21 @@ export class DataTableRootNode<
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+}
+
+function resolveCoreTextSelectionOptions(
+  options: DataTableRootResolvedProps['textSelection'],
+) {
+  if (!options) return false
+  return {
+    enabled: options.enabled,
+    mode: options.mode === 'explicit' ? 'explicit' as const : 'all-text' as const,
+    copy: true,
+    drag: true,
+    granularity: 'text' as const,
+    clipboard: options.copyFormat === 'tsv' ? 'contextual' as const : 'plain' as const,
+    selectionColor: options.selectionColor,
+  }
 }
 
 function escapeTooltipMarkdown(value: string): string {

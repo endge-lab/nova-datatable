@@ -39,6 +39,7 @@ import {
   type DataTableSortState,
   type DataTableStoreApi,
   type DataTableTemplate,
+  type DataTableTextSelectionOptions,
   type DataTableTooltipOptions,
   type DataTableViewOptions,
   type DataTableViewState,
@@ -69,6 +70,7 @@ interface DataTableVueProps {
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<BaseRow>
+  textSelection?: false | DataTableTextSelectionOptions
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<BaseRow>
   cellTemplate?: DataTableTemplate<BaseRow>
@@ -120,6 +122,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   view: undefined,
   scrollbars: undefined,
   tooltip: undefined,
+  textSelection: undefined,
   zoom: undefined,
   editing: undefined,
   cellTemplate: undefined,
@@ -564,6 +567,8 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   getSearchState: () => getRootApi().getSearchState(),
   reorderRows: payload => getRootApi().reorderRows(payload),
   reorderColumns: payload => getRootApi().reorderColumns(payload),
+  setColumnOrder: order => getRootApi().setColumnOrder(order),
+  resetColumnOrder: () => getRootApi().resetColumnOrder(),
   getGroupingState: () => getRootApi().getGroupingState(),
   setGrouping: (groups: Array<DataTableGroupRule<BaseRow>>) => getRootApi().setGrouping(groups),
   clearGrouping: () => getRootApi().clearGrouping(),
@@ -613,6 +618,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :view="rootView"
         :scrollbars="scrollbars"
         :tooltip="tooltip"
+        :text-selection="textSelection"
         :zoom="zoom"
         :editing="rootEditing"
         :cell-template="rootCellTemplate"

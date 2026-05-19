@@ -560,6 +560,26 @@ export interface DataTableResolvedTooltipOptions<Row extends Record<string, any>
   content?: (context: DataTableTooltipContext<Row>) => TooltipContent | null | undefined
 }
 
+export interface DataTableTextSelectionOptions {
+  enabled?: boolean
+  mode?: 'visible-cells' | 'explicit'
+  cellText?: boolean
+  headerText?: boolean
+  pinnedRows?: boolean
+  copyFormat?: 'plain' | 'tsv'
+  selectionColor?: string
+}
+
+export interface DataTableResolvedTextSelectionOptions {
+  enabled: boolean
+  mode: 'visible-cells' | 'explicit'
+  cellText: boolean
+  headerText: boolean
+  pinnedRows: boolean
+  copyFormat: 'plain' | 'tsv'
+  selectionColor: string
+}
+
 export interface DataTableZoomWheelOptions {
   enabled?: boolean
   modifier?: TooltipModifier | Array<TooltipModifier> | false
@@ -860,6 +880,7 @@ export interface DataTableColumnReorderPayload {
   fromIndex: number
   toIndex: number
   order?: Array<string>
+  reason?: 'drag' | 'api' | 'reset'
 }
 
 export interface DataTableColumnInput<Row extends Record<string, any> = Record<string, any>> {
@@ -953,6 +974,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<Row>
+  textSelection?: false | DataTableTextSelectionOptions
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<Row>
   performance?: DataTablePerformanceOptions
@@ -1001,6 +1023,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   view: DataTableResolvedViewOptions
   scrollbars: false | DataTableResolvedScrollbarOptions
   tooltip: false | DataTableResolvedTooltipOptions<Row>
+  textSelection: false | DataTableResolvedTextSelectionOptions
   zoom: false | DataTableResolvedZoomOptions
   editing: false | DataTableResolvedEditingOptions<Row>
   performance: DataTableResolvedPerformanceOptions
@@ -1085,6 +1108,8 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   getSearchState: () => DataTableSearchState
   reorderRows: (payload: DataTableRowReorderPayload) => void
   reorderColumns: (payload: DataTableColumnReorderPayload) => void
+  setColumnOrder: (order: Array<string>) => void
+  resetColumnOrder: () => void
   getGroupingState: () => DataTableGroupingState<Row>
   setGrouping: (groups: Array<DataTableGroupRule<Row>>) => void
   clearGrouping: () => void

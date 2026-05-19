@@ -1447,13 +1447,15 @@ describe('DataTable Root runtime', () => {
     expect(release).toHaveBeenCalledTimes(1)
   })
 
-  it('selects cells without hijacking resize handles', () => {
+  it('resizes columns only from header handles and does not hijack body cells', () => {
     const app = createApp()
     const onSelectionChange = vi.fn()
+    const onColumnResize = vi.fn()
     const root = mountRoot(app)
     root.setProps({
       interaction: { motion: false },
       onSelectionChange,
+      onColumnResize,
     } as never)
 
     root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 230, clientY: 122 }))
@@ -1466,7 +1468,48 @@ describe('DataTable Root runtime', () => {
 
     onSelectionChange.mockClear()
     root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 180, clientY: 122 }))
-    expect(onSelectionChange).not.toHaveBeenCalled()
+    root.eventHandlers.dragmove?.(
+      new MouseEvent('mousemove', { clientX: 210, clientY: 122 }),
+      30,
+      0,
+      {
+        pointerId: 1,
+        startX: 180,
+        startY: 122,
+        x: 210,
+        y: 122,
+        dx: 30,
+        dy: 0,
+        totalDx: 30,
+        totalDy: 0,
+      },
+    )
+    expect(onColumnResize).not.toHaveBeenCalled()
+    expect(onSelectionChange).toHaveBeenCalled()
+
+    onColumnResize.mockClear()
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 180, clientY: 12 }))
+    root.eventHandlers.dragmove?.(
+      new MouseEvent('mousemove', { clientX: 210, clientY: 12 }),
+      30,
+      0,
+      {
+        pointerId: 1,
+        startX: 180,
+        startY: 12,
+        x: 210,
+        y: 12,
+        dx: 30,
+        dy: 0,
+        totalDx: 30,
+        totalDy: 0,
+      },
+    )
+    expect(onColumnResize).toHaveBeenCalledWith(expect.objectContaining({
+      previousWidth: 180,
+      width: 210,
+      column: expect.objectContaining({ id: 'name' }),
+    }))
 
     app.destroy()
   })
@@ -1687,6 +1730,80 @@ describe('DataTable Root runtime', () => {
       order: ['amount', 'name', 'status'],
     }))
     expect(root.getApi().getViewState().columnOrder).toEqual(['amount', 'name', 'status'])
+
+    root.getApi().setColumnOrder(['status', 'amount'])
+    expect(onColumnOrderChange).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'api',
+      order: ['status', 'amount', 'name'],
+    }))
+    expect(root.getApi().getViewState().columnOrder).toEqual(['status', 'amount', 'name'])
+
+    root.getApi().resetColumnOrder()
+    expect(onColumnOrderChange).toHaveBeenCalledWith(expect.objectContaining({
+      reason: 'reset',
+      order: [],
+    }))
+    expect(root.getApi().getViewState().columnOrder).toEqual([])
+
+    app.destroy()
+  })
+
+  it('drag-reorders columns from the header when column ordering is enabled', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const onColumnOrderChange = vi.fn()
+    root.setProps({
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 100, sortable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 100, sortable: true },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 100, sortable: true },
+        { id: 'extra', title: 'Extra', field: 'name', width: 100, sortable: true },
+      ],
+      view: {
+        sorting: { mode: 'client' },
+        columnOrdering: { enabled: true },
+      },
+      onColumnOrderChange,
+    } as never)
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 150, clientY: 12 }))
+    root.eventHandlers.dragmove?.(
+      new MouseEvent('mousemove', { clientX: 350, clientY: 12 }),
+      200,
+      0,
+      {
+        pointerId: 1,
+        startX: 150,
+        startY: 12,
+        x: 350,
+        y: 12,
+        dx: 200,
+        dy: 0,
+        totalDx: 200,
+        totalDy: 0,
+      },
+    )
+    root.eventHandlers.dragend?.(
+      new MouseEvent('mouseup', { clientX: 350, clientY: 12 }),
+      {
+        pointerId: 1,
+        startX: 150,
+        startY: 12,
+        x: 350,
+        y: 12,
+        dx: 0,
+        dy: 0,
+        totalDx: 200,
+        totalDy: 0,
+      },
+    )
+
+    expect(onColumnOrderChange).toHaveBeenCalledWith(expect.objectContaining({
+      columnId: 'status',
+      reason: 'drag',
+      order: ['name', 'amount', 'extra', 'status'],
+    }))
+    expect(root.getApi().getViewState().columnOrder).toEqual(['name', 'amount', 'extra', 'status'])
 
     app.destroy()
   })
