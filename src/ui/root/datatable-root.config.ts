@@ -2,13 +2,16 @@ import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps, normalizeNovaSc
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
   DataTableInteractionOptions,
+  DataTableClipboardOptions,
   DataTablePerformanceOptions,
   DataTableEditingOptions,
   DataTableEditTrigger,
   DataTableScrollbarAxisOptions,
   DataTableResolvedInteractionOptions,
+  DataTableResolvedClipboardOptions,
   DataTableResolvedPerformanceOptions,
   DataTableResolvedEditingOptions,
+  DataTableResolvedSelectionOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
   DataTableResolvedTextSelectionOptions,
@@ -17,6 +20,7 @@ import type {
   DataTableResolvedZoomOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
+  DataTableSelectionOptions,
   DataTableScrollbarOptions,
   DataTableTextSelectionOptions,
   DataTableTooltipOptions,
@@ -46,6 +50,8 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   overscanRows: { type: 'number' },
   overscanColumns: { type: 'number' },
   interaction: { type: 'object' },
+  selection: { type: 'any' },
+  clipboard: { type: 'any' },
   view: { type: 'object' },
   scrollbars: { type: 'any' },
   tooltip: { type: 'any' },
@@ -78,6 +84,13 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   onCellLeave: { type: 'function' },
   onCellClick: { type: 'function' },
   onSelectionChange: { type: 'function' },
+  onSelectionPreviewChange: { type: 'function' },
+  onActiveCellChange: { type: 'function' },
+  onBeforeCopy: { type: 'function' },
+  onCopy: { type: 'function' },
+  onBeforePaste: { type: 'function' },
+  onPasteCommit: { type: 'function' },
+  onPasteError: { type: 'function' },
   onZoomChange: { type: 'function' },
   onEditingChange: { type: 'function' },
 } as const
@@ -114,6 +127,8 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     overscanRows: Math.max(0, props.overscanRows ?? 12),
     overscanColumns: Math.max(0, props.overscanColumns ?? 3),
     interaction: normalizeDataTableInteraction(props.interaction),
+    selection: normalizeDataTableSelection(props.selection, props.interaction),
+    clipboard: normalizeDataTableClipboard(props.clipboard),
     view: normalizeDataTableView(props.view),
     scrollbars: normalizeDataTableScrollbars(props.scrollbars, {
       trackColor: common.trackColor,
@@ -150,6 +165,13 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onCellLeave: props.onCellLeave,
     onCellClick: props.onCellClick,
     onSelectionChange: props.onSelectionChange,
+    onSelectionPreviewChange: props.onSelectionPreviewChange,
+    onActiveCellChange: props.onActiveCellChange,
+    onBeforeCopy: props.onBeforeCopy,
+    onCopy: props.onCopy,
+    onBeforePaste: props.onBeforePaste,
+    onPasteCommit: props.onPasteCommit,
+    onPasteError: props.onPasteError,
     onZoomChange: props.onZoomChange,
     onEditingChange: props.onEditingChange,
   }
@@ -280,6 +302,79 @@ export function normalizeDataTableScrollbars(
           ...(scrollbars?.vertical ?? {}),
         }, defaults),
     nativeRenderer: scrollbars?.nativeRenderer ?? true,
+  }
+}
+
+export function normalizeDataTableSelection(
+  selection: false | DataTableSelectionOptions | undefined,
+  interaction?: DataTableInteractionOptions,
+): false | DataTableResolvedSelectionOptions {
+  if (selection === false) return false
+  if (selection === undefined && interaction?.selection === false) return false
+  const interactionSelection = interaction?.selection !== false ? interaction?.selection : undefined
+  const mode = selection?.mode ?? interactionSelection?.mode ?? 'cell'
+  return {
+    enabled: selection?.enabled ?? true,
+    mode,
+    cardinality: selection?.cardinality ?? 'single',
+    allowedUnits: {
+      cells: selection?.allowedUnits?.cells ?? (mode === 'cell' || mode === 'mixed'),
+      rows: selection?.allowedUnits?.rows ?? (mode === 'row' || mode === 'mixed'),
+      columns: selection?.allowedUnits?.columns ?? (mode === 'column' || mode === 'mixed'),
+    },
+    gestures: {
+      dragRange: selection?.gestures?.dragRange ?? false,
+      shiftRange: selection?.gestures?.shiftRange ?? true,
+      ctrlToggle: selection?.gestures?.ctrlToggle ?? true,
+      metaToggle: selection?.gestures?.metaToggle ?? true,
+      headerSelectColumn: selection?.gestures?.headerSelectColumn ?? false,
+      rowSelect: selection?.gestures?.rowSelect ?? false,
+      autoScrollOnDrag: selection?.gestures?.autoScrollOnDrag ?? true,
+    },
+    behavior: {
+      clearOnPlainClick: selection?.behavior?.clearOnPlainClick ?? true,
+      selectOnMouseDown: selection?.behavior?.selectOnMouseDown ?? true,
+      preserveOnDrag: selection?.behavior?.preserveOnDrag ?? false,
+      groupRows: selection?.behavior?.groupRows ?? 'none',
+    },
+    visuals: {
+      fillColor: selection?.visuals?.fillColor ?? interactionSelection?.color ?? 'rgba(37, 99, 235, 0.18)',
+      borderColor: selection?.visuals?.borderColor ?? interactionSelection?.borderColor ?? '#2563eb',
+      activeCellBorderColor: selection?.visuals?.activeCellBorderColor ?? interactionSelection?.borderColor ?? '#1d4ed8',
+      previewFillColor: selection?.visuals?.previewFillColor ?? 'rgba(14, 165, 233, 0.14)',
+    },
+  }
+}
+
+export function normalizeDataTableClipboard<Row extends Record<string, any>>(
+  clipboard: false | DataTableClipboardOptions<Row> | undefined,
+): false | DataTableResolvedClipboardOptions<Row> {
+  if (clipboard === false) return false
+  const copy = clipboard?.copy === false
+    ? false
+    : {
+        format: typeof clipboard?.copy === 'object' ? clipboard.copy.format ?? 'tsv' : 'tsv',
+        includeHeaders: typeof clipboard?.copy === 'object' ? clipboard.copy.includeHeaders ?? false : false,
+        onlyVisibleColumns: typeof clipboard?.copy === 'object' ? clipboard.copy.onlyVisibleColumns ?? true : true,
+      }
+  const paste = clipboard?.paste === false
+    ? false
+    : {
+        enabled: clipboard?.paste?.enabled ?? true,
+        parseFormat: clipboard?.paste?.parseFormat ?? 'auto',
+        overflow: clipboard?.paste?.overflow ?? 'clip',
+        invalid: clipboard?.paste?.invalid ?? 'reject',
+        readonly: clipboard?.paste?.readonly ?? 'skip',
+        commit: clipboard?.paste?.commit ?? 'optimistic',
+      }
+  return {
+    copy,
+    paste,
+    onBeforeCopy: clipboard?.onBeforeCopy,
+    onCopy: clipboard?.onCopy,
+    onBeforePaste: clipboard?.onBeforePaste,
+    onPasteCommit: clipboard?.onPasteCommit,
+    onPasteError: clipboard?.onPasteError,
   }
 }
 
@@ -490,6 +585,8 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'overscanRows',
         'overscanColumns',
         'interaction',
+        'selection',
+        'clipboard',
         'view',
         'scrollbars',
         'tooltip',

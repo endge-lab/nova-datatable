@@ -19,6 +19,7 @@ import {
   type DataTableEditCommitPayload,
   type DataTableEditError,
   type DataTableInteractionOptions,
+  type DataTableClipboardOptions,
   type DataTablePinnedColumns,
   type DataTablePinnedRows,
   type DataTableColumnReorderPayload,
@@ -35,6 +36,9 @@ import {
   type DataTableScrollbarLayerTemplate,
   type DataTableScrollbarOptions,
   type DataTableSearchState,
+  type DataTableSelectionAnchor,
+  type DataTableSelectionRange,
+  type DataTableSelectionOptions,
   type DataTableSelectionState,
   type DataTableSortState,
   type DataTableStoreApi,
@@ -67,6 +71,8 @@ interface DataTableVueProps {
   overscanRows?: number
   overscanColumns?: number
   interaction?: DataTableInteractionOptions
+  selection?: false | DataTableSelectionOptions
+  clipboard?: false | DataTableClipboardOptions<BaseRow>
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<BaseRow>
@@ -94,6 +100,13 @@ interface DataTableVueProps {
   onCellLeave?: (context: DataTableCellContext<BaseRow>) => void
   onCellClick?: (context: DataTableCellContext<BaseRow>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onSelectionPreviewChange?: (previewRange: DataTableSelectionRange | null) => void
+  onActiveCellChange?: (activeCell: DataTableSelectionAnchor | null) => void
+  onBeforeCopy?: DataTableClipboardOptions<BaseRow>['onBeforeCopy']
+  onCopy?: DataTableClipboardOptions<BaseRow>['onCopy']
+  onBeforePaste?: DataTableClipboardOptions<BaseRow>['onBeforePaste']
+  onPasteCommit?: DataTableClipboardOptions<BaseRow>['onPasteCommit']
+  onPasteError?: DataTableClipboardOptions<BaseRow>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<BaseRow> | null) => void
   width?: number | string
@@ -119,6 +132,8 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   overscanRows: 16,
   overscanColumns: 4,
   interaction: undefined,
+  selection: undefined,
+  clipboard: undefined,
   view: undefined,
   scrollbars: undefined,
   tooltip: undefined,
@@ -146,6 +161,13 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onCellLeave: undefined,
   onCellClick: undefined,
   onSelectionChange: undefined,
+  onSelectionPreviewChange: undefined,
+  onActiveCellChange: undefined,
+  onBeforeCopy: undefined,
+  onCopy: undefined,
+  onBeforePaste: undefined,
+  onPasteCommit: undefined,
+  onPasteError: undefined,
   onZoomChange: undefined,
   onEditingChange: undefined,
   devtools: undefined,
@@ -171,6 +193,11 @@ const emit = defineEmits<{
   (event: 'cell-leave', context: DataTableCellContext<BaseRow>): void
   (event: 'cell-click', context: DataTableCellContext<BaseRow>): void
   (event: 'selection-change', selection: DataTableSelectionState | null): void
+  (event: 'selection-preview-change', previewRange: DataTableSelectionRange | null): void
+  (event: 'active-cell-change', activeCell: DataTableSelectionAnchor | null): void
+  (event: 'copy', payload: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onCopy']>>[0]): void
+  (event: 'paste-commit', result: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onPasteCommit']>>[0]): void
+  (event: 'paste-error', error: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onPasteError']>>[0]): void
   (event: 'zoom-change', state: DataTableZoomState): void
   (event: 'editing-change', state: DataTableEditingState<BaseRow> | null): void
   (event: 'edit-start', state: DataTableEditingState<BaseRow>): void
@@ -428,6 +455,31 @@ function handleSelectionChange(selection: DataTableSelectionState | null): void 
   emit('selection-change', selection)
 }
 
+function handleSelectionPreviewChange(previewRange: DataTableSelectionRange | null): void {
+  props.onSelectionPreviewChange?.(previewRange)
+  emit('selection-preview-change', previewRange)
+}
+
+function handleActiveCellChange(activeCell: DataTableSelectionAnchor | null): void {
+  props.onActiveCellChange?.(activeCell)
+  emit('active-cell-change', activeCell)
+}
+
+function handleCopy(payload: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onCopy']>>[0]): void {
+  props.onCopy?.(payload)
+  emit('copy', payload)
+}
+
+function handlePasteCommit(result: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onPasteCommit']>>[0]): void {
+  props.onPasteCommit?.(result)
+  emit('paste-commit', result)
+}
+
+function handlePasteError(error: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onPasteError']>>[0]): void {
+  props.onPasteError?.(error)
+  emit('paste-error', error)
+}
+
 function handleZoomChange(state: DataTableZoomState): void {
   props.onZoomChange?.(state)
   emit('zoom-change', state)
@@ -549,7 +601,19 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   getViewport: () => getRootApi().getViewport(),
   getInteraction: () => getRootApi().getInteraction(),
   clearHover: () => getRootApi().clearHover(),
-  selectCell: (rowId, columnId) => getRootApi().selectCell(rowId, columnId),
+  getSelection: () => getRootApi().getSelection(),
+  setSelection: selection => getRootApi().setSelection(selection),
+  selectCell: (rowId, columnId, options) => getRootApi().selectCell(rowId, columnId, options),
+  selectRow: (rowId, options) => getRootApi().selectRow(rowId, options),
+  selectColumn: (columnId, options) => getRootApi().selectColumn(columnId, options),
+  selectRange: (range, options) => getRootApi().selectRange(range, options),
+  addSelectionRange: range => getRootApi().addSelectionRange(range),
+  removeSelectionRange: rangeId => getRootApi().removeSelectionRange(rangeId),
+  isCellSelected: (rowId, columnId) => getRootApi().isCellSelected(rowId, columnId),
+  isRowSelected: rowId => getRootApi().isRowSelected(rowId),
+  isColumnSelected: columnId => getRootApi().isColumnSelected(columnId),
+  copySelection: () => getRootApi().copySelection(),
+  pasteClipboard: text => getRootApi().pasteClipboard(text),
   clearSelection: () => getRootApi().clearSelection(),
   getViewState: (): DataTableViewState => getRootApi().getViewState(),
   setSort: sort => getRootApi().setSort(sort),
@@ -615,6 +679,8 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :overscan-rows="overscanRows"
         :overscan-columns="overscanColumns"
         :interaction="interaction"
+        :selection="selection"
+        :clipboard="clipboard"
         :view="rootView"
         :scrollbars="scrollbars"
         :tooltip="tooltip"
@@ -643,6 +709,13 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :on-cell-leave="handleCellLeave"
         :on-cell-click="handleCellClick"
         :on-selection-change="handleSelectionChange"
+        :on-selection-preview-change="handleSelectionPreviewChange"
+        :on-active-cell-change="handleActiveCellChange"
+        :on-before-copy="onBeforeCopy"
+        :on-copy="handleCopy"
+        :on-before-paste="onBeforePaste"
+        :on-paste-commit="handlePasteCommit"
+        :on-paste-error="handlePasteError"
         :on-zoom-change="handleZoomChange"
         :on-editing-change="handleEditingChange"
         :layout="{ width: '100%', height: '100%' }"

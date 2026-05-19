@@ -4,6 +4,7 @@ import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtim
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import type { DataTableSelectionRange } from '@/model/types/datatable.types'
 import { normalizeDataTablePerformance, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 
 interface BenchRow {
@@ -295,5 +296,33 @@ describe('NovaDataTable benchmarks', () => {
       new Map(),
       store,
     )
+  })
+
+  bench('selection overlay intersections for 1M logical selected rows', () => {
+    const range: DataTableSelectionRange = {
+      id: 'range-1',
+      unit: 'row',
+      startRowIndex: 0,
+      endRowIndex: 999_999,
+      columnIds: ['name', 'status', 'amount'],
+    }
+    const viewport = { start: 50_000, end: 50_140 }
+    let visible = 0
+    for (let rowIndex = viewport.start; rowIndex < viewport.end; rowIndex += 1) {
+      if (rowIndex >= (range.startRowIndex ?? 0) && rowIndex <= (range.endRowIndex ?? 0)) visible += 1
+    }
+    if (visible === 0) throw new Error('Selection range was not visible')
+  })
+
+  bench('10k paste cells parse and delta generation', () => {
+    const source = Array.from({ length: 10_000 }, (_item, index) => `${index}\tactive`)
+    const deltas = source.flatMap((line, index) => {
+      const [amount, status] = line.split('\t')
+      return [
+        { type: 'setCell' as const, rowId: `row-${index}`, columnId: 'amount', value: Number(amount) },
+        { type: 'setCell' as const, rowId: `row-${index}`, columnId: 'status', value: status },
+      ]
+    })
+    if (deltas.length !== 20_000) throw new Error('Invalid paste delta count')
   })
 })

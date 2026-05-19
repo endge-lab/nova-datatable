@@ -1565,6 +1565,87 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('supports shift ranges, ctrl toggles and drag range preview for cell selection', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      interaction: { motion: false },
+      selection: {
+        mode: 'cell',
+        cardinality: 'multiple',
+        allowedUnits: { cells: true },
+        gestures: { dragRange: true, shiftRange: true, ctrlToggle: true, metaToggle: true },
+      },
+    } as never)
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 220, clientY: 84 }))
+    expect(root.getApi().getSelection()?.activeCell).toMatchObject({ rowId: 'row-0', columnId: 'status' })
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 220, clientY: 122, shiftKey: true }))
+    expect(root.getApi().getSelection()?.ranges[0]).toMatchObject({
+      unit: 'cell',
+      startRowIndex: 0,
+      endRowIndex: 1,
+      columnIds: ['status'],
+    })
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 60, clientY: 84, ctrlKey: true }))
+    expect(root.getApi().getSelection()?.ranges.length).toBe(2)
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 220, clientY: 84 }))
+    root.eventHandlers.dragmove?.(
+      new MouseEvent('mousemove', { clientX: 220, clientY: 158 }),
+      0,
+      74,
+      { pointerId: 1, startX: 220, startY: 84, x: 220, y: 158, dx: 0, dy: 74, totalDx: 0, totalDy: 74 },
+    )
+    expect(root.getApi().getSelection()?.previewRange).toMatchObject({ startRowIndex: 0, endRowIndex: 2 })
+    root.eventHandlers.dragend?.(
+      new MouseEvent('mouseup', { clientX: 220, clientY: 158 }),
+      { pointerId: 1, startX: 220, startY: 84, x: 220, y: 158, dx: 0, dy: 0, totalDx: 0, totalDy: 74 },
+    )
+    expect(root.getApi().getSelection()?.previewRange).toBeNull()
+    const ranges = root.getApi().getSelection()?.ranges ?? []
+    expect(ranges[ranges.length - 1]).toMatchObject({ startRowIndex: 0, endRowIndex: 2 })
+
+    app.destroy()
+  })
+
+  it('copies and pastes selected cells through typed column policies', async () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, pinned: 'left', resizable: true, editable: true, type: 'text', paste: { enabled: true } },
+        { id: 'status', title: 'Status', field: 'status', width: 120, editable: true, type: 'text', paste: { enabled: true } },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, pinned: 'right', editable: true, type: 'number', paste: { enabled: true } },
+      ],
+      selection: {
+        mode: 'cell',
+        cardinality: 'multiple',
+        allowedUnits: { cells: true },
+      },
+      clipboard: {
+        copy: { format: 'tsv', onlyVisibleColumns: true },
+        paste: { enabled: true, invalid: 'reject' },
+      },
+    } as never)
+
+    root.getApi().selectCell('row-0', 'name')
+    expect(root.getApi().copySelection()).toBe('Row 0')
+
+    await root.getApi().pasteClipboard('Renamed\t42')
+    expect(root.store.getRow('row-0')?.name).toBe('Renamed')
+    expect(root.store.getRow('row-0')?.status).toBe('42')
+
+    root.getApi().selectCell('row-1', 'amount')
+    const result = await root.getApi().pasteClipboard('not-a-number')
+    expect(result.invalid[0]).toMatchObject({ rowId: 'row-1', columnId: 'amount' })
+    expect(root.store.getRow('row-1')?.amount).toBe(10)
+
+    app.destroy()
+  })
+
   it('renders clipped row-column hover overlay without crossing pinned boundaries', () => {
     const app = createApp(620, 220)
     const root = mountRoot(app)

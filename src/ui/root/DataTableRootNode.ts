@@ -49,9 +49,11 @@ import type {
   DataTableHoverMode,
   DataTableInteractionState,
   DataTableInteractionTarget,
+  DataTableClipboardFormat,
   DataTablePinnedRowPosition,
   DataTableQueryState,
   DataTableResolvedColumn,
+  DataTableResolvedClipboardOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedZoomWheelOptions,
   DataTableRootApi,
@@ -60,12 +62,18 @@ import type {
   DataTableRootResolvedProps,
   DataTableRowId,
   DataTableSearchHighlightMode,
+  DataTablePasteParseFormat,
+  DataTableSelectionAnchor,
+  DataTableSelectionRange,
+  DataTableSelectionUnit,
+  DataTableSelectionUpdateOptions,
   DataTableScrollbarAxis,
   DataTableScrollbarGeometry,
   DataTableScrollbarLayerContext,
   DataTableScrollbarState,
   DataTableScrollbarVisibility,
   DataTableSelectionState,
+  DataTablePasteResult,
   DataTableStoreApi,
   DataTableTooltipContext,
   DataTableViewport,
@@ -99,6 +107,13 @@ interface ScrollbarDragState {
   axis: DataTableScrollbarAxis
   startScrollX: number
   startScrollY: number
+}
+
+interface SelectionDragState {
+  anchor: DataTableSelectionAnchor
+  target: DataTableSelectionAnchor
+  unit: DataTableSelectionUnit
+  active: boolean
 }
 
 type VisibleColumnRegion = 'all' | 'left' | 'center' | 'right'
@@ -174,6 +189,8 @@ export class DataTableRootNode<
   private hoverActive = false
   private selection: DataTableSelectionState | null = null
   private selectionActive = false
+  private selectionDragState: SelectionDragState | null = null
+  private selectionIdCounter = 0
   private visibleCellKeys = new Set<string>()
   private nextVisibleCellKeys = new Set<string>()
   private cellEnterStartedAt = new Map<string, number>()
@@ -278,7 +295,19 @@ export class DataTableRootNode<
       getViewport: () => ({ ...this.viewport }),
       getInteraction: () => this.getInteractionState(),
       clearHover: () => this.clearHover(),
-      selectCell: (rowId, columnId) => this.selectCell(rowId, columnId),
+      getSelection: () => this.cloneSelectionState(),
+      setSelection: selection => this.setSelection(selection),
+      selectCell: (rowId, columnId, options) => this.selectCell(rowId, columnId, options),
+      selectRow: (rowId, options) => this.selectRow(rowId, options),
+      selectColumn: (columnId, options) => this.selectColumn(columnId, options),
+      selectRange: (range, options) => this.selectRange(range, options),
+      addSelectionRange: range => this.addSelectionRange(range),
+      removeSelectionRange: rangeId => this.removeSelectionRange(rangeId),
+      isCellSelected: (rowId, columnId) => this.isCellSelected(rowId, columnId),
+      isRowSelected: rowId => this.isRowSelected(rowId),
+      isColumnSelected: columnId => this.isColumnSelected(columnId),
+      copySelection: () => this.copySelection(),
+      pasteClipboard: text => this.pasteClipboard(text),
       clearSelection: () => this.clearSelection(),
       getViewState: () => this.getViewState(),
       setSort: sort => this.setSort(sort),
@@ -469,7 +498,15 @@ export class DataTableRootNode<
       this.scrollY = 0
       this.hoverTarget = null
       this.selection = null
+      this.selectionActive = false
+      this.selectionDragState = null
       this.cancelEdit()
+    }
+    if (
+      changedKeys.includes('selection')
+      && (this.props.selection === false || !this.props.selection.enabled || this.props.selection.mode === 'none')
+    ) {
+      this.clearSelection()
     }
     if (changedKeys.includes('scrollbars')) {
       this.clearScrollbarHideTimer()
@@ -1096,6 +1133,10 @@ export class DataTableRootNode<
             event.cancelBubble = true
             return
           }
+          if (this.tryHeaderSelection(target, event)) {
+            event.cancelBubble = true
+            return
+          }
           this.handleHeaderAction(target, event)
           event.cancelBubble = true
           return
@@ -1105,11 +1146,15 @@ export class DataTableRootNode<
           event.cancelBubble = true
           return
         }
-        if (this.startTextSelectionAt(x, y, event)) {
+        const tableSelectionEnabled = this.props.selection !== false && this.props.selection.enabled
+        if ((!tableSelectionEnabled || event.altKey) && this.startTextSelectionAt(x, y, event)) {
           event.cancelBubble = true
           return
         }
-        this.updateSelection(target)
+        if (tableSelectionEnabled) {
+          this.updateSelection(target, event)
+          this.startSelectionDrag(target, event)
+        }
         const context = this.createCellContext(target)
         if (context) this.props.onCellClick?.(context)
       }
@@ -1166,6 +1211,11 @@ export class DataTableRootNode<
         event.cancelBubble = true
         return
       }
+      if (this.selectionDragState) {
+        this.updateSelectionDrag(meta)
+        event.cancelBubble = true
+        return
+      }
       if (this.textSelectionActive) {
         this.updateTextSelectionAt(meta.x, meta.y)
         event.cancelBubble = true
@@ -1190,6 +1240,12 @@ export class DataTableRootNode<
       }
       if (this.columnDragState) {
         this.commitColumnDrag(meta)
+        this.releasePointerCapture(event)
+        event.cancelBubble = true
+        return
+      }
+      if (this.selectionDragState) {
+        this.commitSelectionDrag()
         this.releasePointerCapture(event)
         event.cancelBubble = true
         return
@@ -1817,16 +1873,13 @@ export class DataTableRootNode<
     const hovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId && hover.column.id === columnRect.column.id
     const rowHovered = hoverAffectsCells && hover.zone === zone && hover.rowId === rowId
     const columnHovered = hoverAffectsCells && hover.column.id === columnRect.column.id
-    const selected = !!selection
-      && selection.mode === 'cell'
-      && selection.rowId === rowId
-      && selection.columnId === columnRect.column.id
-    const rowSelected = !!selection
-      && (selection.mode === 'row' || selection.mode === 'cell')
-      && selection.rowId === rowId
-    const columnSelected = !!selection
-      && (selection.mode === 'column' || selection.mode === 'cell')
-      && selection.columnId === columnRect.column.id
+    const selectionHit = this.resolveSelectionHit(rowId, rowIndex, columnRect.column.id)
+    const selected = selectionHit.selected
+    const rowSelected = selectionHit.rowSelected
+    const columnSelected = selectionHit.columnSelected
+    const activeCell = !!selection?.activeCell
+      && selection.activeCell.rowId === rowId
+      && selection.activeCell.columnId === columnRect.column.id
 
     return {
       rect,
@@ -1835,6 +1888,9 @@ export class DataTableRootNode<
       storeIndex,
       columnIndex: columnRect.columnIndex,
       selected,
+      selectionActive: !!selection,
+      selectionRangeId: selectionHit.rangeId,
+      activeCell,
       hovered,
       cellHovered: hovered,
       rowHovered,
@@ -2360,19 +2416,19 @@ export class DataTableRootNode<
 
   private renderSelectionOverlay(): void {
     const selection = this.selection
-    const options = this.props.interaction.selection
-    if (!selection || !options || options.mode === 'none' || this.props.selectionAlpha <= 0) return
-
-    const target = this.resolveSelectionTarget(selection)
-    if (!target) return
-
+    if (!selection || this.props.selection === false || !this.props.selection.enabled || this.props.selectionAlpha <= 0) return
     const alpha = this.props.selectionAlpha
     const schema: NovaSchema = []
-    if (selection.mode === 'row') schema.push(...this.createRowOverlayRects(target, options.color, alpha, true))
-    else if (selection.mode === 'column') schema.push(...this.createColumnOverlayRects(target, options.color, alpha, true))
-    else {
-      const cellRect = this.clipRectToColumnRegion(target.rect, target.column, target.zone)
-      if (cellRect) schema.push(this.createOverlayRect(cellRect, options.color, alpha, options.borderColor))
+    for (const range of selection.ranges) {
+      schema.push(...this.createSelectionRangeOverlayRects(range, this.props.selection.visuals.fillColor, alpha))
+    }
+    if (selection.previewRange) {
+      schema.push(...this.createSelectionRangeOverlayRects(selection.previewRange, this.props.selection.visuals.previewFillColor, Math.max(alpha, 0.72)))
+    }
+    const activeCell = selection.activeCell
+    if (activeCell) {
+      const rect = this.resolveSelectionCellRect(activeCell.rowIndex, activeCell.columnId)
+      if (rect) schema.push(this.createOverlayRect(rect, 'rgba(37, 99, 235, 0.03)', 1, this.props.selection.visuals.activeCellBorderColor))
     }
     if (schema.length > 0) this.renderer.schema(schema)
   }
@@ -2496,6 +2552,70 @@ export class DataTableRootNode<
     includePinned: boolean,
   ): NovaSchema {
     return this.createRowRects(target, includePinned).map(rect => this.createOverlayRect(rect, color, opacity))
+  }
+
+  private createSelectionRangeOverlayRects(
+    range: DataTableSelectionRange,
+    color: string,
+    opacity: number,
+  ): NovaSchema {
+    const schema: NovaSchema = []
+    const startRow = Math.max(this.viewport.rowRange.start, range.startRowIndex ?? this.viewport.rowRange.start)
+    const endRow = Math.min(this.viewport.rowRange.end - 1, range.endRowIndex ?? this.viewport.rowRange.end - 1)
+    if (endRow < startRow) return schema
+
+    if (range.unit === 'row') {
+      for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
+        const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+        schema.push(...this.createRowOverlayRectsFromRect({ x: this.viewport.bodyX, y, width: this.viewport.bodyWidth, height: this.rowHeight }, color, opacity, true, 'body'))
+      }
+      return schema
+    }
+
+    const columnIds = range.columnIds?.length ? range.columnIds : this.normalizeSelectionColumns(range)
+    if (range.unit === 'column') {
+      for (const columnId of columnIds) {
+        const columnRect = this.visibleColumnRects().find(item => item.column.id === columnId)
+        if (!columnRect) continue
+        const rect = this.clipRectToColumnRegion({
+          x: columnRect.x,
+          y: this.viewport.bodyY,
+          width: columnRect.width,
+          height: this.viewport.bodyHeight,
+        }, columnRect.column, 'body')
+        if (rect) schema.push(this.createOverlayRect(rect, color, opacity))
+      }
+      return schema
+    }
+
+    const visibleColumns = this.visibleColumnRects().filter(item => columnIds.includes(item.column.id))
+    for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
+      const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+      for (const columnRect of visibleColumns) {
+        const columnClippedRect = this.clipRectToColumnRegion({
+          x: columnRect.x,
+          y,
+          width: columnRect.width,
+          height: this.rowHeight,
+        }, columnRect.column, 'body')
+        const rect = columnClippedRect ? this.clipRectToVerticalRegion(columnClippedRect, 'body') : null
+        if (rect) schema.push(this.createOverlayRect(rect, color, opacity))
+      }
+    }
+    return schema
+  }
+
+  private resolveSelectionCellRect(rowIndex: number, columnId: string): DataTableCellRect | null {
+    if (rowIndex < this.viewport.rowRange.start || rowIndex >= this.viewport.rowRange.end) return null
+    const columnRect = this.visibleColumnRects().find(item => item.column.id === columnId)
+    if (!columnRect) return null
+    const columnClippedRect = this.clipRectToColumnRegion({
+      x: columnRect.x,
+      y: this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY,
+      width: columnRect.width,
+      height: this.rowHeight,
+    }, columnRect.column, 'body')
+    return columnClippedRect ? this.clipRectToVerticalRegion(columnClippedRect, 'body') : null
   }
 
   private createRowOverlayRectsFromRect(
@@ -2813,47 +2933,628 @@ export class DataTableRootNode<
     return this.tooltipModifiers[options.modifier]
   }
 
-  private updateSelection(target: DataTableInteractionTarget<Row>): void {
-    if (target.zone === 'header') return
-    if (target.zone === 'group' || target.zone === 'group-footer' || target.zone === 'grand-footer') return
-    const options = this.props.interaction.selection
-    if (!options || options.mode === 'none') return
+  private updateSelection(target: DataTableInteractionTarget<Row>, event?: MouseEvent): void {
+    if (!this.isSelectableTarget(target)) return
+    const options = this.props.selection
+    if (!options || !options.enabled || options.mode === 'none') return
 
+    const anchor = this.createSelectionAnchor(target)
+    if (!anchor) return
+    const unit = this.resolveSelectionUnit(target)
+    if (!this.isSelectionUnitAllowed(unit)) return
+
+    const toggle = this.isSelectionToggleEvent(event)
+    const range = !!event?.shiftKey && options.gestures.shiftRange && this.selection?.anchor
+    if (range) {
+      this.selectRange(this.createSelectionRange(this.selection!.anchor!, anchor, unit), {
+        append: options.cardinality === 'multiple' && !options.behavior.clearOnPlainClick,
+        focus: true,
+      })
+      return
+    }
+
+    const nextRange = this.createSelectionRange(anchor, anchor, unit)
+    this.applySelectionRange(nextRange, {
+      append: options.cardinality === 'multiple' && (toggle || !options.behavior.clearOnPlainClick),
+      toggle,
+      focus: true,
+    }, anchor)
+  }
+
+  private selectCell(rowId: DataTableRowId, columnId: string, options: DataTableSelectionUpdateOptions = {}): void {
+    const column = this.resolvedColumns.find(item => item.id === columnId)
+    if (!column) return
+    const rowIndex = this.findViewRowIndexById(rowId)
+    if (rowIndex === undefined) return
+    const anchor = { rowId, rowIndex, columnId, columnIndex: this.resolvedColumns.indexOf(column) }
+    this.applySelectionRange(this.createSelectionRange(anchor, anchor, 'cell'), options, anchor)
+    if (options.scrollIntoView) this.scrollCellIntoView(rowIndex, column)
+  }
+
+  private selectRow(rowId: DataTableRowId, options: DataTableSelectionUpdateOptions = {}): void {
+    const rowIndex = this.findViewRowIndexById(rowId)
+    if (rowIndex === undefined) return
+    const firstColumn = this.resolvedColumns[0]
+    if (!firstColumn) return
+    const anchor = { rowId, rowIndex, columnId: firstColumn.id, columnIndex: 0 }
+    this.applySelectionRange(this.createSelectionRange(anchor, anchor, 'row'), options, anchor)
+  }
+
+  private selectColumn(columnId: string, options: DataTableSelectionUpdateOptions = {}): void {
+    const columnIndex = this.resolvedColumns.findIndex(item => item.id === columnId)
+    if (columnIndex < 0) return
+    const rowId = this.viewPipeline.getRowIdAt(this.viewport.rowRange.start) ?? this.store.getRowIdAt(0) ?? 0
+    const anchor = { rowId, rowIndex: this.viewport.rowRange.start, columnId, columnIndex }
+    this.applySelectionRange(this.createSelectionRange(anchor, anchor, 'column'), options, anchor)
+  }
+
+  private selectRange(range: DataTableSelectionRange, options: DataTableSelectionUpdateOptions = {}): void {
+    this.applySelectionRange(this.normalizeSelectionRange(range), options)
+  }
+
+  private addSelectionRange(range: DataTableSelectionRange): void {
+    this.selectRange(range, { append: true })
+  }
+
+  private removeSelectionRange(rangeId: string): void {
+    if (!this.selection) return
+    const ranges = this.selection.ranges.filter(range => range.id !== rangeId)
+    this.commitSelectionState({ ...this.selection, ranges, previewRange: null }, { emitActive: false })
+  }
+
+  private setSelection(selection: DataTableSelectionState | null): void {
+    if (this.props.selection === false || !this.props.selection.enabled || this.props.selection.mode === 'none') {
+      this.clearSelection()
+      return
+    }
+    if (!selection) {
+      this.clearSelection()
+      return
+    }
+    this.commitSelectionState({
+      ...selection,
+      ranges: selection.ranges.map(range => this.normalizeSelectionRange(range)),
+      previewRange: selection.previewRange ? this.normalizeSelectionRange(selection.previewRange) : null,
+    })
+  }
+
+  private clearSelection(): void {
+    if (!this.selectionActive && !this.selection && !this.selectionDragState) return
+    this.selectionActive = false
+    this.selection = null
+    this.selectionDragState = null
+    this.animateInteractionAlpha('selectionAlpha', 0)
+    this.props.onSelectionChange?.(null)
+    this.props.onSelectionPreviewChange?.(null)
+    this.props.onActiveCellChange?.(null)
+    this.refresh(['interaction'])
+  }
+
+  private applySelectionRange(
+    range: DataTableSelectionRange,
+    options: DataTableSelectionUpdateOptions = {},
+    anchor?: DataTableSelectionAnchor,
+  ): void {
+    if (this.props.selection === false || !this.props.selection.enabled || this.props.selection.mode === 'none') return
+    const resolved = this.normalizeSelectionRange(range)
+    const current = this.selection
+    const append = this.props.selection !== false
+      && this.props.selection.cardinality === 'multiple'
+      && options.append
+    let ranges = (append || options.toggle) && current ? [...current.ranges] : []
+    if (options.toggle) {
+      const index = ranges.findIndex(item => sameSelectionRange(item, resolved))
+      if (index >= 0) ranges.splice(index, 1)
+      else ranges.push(resolved)
+    } else {
+      ranges.push(resolved)
+    }
+    const nextAnchor = anchor ?? current?.anchor ?? this.anchorFromRange(resolved)
+    const activeCell = options.focus === false ? current?.activeCell ?? null : nextAnchor
+    this.commitSelectionState({
+      mode: this.props.selection === false ? 'none' : this.props.selection.mode,
+      activeCell,
+      anchor: nextAnchor,
+      ranges,
+      previewRange: null,
+      rowId: activeCell?.rowId,
+      rowIndex: activeCell?.rowIndex,
+      columnId: activeCell?.columnId,
+      columnIndex: activeCell?.columnIndex,
+    })
+  }
+
+  private commitSelectionState(selection: DataTableSelectionState, options: { emitActive?: boolean; emitPreview?: boolean } = {}): void {
+    this.selection = selection.ranges.length > 0 || selection.previewRange || selection.activeCell ? selection : null
+    this.selectionActive = !!this.selection
+    if (this.selectionActive) this.animateInteractionAlpha('selectionAlpha', 1)
+    else this.animateInteractionAlpha('selectionAlpha', 0)
+    this.props.onSelectionChange?.(this.cloneSelectionState())
+    if (options.emitPreview !== false) this.props.onSelectionPreviewChange?.(selection.previewRange)
+    if (options.emitActive !== false) this.props.onActiveCellChange?.(selection.activeCell)
+    this.refresh(['interaction'])
+  }
+
+  private cloneSelectionState(): DataTableSelectionState | null {
+    if (!this.selection) return null
+    return {
+      ...this.selection,
+      activeCell: this.selection.activeCell ? { ...this.selection.activeCell } : null,
+      anchor: this.selection.anchor ? { ...this.selection.anchor } : null,
+      ranges: this.selection.ranges.map(range => ({ ...range, columnIds: range.columnIds ? [...range.columnIds] : undefined })),
+      previewRange: this.selection.previewRange ? { ...this.selection.previewRange, columnIds: this.selection.previewRange.columnIds ? [...this.selection.previewRange.columnIds] : undefined } : null,
+    }
+  }
+
+  private tryHeaderSelection(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
+    const options = this.props.selection
+    if (!options || !options.enabled || !options.gestures.headerSelectColumn || !options.allowedUnits.columns) return false
+    if (target.column.sortable) return false
+    this.selectColumn(target.column.id, {
+      append: this.isSelectionToggleEvent(event),
+      toggle: this.isSelectionToggleEvent(event),
+      focus: true,
+    })
+    return true
+  }
+
+  private startSelectionDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
+    const options = this.props.selection
+    if (!options || !options.enabled || !options.gestures.dragRange || !this.isSelectableTarget(target)) return
+    const anchor = this.createSelectionAnchor(target)
+    if (!anchor) return
+    const unit = this.resolveSelectionUnit(target)
+    if (unit !== 'cell') return
+    this.selectionDragState = { anchor, target: anchor, unit, active: false }
+    this.capturePointer(event)
+  }
+
+  private updateSelectionDrag(meta: NovaDragEventMeta): void {
+    const drag = this.selectionDragState
+    if (!drag) return
+    const [x, y] = this.toLocal(meta.x, meta.y)
+    const target = this.resolveInteractionTargetAt(x, y)
+    if (!target || !this.isSelectableTarget(target)) return
+    const nextAnchor = this.createSelectionAnchor(target)
+    if (!nextAnchor) return
+    drag.target = nextAnchor
+    drag.active = drag.active || Math.abs(meta.totalDx) > 3 || Math.abs(meta.totalDy) > 3
+    if (!drag.active) return
+    const previewRange = this.createSelectionRange(drag.anchor, drag.target, drag.unit)
+    const current = this.selection ?? this.createEmptySelection()
     this.selection = {
-      mode: options.mode,
+      ...current,
+      activeCell: drag.target,
+      anchor: drag.anchor,
+      previewRange,
+      rowId: drag.target.rowId,
+      rowIndex: drag.target.rowIndex,
+      columnId: drag.target.columnId,
+      columnIndex: drag.target.columnIndex,
+    }
+    this.selectionActive = true
+    this.props.onSelectionPreviewChange?.(previewRange)
+    this.props.onActiveCellChange?.(drag.target)
+    this.autoScrollSelectionDrag(x, y)
+    this.refresh(['interaction'])
+  }
+
+  private commitSelectionDrag(): void {
+    const drag = this.selectionDragState
+    if (!drag) return
+    this.selectionDragState = null
+    if (!drag.active) return
+    this.applySelectionRange(this.createSelectionRange(drag.anchor, drag.target, drag.unit), {
+      append: this.props.selection !== false && this.props.selection.cardinality === 'multiple' && this.props.selection.behavior.preserveOnDrag,
+      focus: true,
+    }, drag.target)
+    this.props.onSelectionPreviewChange?.(null)
+  }
+
+  private createEmptySelection(): DataTableSelectionState {
+    return {
+      mode: this.props.selection === false ? 'none' : this.props.selection.mode,
+      activeCell: null,
+      anchor: null,
+      ranges: [],
+      previewRange: null,
+    }
+  }
+
+  private createSelectionAnchor(target: DataTableInteractionTarget<Row>): DataTableSelectionAnchor | null {
+    if (target.rowId === undefined) return null
+    return {
       rowId: target.rowId,
       rowIndex: target.rowIndex,
       columnId: target.column.id,
       columnIndex: target.columnIndex,
     }
-    this.selectionActive = true
-    this.animateInteractionAlpha('selectionAlpha', 1)
-    this.props.onSelectionChange?.(this.selection)
-    this.refresh(['interaction'])
   }
 
-  private selectCell(rowId: DataTableRowId, columnId: string): void {
-    const column = this.resolvedColumns.find(item => item.id === columnId)
-    if (!column) return
+  private createSelectionRange(
+    start: DataTableSelectionAnchor,
+    end: DataTableSelectionAnchor,
+    unit: DataTableSelectionUnit,
+  ): DataTableSelectionRange {
+    const startRowIndex = Math.min(start.rowIndex, end.rowIndex)
+    const endRowIndex = Math.max(start.rowIndex, end.rowIndex)
+    const startColumnIndex = Math.min(start.columnIndex, end.columnIndex)
+    const endColumnIndex = Math.max(start.columnIndex, end.columnIndex)
+    const columns = this.resolvedColumns.slice(startColumnIndex, endColumnIndex + 1).map(column => column.id)
+    return this.normalizeSelectionRange({
+      id: this.nextSelectionRangeId(),
+      unit,
+      startRowIndex: unit === 'column' ? 0 : startRowIndex,
+      endRowIndex: unit === 'column' ? Math.max(0, this.viewPipeline.rowCount - 1) : endRowIndex,
+      startRowId: start.rowIndex <= end.rowIndex ? start.rowId : end.rowId,
+      endRowId: start.rowIndex <= end.rowIndex ? end.rowId : start.rowId,
+      startColumnId: unit === 'row' ? this.resolvedColumns[0]?.id : columns[0],
+      endColumnId: unit === 'row' ? this.resolvedColumns[this.resolvedColumns.length - 1]?.id : columns[columns.length - 1],
+      columnIds: unit === 'row' ? this.resolvedColumns.map(column => column.id) : columns,
+    })
+  }
 
-    this.selection = {
-      mode: 'cell',
-      rowId,
-      columnId,
-      columnIndex: this.resolvedColumns.indexOf(column),
+  private normalizeSelectionRange(range: DataTableSelectionRange): DataTableSelectionRange {
+    const startRowIndex = Math.min(range.startRowIndex ?? 0, range.endRowIndex ?? range.startRowIndex ?? 0)
+    const endRowIndex = Math.max(range.startRowIndex ?? 0, range.endRowIndex ?? range.startRowIndex ?? 0)
+    const columnIds = this.normalizeSelectionColumns(range)
+    return {
+      ...range,
+      id: range.id || this.nextSelectionRangeId(),
+      startRowIndex,
+      endRowIndex,
+      startColumnId: columnIds[0],
+      endColumnId: columnIds[columnIds.length - 1],
+      columnIds,
     }
-    this.selectionActive = true
-    this.animateInteractionAlpha('selectionAlpha', 1)
-    this.props.onSelectionChange?.(this.selection)
-    this.refresh(['interaction'])
   }
 
-  private clearSelection(): void {
-    if (!this.selectionActive && !this.selection) return
-    this.selectionActive = false
-    this.animateInteractionAlpha('selectionAlpha', 0)
-    this.props.onSelectionChange?.(null)
-    this.refresh(['interaction'])
+  private normalizeSelectionColumns(range: DataTableSelectionRange): Array<string> {
+    if (range.unit === 'row') return this.resolvedColumns.map(column => column.id)
+    if (range.columnIds?.length) return this.sortColumnIdsByResolvedOrder(range.columnIds)
+    const start = this.resolvedColumns.findIndex(column => column.id === range.startColumnId)
+    const end = this.resolvedColumns.findIndex(column => column.id === range.endColumnId)
+    if (start < 0 && end < 0) return []
+    const min = Math.min(start < 0 ? end : start, end < 0 ? start : end)
+    const max = Math.max(start < 0 ? end : start, end < 0 ? start : end)
+    return this.resolvedColumns.slice(min, max + 1).map(column => column.id)
+  }
+
+  private sortColumnIdsByResolvedOrder(columnIds: Array<string>): Array<string> {
+    const source = new Set(columnIds)
+    return this.resolvedColumns.filter(column => source.has(column.id)).map(column => column.id)
+  }
+
+  private nextSelectionRangeId(): string {
+    this.selectionIdCounter += 1
+    return `selection-${this.selectionIdCounter}`
+  }
+
+  private anchorFromRange(range: DataTableSelectionRange): DataTableSelectionAnchor | null {
+    const columnId = range.columnIds?.[0] ?? range.startColumnId
+    if (!columnId) return null
+    const columnIndex = this.resolvedColumns.findIndex(column => column.id === columnId)
+    if (columnIndex < 0) return null
+    const rowIndex = range.startRowIndex ?? 0
+    const rowId = range.startRowId ?? this.viewPipeline.getRowIdAt(rowIndex) ?? this.store.getRowIdAt(rowIndex)
+    if (rowId === undefined) return null
+    return { rowId, rowIndex, columnId, columnIndex }
+  }
+
+  private isSelectableTarget(target: DataTableInteractionTarget<Row>): boolean {
+    if (this.props.selection === false || !this.props.selection.enabled) return false
+    if (target.zone === 'body' || target.zone === 'pinned-top' || target.zone === 'pinned-bottom') return target.rowId !== undefined
+    if (target.zone === 'group') return this.props.selection.behavior.groupRows === 'group-row-only'
+    return false
+  }
+
+  private resolveSelectionUnit(target: DataTableInteractionTarget<Row>): DataTableSelectionUnit {
+    if (target.zone === 'header') return 'column'
+    const mode = this.props.selection === false ? 'cell' : this.props.selection.mode
+    if (mode === 'row' || mode === 'column') return mode
+    return 'cell'
+  }
+
+  private isSelectionUnitAllowed(unit: DataTableSelectionUnit): boolean {
+    if (this.props.selection === false) return false
+    if (unit === 'cell') return this.props.selection.allowedUnits.cells
+    if (unit === 'row') return this.props.selection.allowedUnits.rows
+    return this.props.selection.allowedUnits.columns
+  }
+
+  private isSelectionToggleEvent(event?: MouseEvent): boolean {
+    if (!event || this.props.selection === false || this.props.selection.cardinality !== 'multiple') return false
+    return (event.ctrlKey && this.props.selection.gestures.ctrlToggle) || (event.metaKey && this.props.selection.gestures.metaToggle)
+  }
+
+  private autoScrollSelectionDrag(x: number, y: number): void {
+    if (this.props.selection === false || !this.props.selection.gestures.autoScrollOnDrag) return
+    const edge = 24
+    let nextX = this.scrollX
+    let nextY = this.scrollY
+    if (x < this.viewport.bodyX + edge) nextX -= this.viewport.bodyWidth * 0.08
+    else if (x > this.viewport.bodyX + this.viewport.bodyWidth - edge) nextX += this.viewport.bodyWidth * 0.08
+    if (y < this.viewport.bodyY + edge) nextY -= this.rowHeight
+    else if (y > this.viewport.bodyY + this.viewport.bodyHeight - edge) nextY += this.rowHeight
+    if (nextX !== this.scrollX || nextY !== this.scrollY) this.setScroll(nextX, nextY)
+  }
+
+  private findViewRowIndexById(rowId: DataTableRowId): number | undefined {
+    return this.viewPipeline.findViewIndexByRowId(rowId)
+  }
+
+  private resolveSelectionHit(rowId: DataTableRowId, rowIndex: number, columnId: string): {
+    selected: boolean
+    rowSelected: boolean
+    columnSelected: boolean
+    rangeId?: string
+  } {
+    const ranges = this.selection?.ranges ?? []
+    for (const range of ranges) {
+      const rowInRange = rowIndex >= (range.startRowIndex ?? rowIndex) && rowIndex <= (range.endRowIndex ?? rowIndex)
+      const columnInRange = (range.columnIds ?? []).includes(columnId)
+      if (range.unit === 'row' && rowInRange) return { selected: true, rowSelected: true, columnSelected: false, rangeId: range.id }
+      if (range.unit === 'column' && columnInRange) return { selected: true, rowSelected: false, columnSelected: true, rangeId: range.id }
+      if (range.unit === 'cell' && rowInRange && columnInRange) return { selected: true, rowSelected: false, columnSelected: false, rangeId: range.id }
+    }
+    return { selected: false, rowSelected: false, columnSelected: false }
+  }
+
+  private isCellSelected(rowId: DataTableRowId, columnId: string): boolean {
+    const rowIndex = this.findViewRowIndexById(rowId)
+    if (rowIndex === undefined) return false
+    return this.resolveSelectionHit(rowId, rowIndex, columnId).selected
+  }
+
+  private isRowSelected(rowId: DataTableRowId): boolean {
+    const rowIndex = this.findViewRowIndexById(rowId)
+    if (rowIndex === undefined) return false
+    return (this.selection?.ranges ?? []).some(range => range.unit === 'row' && rowIndex >= (range.startRowIndex ?? rowIndex) && rowIndex <= (range.endRowIndex ?? rowIndex))
+  }
+
+  private isColumnSelected(columnId: string): boolean {
+    return (this.selection?.ranges ?? []).some(range => range.unit === 'column' && (range.columnIds ?? []).includes(columnId))
+  }
+
+  private copySelection(): string {
+    if (this.props.clipboard === false || this.props.clipboard.copy === false || !this.selection || this.selection.ranges.length === 0) return ''
+    const payload = {
+      selection: this.selection,
+      ranges: this.selection.ranges,
+      store: this.store,
+      api: this.api,
+    }
+    const override = this.props.onBeforeCopy?.(payload) ?? this.props.clipboard.onBeforeCopy?.(payload)
+    if (override === false) return ''
+    const text = typeof override === 'string' ? override : this.formatSelectionCopy(this.selection, this.props.clipboard)
+    this.props.onCopy?.({ ...payload, text })
+    this.props.clipboard.onCopy?.({ ...payload, text })
+    return text
+  }
+
+  private async pasteClipboard(text?: string): Promise<DataTablePasteResult<Row>> {
+    const emptyResult = { committed: 0, skipped: 0, invalid: [], deltas: [] } satisfies DataTablePasteResult<Row>
+    if (this.props.clipboard === false || this.props.clipboard.paste === false || !this.props.clipboard.paste.enabled) return emptyResult
+    const sourceText = text ?? await this.readClipboardText()
+    if (!sourceText) return emptyResult
+
+    const matrix = parseClipboardMatrix(sourceText, this.props.clipboard.paste.parseFormat)
+    const payload = {
+      text: sourceText,
+      matrix,
+      selection: this.selection,
+      store: this.store,
+      api: this.api,
+    }
+    try {
+      const override = await (this.props.onBeforePaste?.(payload) ?? this.props.clipboard.onBeforePaste?.(payload))
+      if (override === false) return emptyResult
+      if (Array.isArray(override)) {
+        this.store.applyDeltaBatch(override)
+        this.refresh(['data', 'interaction'])
+        const result = { committed: override.length, skipped: 0, invalid: [], deltas: override } satisfies DataTablePasteResult<Row>
+        this.props.onPasteCommit?.(result)
+        this.props.clipboard.onPasteCommit?.(result)
+        return result
+      }
+      const result = await this.createPasteResult(matrix)
+      if (result.invalid.length > 0 && this.props.clipboard.paste.invalid === 'reject') {
+        this.props.onPasteError?.({ message: 'Paste validation failed', result })
+        this.props.clipboard.onPasteError?.({ message: 'Paste validation failed', result })
+        return result
+      }
+      if (result.deltas.length > 0) {
+        this.store.applyDeltaBatch(result.deltas)
+        this.refresh(['data', 'interaction'])
+      }
+      this.props.onPasteCommit?.(result)
+      this.props.clipboard.onPasteCommit?.(result)
+      return result
+    } catch (error) {
+      this.props.onPasteError?.({
+        message: error instanceof Error ? error.message : 'Paste failed',
+        error,
+      })
+      this.props.clipboard.onPasteError?.({
+        message: error instanceof Error ? error.message : 'Paste failed',
+        error,
+      })
+      return emptyResult
+    }
+  }
+
+  private async readClipboardText(): Promise<string> {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) return ''
+    try {
+      return await navigator.clipboard.readText()
+    } catch {
+      return ''
+    }
+  }
+
+  private formatSelectionCopy(selection: DataTableSelectionState, clipboard: DataTableResolvedClipboardOptions<Row>): string {
+    const blocks: Array<string> = []
+    const format = clipboard.copy ? clipboard.copy.format : 'tsv'
+    for (const range of selection.ranges) {
+      const rows = this.resolveRowsForSelectionRange(range)
+      const columns = this.resolveColumnsForSelectionRange(range, clipboard.copy ? clipboard.copy.onlyVisibleColumns : true)
+      const lines: Array<Array<string>> = []
+      if (clipboard.copy && clipboard.copy.includeHeaders) lines.push(columns.map(column => column.title ?? column.id))
+      for (const rowInfo of rows) {
+        const rowValues: Array<string> = []
+        for (const column of columns) {
+          const value = rowInfo.row ? resolveDataTableValue(rowInfo.row, rowInfo.storeIndex ?? rowInfo.rowIndex, column) : ''
+          const context = rowInfo.row ? this.createCopyPasteCellContext(rowInfo.row, rowInfo.rowId, rowInfo.rowIndex, rowInfo.storeIndex, column, value) : null
+          rowValues.push(column.formatCopyValue && context ? column.formatCopyValue(value, context) : stringifyClipboardValue(value))
+        }
+        lines.push(rowValues)
+      }
+      blocks.push(formatClipboardBlock(lines, format))
+    }
+    return blocks.filter(Boolean).join(format === 'html' ? '' : '\n\n')
+  }
+
+  private async createPasteResult(matrix: Array<Array<string>>): Promise<DataTablePasteResult<Row>> {
+    const result = { committed: 0, skipped: 0, invalid: [], deltas: [] } satisfies DataTablePasteResult<Row>
+    const target = this.resolvePasteTarget()
+    if (!target || matrix.length === 0) return result
+    const policy = this.props.clipboard !== false && this.props.clipboard.paste !== false ? this.props.clipboard.paste : null
+    if (!policy) return result
+
+    for (let rowOffset = 0; rowOffset < matrix.length; rowOffset += 1) {
+      const rowIndex = target.rowIndex + rowOffset
+      const row = this.viewPipeline.getRowAt(rowIndex)
+      const rowId = this.viewPipeline.getRowIdAt(rowIndex)
+      if (!row || rowId === undefined) {
+        result.skipped += matrix[rowOffset]?.length ?? 0
+        continue
+      }
+      const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
+      const cells = matrix[rowOffset] ?? []
+      for (let columnOffset = 0; columnOffset < cells.length; columnOffset += 1) {
+        const column = target.columns[columnOffset]
+        if (!column) {
+          if (policy.overflow === 'reject') result.invalid.push({ rowId, rowIndex, columnId: '', raw: cells[columnOffset] ?? '', message: 'Paste exceeds target columns' })
+          else result.skipped += 1
+          continue
+        }
+        const raw = cells[columnOffset] ?? ''
+        const value = raw === '' && column.paste && column.paste !== false && 'emptyValue' in column.paste ? column.paste.emptyValue : raw
+        const context = this.createCopyPasteCellContext(row, rowId, rowIndex, storeIndex, column, value)
+        if (!this.canPasteCell(context)) {
+          if (policy.readonly === 'reject') result.invalid.push({ rowId, rowIndex, columnId: column.id, raw, message: 'Cell is readonly' })
+          else result.skipped += 1
+          continue
+        }
+        const parsed = this.parsePasteValue(value, context)
+        const validation = await this.validatePasteValue(parsed, context)
+        if (validation !== true) {
+          result.invalid.push({ rowId, rowIndex, columnId: column.id, raw, message: validation })
+          result.skipped += 1
+          continue
+        }
+        const key = typeof column.field === 'string' ? column.field : column.id
+        result.deltas.push({ type: 'patch', rowId, patch: { [key]: parsed } as Partial<Row> })
+        result.committed += 1
+      }
+    }
+    if (result.invalid.length > 0 && policy.invalid === 'reject') {
+      result.deltas = []
+      result.committed = 0
+    }
+    return result
+  }
+
+  private resolvePasteTarget(): { rowIndex: number; columns: Array<DataTableResolvedColumn<Row>> } | null {
+    const active = this.selection?.activeCell
+    const range = this.selection?.ranges[0]
+    if (this.selection && (this.selection.ranges.length > 1 || this.selection.ranges.some(item => item.unit !== 'cell'))) return null
+    const rowIndex = active?.rowIndex ?? range?.startRowIndex
+    if (rowIndex === undefined) return null
+    const startColumnId = active?.columnId ?? range?.columnIds?.[0] ?? range?.startColumnId
+    const startColumnIndex = Math.max(0, this.resolvedColumns.findIndex(column => column.id === startColumnId))
+    return {
+      rowIndex,
+      columns: this.resolvedColumns.slice(startColumnIndex),
+    }
+  }
+
+  private resolveRowsForSelectionRange(range: DataTableSelectionRange): Array<{ row?: Row; rowId?: DataTableRowId; rowIndex: number; storeIndex?: number }> {
+    const start = Math.max(0, range.startRowIndex ?? 0)
+    const end = Math.min(this.viewPipeline.rowCount - 1, range.endRowIndex ?? start)
+    const rows: Array<{ row?: Row; rowId?: DataTableRowId; rowIndex: number; storeIndex?: number }> = []
+    for (let rowIndex = start; rowIndex <= end; rowIndex += 1) {
+      rows.push({
+        row: this.viewPipeline.getRowAt(rowIndex),
+        rowId: this.viewPipeline.getRowIdAt(rowIndex),
+        rowIndex,
+        storeIndex: this.viewPipeline.getStoreIndexAt(rowIndex),
+      })
+    }
+    return rows
+  }
+
+  private resolveColumnsForSelectionRange(range: DataTableSelectionRange, onlyVisible: boolean): Array<DataTableResolvedColumn<Row>> {
+    const ids = range.unit === 'row'
+      ? this.resolvedColumns.map(column => column.id)
+      : range.columnIds ?? this.normalizeSelectionColumns(range)
+    const visible = onlyVisible ? new Set(this.visibleColumnRects().map(rect => rect.column.id)) : null
+    return this.resolvedColumns.filter(column => ids.includes(column.id) && (!visible || visible.has(column.id)))
+  }
+
+  private createCopyPasteCellContext(
+    row: Row,
+    rowId: DataTableRowId,
+    rowIndex: number,
+    storeIndex: number | undefined,
+    column: DataTableResolvedColumn<Row>,
+    value: unknown,
+  ): DataTableCellContext<Row> {
+    const columnIndex = this.resolvedColumns.findIndex(item => item.id === column.id)
+    return {
+      row,
+      rowId,
+      rowIndex,
+      viewRowIndex: rowIndex,
+      storeIndex,
+      column,
+      columnIndex,
+      value,
+      rect: { x: 0, y: 0, width: column.resolvedWidth, height: this.rowHeight },
+      state: this.createCellState({ x: 0, y: 0, width: column.resolvedWidth, height: this.rowHeight }, rowId, rowIndex, storeIndex, { column, columnIndex, x: 0, width: column.resolvedWidth }, 'body'),
+      zone: 'body',
+      store: this.store,
+      api: this.api,
+    }
+  }
+
+  private canPasteCell(context: DataTableCellContext<Row>): boolean {
+    const column = context.column
+    if (column.paste === false) return false
+    if (column.paste && column.paste.enabled === false) return false
+    const editable = column.editable
+    if (typeof editable === 'function') return editable(context)
+    return editable === true
+  }
+
+  private parsePasteValue(raw: unknown, context: DataTableCellContext<Row>): unknown {
+    if (context.column.parsePasteValue) return context.column.parsePasteValue(String(raw ?? ''), context)
+    if (context.column.type === 'number') return raw === '' || raw === null || raw === undefined ? null : Number(String(raw).replace(',', '.'))
+    if (context.column.type === 'boolean') return parseClipboardBoolean(raw)
+    if (context.column.type === 'json') {
+      try {
+        return JSON.parse(String(raw))
+      } catch {
+        return raw
+      }
+    }
+    return raw
+  }
+
+  private async validatePasteValue(value: unknown, context: DataTableCellContext<Row>): Promise<true | string> {
+    if (context.column.validatePasteValue) return context.column.validatePasteValue(value, context)
+    if (context.column.type === 'number' && value !== null && !Number.isFinite(value)) return 'Invalid number'
+    return true
   }
 
   private startTextSelectionAt(x: number, y: number, event: MouseEvent): boolean {
@@ -2884,11 +3585,25 @@ export class DataTableRootNode<
   }
 
   private handleTextSelectionKeydownEvent(event: KeyboardEvent): void {
-    if (!this.props.textSelection || !this.props.textSelection.enabled) return
     const copy = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c'
-    if (!copy || !this.textSelection.hasSelection()) return
-    event.preventDefault()
-    void this.textSelection.copy(ranges => this.formatTextSelectionCopy(ranges))
+    const paste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v'
+    if (copy && this.props.textSelection && this.props.textSelection.enabled && this.textSelection.hasSelection()) {
+      event.preventDefault()
+      void this.textSelection.copy(ranges => this.formatTextSelectionCopy(ranges))
+      return
+    }
+    if (copy && this.selection && this.selection.ranges.length > 0) {
+      event.preventDefault()
+      const text = this.copySelection()
+      if (text && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        void navigator.clipboard.writeText(text)
+      }
+      return
+    }
+    if (paste && this.selection?.activeCell) {
+      event.preventDefault()
+      void this.pasteClipboard()
+    }
   }
 
   private formatTextSelectionCopy(ranges: Array<NovaTextSelectionRange<DataTableTextSelectionContext>>): string {
@@ -2928,8 +3643,9 @@ export class DataTableRootNode<
   private handleEditingKeydownEvent(event: KeyboardEvent): void {
     if (event.key !== 'Enter' || this.editingState || !this.selectionActive || !this.selection) return
     if (!this.isEditTriggerEnabled('enter')) return
-    if (this.selection.rowId === undefined || !this.selection.columnId) return
-    if (!this.startEdit(this.selection.rowId, this.selection.columnId)) return
+    const activeCell = this.selection.activeCell
+    if (!activeCell) return
+    if (!this.startEdit(activeCell.rowId, activeCell.columnId)) return
     event.preventDefault()
     event.stopPropagation()
   }
@@ -3421,44 +4137,6 @@ export class DataTableRootNode<
     return null
   }
 
-  private resolveSelectionTarget(selection: DataTableSelectionState): DataTableInteractionTarget<Row> | null {
-    const column = this.resolvedColumns.find(item => item.id === selection.columnId)
-    if (!column) return null
-    const columnRect = this.visibleColumnRects().find(item => item.column.id === column.id)
-    if (!columnRect) return null
-    const rowIndex = selection.rowIndex ?? this.findVisibleRowIndex(selection.rowId)
-    if (rowIndex === undefined) return null
-    const row = this.viewPipeline.getRowAt(rowIndex) ?? (selection.rowId !== undefined ? this.store.getRow(selection.rowId) : undefined)
-    const storeIndex = this.viewPipeline.getStoreIndexAt(rowIndex)
-    const y = this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
-    if (selection.rowId !== undefined && (y + this.rowHeight < this.viewport.bodyY || y > this.viewport.bodyY + this.viewport.bodyHeight)) {
-      return null
-    }
-    return {
-      row,
-      rowId: selection.rowId,
-      rowIndex,
-      storeIndex,
-      column,
-      columnIndex: columnRect.columnIndex,
-      rect: {
-        x: columnRect.x,
-        y,
-        width: columnRect.width,
-        height: this.rowHeight,
-      },
-      zone: 'body',
-    }
-  }
-
-  private findVisibleRowIndex(rowId: DataTableRowId | undefined): number | undefined {
-    if (rowId === undefined) return undefined
-    for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
-      if (this.viewPipeline.getRowIdAt(rowIndex) === rowId) return rowIndex
-    }
-    return undefined
-  }
-
   private createCellContext(target: DataTableInteractionTarget<Row>): DataTableCellContext<Row> | null {
     if (isGroupInteractionZone(target.zone) || !target.row || target.rowId === undefined) return null
     return {
@@ -3794,6 +4472,85 @@ function sameInteractionGeometry<Row extends Record<string, any>>(
     && left.rect.y === right.rect.y
     && left.rect.width === right.rect.width
     && left.rect.height === right.rect.height
+}
+
+function sameSelectionRange(left: DataTableSelectionRange, right: DataTableSelectionRange): boolean {
+  return left.unit === right.unit
+    && left.startRowIndex === right.startRowIndex
+    && left.endRowIndex === right.endRowIndex
+    && (left.columnIds ?? []).join('\u0001') === (right.columnIds ?? []).join('\u0001')
+}
+
+function parseClipboardMatrix(text: string, format: DataTablePasteParseFormat): Array<Array<string>> {
+  const delimiter = format === 'csv' ? ',' : '\t'
+  if (format === 'plain') return [[text]]
+  if (format === 'auto' && !text.includes('\t') && text.includes(',')) return parseDelimitedClipboard(text, ',')
+  return parseDelimitedClipboard(text, delimiter)
+}
+
+function parseDelimitedClipboard(text: string, delimiter: string): Array<Array<string>> {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .filter((line, index, lines) => line.length > 0 || index < lines.length - 1)
+    .map(line => delimiter === ',' ? parseCsvLine(line) : line.split('\t'))
+}
+
+function parseCsvLine(line: string): Array<string> {
+  const cells: Array<string> = []
+  let value = ''
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (char === '"' && line[index + 1] === '"') {
+      value += '"'
+      index += 1
+    } else if (char === '"') {
+      quoted = !quoted
+    } else if (char === ',' && !quoted) {
+      cells.push(value)
+      value = ''
+    } else {
+      value += char
+    }
+  }
+  cells.push(value)
+  return cells
+}
+
+function stringifyClipboardValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function formatClipboardBlock(lines: Array<Array<string>>, format: DataTableClipboardFormat): string {
+  if (format === 'html') {
+    const rows = lines
+      .map(line => `<tr>${line.map(value => `<td>${escapeHtmlCell(value)}</td>`).join('')}</tr>`)
+      .join('')
+    return `<table><tbody>${rows}</tbody></table>`
+  }
+  if (format === 'plain') return lines.map(line => line.join(' ')).join('\n')
+  return lines.map(line => line.map(escapeTsvCell).join('\t')).join('\n')
+}
+
+function escapeHtmlCell(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+function escapeTsvCell(value: string): string {
+  return /[\t\n\r"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+function parseClipboardBoolean(value: unknown): boolean {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on'
 }
 
 function isGroupInteractionZone(zone: DataTableCellContext['zone']): boolean {

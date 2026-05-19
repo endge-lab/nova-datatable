@@ -45,7 +45,17 @@ export type DataTableSearchScope = 'rows' | 'cells'
 export type DataTableSearchMatchMode = 'contains' | 'startsWith' | 'equals' | 'regex'
 export type DataTableSearchHighlightMode = 'none' | 'row' | 'cell' | 'text' | 'cell-text' | 'row-cell' | 'row-cell-text'
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
-export type DataTableSelectionMode = 'none' | 'cell' | 'row' | 'column'
+export type DataTableSelectionUnit = 'cell' | 'row' | 'column'
+export type DataTableSelectionCardinality = 'single' | 'multiple'
+export type DataTableSelectionMode = 'none' | DataTableSelectionUnit | 'mixed'
+export type DataTableSelectionGroupRowsMode = 'none' | 'group-row-only' | 'children-visible'
+export type DataTableClipboardFormat = 'plain' | 'tsv' | 'html'
+export type DataTablePasteParseFormat = 'auto' | 'plain' | 'tsv' | 'csv'
+export type DataTablePasteOverflowPolicy = 'clip' | 'expand-rows' | 'reject'
+export type DataTablePasteInvalidPolicy = 'reject' | 'skip-cell' | 'commit-valid'
+export type DataTablePasteReadonlyPolicy = 'skip' | 'reject'
+export type DataTablePasteCommitPolicy = 'optimistic' | 'transaction'
+export type DataTableColumnType = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'time' | 'enum' | 'json' | 'custom'
 export type DataTableCellEnterMotion = 'none' | 'fade'
 export type DataTableScrollbarVisibility = Extract<NovaScrollbarVisibility, 'always' | 'hover' | 'scroll'>
 export type DataTableScrollbarAxis = NovaScrollbarAxis
@@ -125,6 +135,179 @@ export interface DataTableSearchState {
   total: number
   mode: DataTableViewMode | 'off'
   local: boolean
+}
+
+export interface DataTableSelectionAnchor {
+  rowId: DataTableRowId
+  rowIndex: number
+  columnId: string
+  columnIndex: number
+}
+
+export interface DataTableSelectionRange {
+  id: string
+  unit: DataTableSelectionUnit
+  startRowIndex?: number
+  endRowIndex?: number
+  startRowId?: DataTableRowId
+  endRowId?: DataTableRowId
+  startColumnId?: string
+  endColumnId?: string
+  columnIds?: Array<string>
+}
+
+export interface DataTableSelectionState {
+  mode: DataTableSelectionMode
+  activeCell: DataTableSelectionAnchor | null
+  anchor: DataTableSelectionAnchor | null
+  ranges: Array<DataTableSelectionRange>
+  previewRange: DataTableSelectionRange | null
+  rowId?: DataTableRowId
+  rowIndex?: number
+  columnId?: string
+  columnIndex?: number
+}
+
+export interface DataTableSelectionOptions {
+  enabled?: boolean
+  mode?: DataTableSelectionMode
+  cardinality?: DataTableSelectionCardinality
+  allowedUnits?: {
+    cells?: boolean
+    rows?: boolean
+    columns?: boolean
+  }
+  gestures?: {
+    dragRange?: boolean
+    shiftRange?: boolean
+    ctrlToggle?: boolean
+    metaToggle?: boolean
+    headerSelectColumn?: boolean
+    rowSelect?: boolean
+    autoScrollOnDrag?: boolean
+  }
+  behavior?: {
+    clearOnPlainClick?: boolean
+    selectOnMouseDown?: boolean
+    preserveOnDrag?: boolean
+    groupRows?: DataTableSelectionGroupRowsMode
+  }
+  visuals?: {
+    fillColor?: string
+    borderColor?: string
+    activeCellBorderColor?: string
+    previewFillColor?: string
+  }
+}
+
+export interface DataTableResolvedSelectionOptions {
+  enabled: boolean
+  mode: DataTableSelectionMode
+  cardinality: DataTableSelectionCardinality
+  allowedUnits: {
+    cells: boolean
+    rows: boolean
+    columns: boolean
+  }
+  gestures: {
+    dragRange: boolean
+    shiftRange: boolean
+    ctrlToggle: boolean
+    metaToggle: boolean
+    headerSelectColumn: boolean
+    rowSelect: boolean
+    autoScrollOnDrag: boolean
+  }
+  behavior: {
+    clearOnPlainClick: boolean
+    selectOnMouseDown: boolean
+    preserveOnDrag: boolean
+    groupRows: DataTableSelectionGroupRowsMode
+  }
+  visuals: {
+    fillColor: string
+    borderColor: string
+    activeCellBorderColor: string
+    previewFillColor: string
+  }
+}
+
+export interface DataTableSelectionUpdateOptions {
+  append?: boolean
+  toggle?: boolean
+  focus?: boolean
+  scrollIntoView?: boolean
+}
+
+export interface DataTableClipboardCopyOptions {
+  format?: DataTableClipboardFormat
+  includeHeaders?: boolean
+  onlyVisibleColumns?: boolean
+}
+
+export interface DataTableClipboardPasteOptions {
+  enabled?: boolean
+  parseFormat?: DataTablePasteParseFormat
+  overflow?: DataTablePasteOverflowPolicy
+  invalid?: DataTablePasteInvalidPolicy
+  readonly?: DataTablePasteReadonlyPolicy
+  commit?: DataTablePasteCommitPolicy
+}
+
+export interface DataTableClipboardOptions<Row extends Record<string, any> = Record<string, any>> {
+  copy?: boolean | DataTableClipboardCopyOptions
+  paste?: false | DataTableClipboardPasteOptions
+  onBeforeCopy?: (payload: DataTableCopyPayload<Row>) => string | false | void
+  onCopy?: (payload: DataTableCopyPayload<Row> & { text: string }) => void
+  onBeforePaste?: (payload: DataTablePastePayload<Row>) => false | Array<DataTableDelta<Row>> | void | Promise<false | Array<DataTableDelta<Row>> | void>
+  onPasteCommit?: (result: DataTablePasteResult<Row>) => void
+  onPasteError?: (error: DataTablePasteError<Row>) => void
+}
+
+export interface DataTableResolvedClipboardOptions<Row extends Record<string, any> = Record<string, any>> {
+  copy: false | Required<DataTableClipboardCopyOptions>
+  paste: false | Required<DataTableClipboardPasteOptions>
+  onBeforeCopy?: DataTableClipboardOptions<Row>['onBeforeCopy']
+  onCopy?: DataTableClipboardOptions<Row>['onCopy']
+  onBeforePaste?: DataTableClipboardOptions<Row>['onBeforePaste']
+  onPasteCommit?: DataTableClipboardOptions<Row>['onPasteCommit']
+  onPasteError?: DataTableClipboardOptions<Row>['onPasteError']
+}
+
+export interface DataTableCopyPayload<Row extends Record<string, any> = Record<string, any>> {
+  selection: DataTableSelectionState
+  ranges: Array<DataTableSelectionRange>
+  store: DataTableStoreApi<Row>
+  api: DataTableRootApi<Row>
+}
+
+export interface DataTablePastePayload<Row extends Record<string, any> = Record<string, any>> {
+  text: string
+  matrix: Array<Array<string>>
+  selection: DataTableSelectionState | null
+  store: DataTableStoreApi<Row>
+  api: DataTableRootApi<Row>
+}
+
+export interface DataTablePasteInvalidCell {
+  rowId?: DataTableRowId
+  rowIndex: number
+  columnId: string
+  raw: string
+  message: string
+}
+
+export interface DataTablePasteResult<Row extends Record<string, any> = Record<string, any>> {
+  committed: number
+  skipped: number
+  invalid: Array<DataTablePasteInvalidCell>
+  deltas: Array<DataTableDelta<Row>>
+}
+
+export interface DataTablePasteError<Row extends Record<string, any> = Record<string, any>> {
+  message: string
+  error?: unknown
+  result?: DataTablePasteResult<Row>
 }
 
 export type DataTableAggregator<Row extends Record<string, any> = Record<string, any>> =
@@ -268,6 +451,9 @@ export interface DataTableCellState {
   storeIndex?: number
   columnIndex: number
   selected: boolean
+  selectionActive: boolean
+  selectionRangeId?: string
+  activeCell: boolean
   hovered: boolean
   cellHovered: boolean
   rowHovered: boolean
@@ -474,14 +660,6 @@ export interface DataTableInteractionTarget<Row extends Record<string, any> = Re
   rect: DataTableCellRect
   zone: DataTableCellContext<Row>['zone']
   value?: unknown
-}
-
-export interface DataTableSelectionState {
-  mode: DataTableSelectionMode
-  rowId?: DataTableRowId
-  rowIndex?: number
-  columnId?: string
-  columnIndex?: number
 }
 
 export interface DataTableInteractionState<Row extends Record<string, any> = Record<string, any>> {
@@ -886,6 +1064,7 @@ export interface DataTableColumnReorderPayload {
 export interface DataTableColumnInput<Row extends Record<string, any> = Record<string, any>> {
   id: string
   title?: string
+  type?: DataTableColumnType
   field?: keyof Row | string
   value?: (row: Row, index: number) => unknown
   width?: DataTableColumnWidth
@@ -900,6 +1079,13 @@ export interface DataTableColumnInput<Row extends Record<string, any> = Record<s
   animated?: boolean
   tooltip?: false | DataTableCellTooltip<Row>
   editable?: boolean | ((context: DataTableCellContext<Row>) => boolean)
+  paste?: false | {
+    enabled?: boolean
+    emptyValue?: unknown
+  }
+  formatCopyValue?: (value: unknown, context: DataTableCellContext<Row>) => string
+  parsePasteValue?: (raw: string, context: DataTableCellContext<Row>) => unknown
+  validatePasteValue?: (value: unknown, context: DataTableCellContext<Row>) => true | string | Promise<true | string>
   editor?: DataTableEditorType | DataTableEditorConfig<Row>
   editorOptions?: unknown
   editorTemplate?: DataTableDomEditorTemplate<Row>
@@ -971,6 +1157,8 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   overscanRows?: number
   overscanColumns?: number
   interaction?: DataTableInteractionOptions
+  selection?: false | DataTableSelectionOptions
+  clipboard?: false | DataTableClipboardOptions<Row>
   view?: DataTableViewOptions
   scrollbars?: false | DataTableScrollbarOptions
   tooltip?: false | DataTableTooltipOptions<Row>
@@ -1007,6 +1195,13 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onSelectionPreviewChange?: (previewRange: DataTableSelectionRange | null) => void
+  onActiveCellChange?: (activeCell: DataTableSelectionAnchor | null) => void
+  onBeforeCopy?: DataTableClipboardOptions<Row>['onBeforeCopy']
+  onCopy?: DataTableClipboardOptions<Row>['onCopy']
+  onBeforePaste?: DataTableClipboardOptions<Row>['onBeforePaste']
+  onPasteCommit?: DataTableClipboardOptions<Row>['onPasteCommit']
+  onPasteError?: DataTableClipboardOptions<Row>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<Row> | null) => void
 }
@@ -1020,6 +1215,8 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   pinnedColumns: DataTablePinnedColumns
   pinnedRows: DataTablePinnedRows<Row>
   interaction: DataTableResolvedInteractionOptions
+  selection: false | DataTableResolvedSelectionOptions
+  clipboard: false | DataTableResolvedClipboardOptions<Row>
   view: DataTableResolvedViewOptions
   scrollbars: false | DataTableResolvedScrollbarOptions
   tooltip: false | DataTableResolvedTooltipOptions<Row>
@@ -1052,6 +1249,13 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onCellLeave?: (context: DataTableCellContext<Row>) => void
   onCellClick?: (context: DataTableCellContext<Row>) => void
   onSelectionChange?: (selection: DataTableSelectionState | null) => void
+  onSelectionPreviewChange?: (previewRange: DataTableSelectionRange | null) => void
+  onActiveCellChange?: (activeCell: DataTableSelectionAnchor | null) => void
+  onBeforeCopy?: DataTableClipboardOptions<Row>['onBeforeCopy']
+  onCopy?: DataTableClipboardOptions<Row>['onCopy']
+  onBeforePaste?: DataTableClipboardOptions<Row>['onBeforePaste']
+  onPasteCommit?: DataTableClipboardOptions<Row>['onPasteCommit']
+  onPasteError?: DataTableClipboardOptions<Row>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<Row> | null) => void
 }
@@ -1090,7 +1294,19 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   getViewport: () => DataTableViewport
   getInteraction: () => DataTableInteractionState<Row>
   clearHover: () => void
-  selectCell: (rowId: DataTableRowId, columnId: string) => void
+  getSelection: () => DataTableSelectionState | null
+  setSelection: (selection: DataTableSelectionState | null) => void
+  selectCell: (rowId: DataTableRowId, columnId: string, options?: DataTableSelectionUpdateOptions) => void
+  selectRow: (rowId: DataTableRowId, options?: DataTableSelectionUpdateOptions) => void
+  selectColumn: (columnId: string, options?: DataTableSelectionUpdateOptions) => void
+  selectRange: (range: DataTableSelectionRange, options?: DataTableSelectionUpdateOptions) => void
+  addSelectionRange: (range: DataTableSelectionRange) => void
+  removeSelectionRange: (rangeId: string) => void
+  isCellSelected: (rowId: DataTableRowId, columnId: string) => boolean
+  isRowSelected: (rowId: DataTableRowId) => boolean
+  isColumnSelected: (columnId: string) => boolean
+  copySelection: () => string
+  pasteClipboard: (text?: string) => Promise<DataTablePasteResult<Row>>
   clearSelection: () => void
   getViewState: () => DataTableViewState
   setSort: (sort: DataTableSortState | DataTableSortRule) => void
