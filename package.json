@@ -24,15 +24,15 @@
     "bench": "vitest bench --run src/test/*.bench.ts --config vite.config.ts"
   },
   "dependencies": {
-    "@endge/nova": "workspace:*",
-    "@endge/nova-ui-kit": "workspace:*",
-    "@endge/nova-vue": "workspace:*",
-    "@endge/utils": "workspace:*",
+    "@endge/nova": "^0.5.1",
+    "@endge/nova-ui-kit": "^0.6.0",
+    "@endge/nova-vue": "^0.2.0",
+    "@endge/utils": "^0.23.0",
     "reflect-metadata": "^0.2.2",
     "vue": "^3.5.25"
   },
   "devDependencies": {
-    "@endge/nova-compiler": "workspace:*",
+    "@endge/nova-compiler": "^0.2.0",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/tsconfig": "^0.8.1",
     "jsdom": "^26.1.0",
