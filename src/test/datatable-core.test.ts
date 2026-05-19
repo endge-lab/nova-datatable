@@ -1941,6 +1941,9 @@ describe('DataTable Root runtime', () => {
         totalDy: 0,
       },
     )
+    expect(onColumnOrderChange).not.toHaveBeenCalled()
+    expect(root.getApi().getViewState().columnOrder).toEqual([])
+
     root.eventHandlers.dragend?.(
       new MouseEvent('mouseup', { clientX: 350, clientY: 12 }),
       {

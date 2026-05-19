@@ -91,9 +91,19 @@ interface ResizeState<Row extends Record<string, any>> {
 
 interface ColumnDragState<Row extends Record<string, any>> {
   column: DataTableResolvedColumn<Row>
+  startIndex: number
   targetIndex: number
   pinned: DataTableResolvedColumn<Row>['pinned']
   active: boolean
+  pointerX: number
+  pointerY: number
+  grabOffsetX: number
+}
+
+interface ColumnDragLayoutMotion {
+  from: number
+  startedAt: number
+  duration: number
 }
 
 interface VisibleColumnRect<Row extends Record<string, any>> {
@@ -183,6 +193,7 @@ export class DataTableRootNode<
   private viewport: DataTableViewport
   private resizeState: ResizeState<Row> | null = null
   private columnDragState: ColumnDragState<Row> | null = null
+  private readonly columnDragLayoutMotion = new Map<string, ColumnDragLayoutMotion>()
   private textSelectionActive = false
   private suppressNextHeaderClick = false
   private hoverTarget: DataTableInteractionTarget<Row> | null = null
@@ -1422,12 +1433,20 @@ export class DataTableRootNode<
   private startColumnDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
     if (!this.canDragColumn(target)) return false
 
+    const [x, y] = this.trackPointerPosition(event)
+    const startIndex = this.resolvedColumns.findIndex(column => column.id === target.column.id)
+    if (startIndex < 0) return false
     this.columnDragState = {
       column: target.column,
-      targetIndex: this.resolvedColumns.findIndex(column => column.id === target.column.id),
+      startIndex,
+      targetIndex: startIndex,
       pinned: target.column.pinned,
       active: false,
+      pointerX: x,
+      pointerY: y,
+      grabOffsetX: x - target.rect.x,
     }
+    this.columnDragLayoutMotion.clear()
     this.capturePointer(event)
     return true
   }
@@ -1443,12 +1462,27 @@ export class DataTableRootNode<
     const drag = this.columnDragState
     if (!drag) return
 
+    const [x, y] = this.toLocal(meta.x, meta.y)
+    this.lastPointerPosition = { x, y }
+    drag.pointerX = x
+    drag.pointerY = y
     if (!drag.active && Math.abs(meta.totalDx) < 6) return
+    const wasActive = drag.active
     drag.active = true
+    this.autoScrollColumnDrag(x)
     const targetIndex = this.resolveColumnDragTargetIndex(meta)
-    if (targetIndex === undefined || targetIndex === drag.targetIndex) return
+    if (targetIndex === undefined || targetIndex === drag.targetIndex) {
+      if (!wasActive) {
+        this.refresh(['interaction'])
+        this.queueAnimationLoopSync()
+      }
+      return
+    }
 
+    const before = this.captureColumnXById()
     drag.targetIndex = targetIndex
+    const after = this.captureColumnXById()
+    this.startColumnLayoutMotion(before, after, drag.column.id)
     this.refresh(['interaction'])
   }
 
@@ -1459,12 +1493,14 @@ export class DataTableRootNode<
     if (drag.active) this.suppressNextHeaderClickOnce()
     if (!drag.active) {
       this.columnDragState = null
+      this.columnDragLayoutMotion.clear()
       return
     }
 
     const fromIndex = this.resolvedColumns.findIndex(column => column.id === drag.column.id)
     const toIndex = this.resolveColumnDragTargetIndex(meta) ?? drag.targetIndex
     this.columnDragState = null
+    this.columnDragLayoutMotion.clear()
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
 
     const order = this.resolvedColumns.map(column => column.id)
@@ -1497,13 +1533,44 @@ export class DataTableRootNode<
 
     const [x] = this.toLocal(meta.x, meta.y)
     const target = this.resolveColumnAt(x)
-    if (!target) return drag.targetIndex
-
     const allowCrossPinned = !!(this.props.view.columnOrdering && this.props.view.columnOrdering.allowCrossPinned)
+    if (!target) return this.resolveColumnDragEdgeTargetIndex(x, allowCrossPinned)
     if (!allowCrossPinned && target.column.pinned !== drag.pinned) return drag.targetIndex
     if (target.column.reorderable === false) return drag.targetIndex
 
-    return this.resolvedColumns.findIndex(column => column.id === target.column.id)
+    const targetIndex = this.resolvedColumns.findIndex(column => column.id === target.column.id)
+    if (targetIndex < 0) return drag.targetIndex
+    return this.resolveColumnDragInsertionIndex(targetIndex, x >= target.x + target.width / 2)
+  }
+
+  private resolveColumnDragEdgeTargetIndex(x: number, allowCrossPinned: boolean): number | undefined {
+    const drag = this.columnDragState
+    if (!drag) return undefined
+    const visible = this.visibleColumnRects('all', false)
+      .filter(item => (allowCrossPinned || item.column.pinned === drag.pinned) && item.column.reorderable !== false)
+    if (visible.length === 0) return drag.targetIndex
+    if (x < 0) return this.resolveColumnDragInsertionIndex(this.resolvedColumns.findIndex(column => column.id === visible[0]?.column.id), false)
+    if (x > this.width) return this.resolveColumnDragInsertionIndex(this.resolvedColumns.findIndex(column => column.id === visible[visible.length - 1]?.column.id), true)
+    return drag.targetIndex
+  }
+
+  private resolveColumnDragInsertionIndex(targetIndex: number, after: boolean): number {
+    const drag = this.columnDragState
+    if (!drag || targetIndex < 0) return targetIndex
+    let insertionIndex = after ? targetIndex + 1 : targetIndex
+    const fromIndex = this.resolvedColumns.findIndex(column => column.id === drag.column.id)
+    if (fromIndex >= 0 && fromIndex < insertionIndex) insertionIndex -= 1
+    return Math.max(0, Math.min(this.resolvedColumns.length - 1, insertionIndex))
+  }
+
+  private autoScrollColumnDrag(x: number): void {
+    const drag = this.columnDragState
+    if (!drag || drag.pinned) return
+    const edge = 28
+    let nextX = this.scrollX
+    if (x < this.viewport.bodyX + edge) nextX -= Math.max(24, this.viewport.bodyWidth * 0.08)
+    else if (x > this.viewport.bodyX + this.viewport.bodyWidth - edge) nextX += Math.max(24, this.viewport.bodyWidth * 0.08)
+    if (nextX !== this.scrollX) this.setScroll(nextX, this.scrollY)
   }
 
   private renderGrid(): void {
@@ -1535,6 +1602,7 @@ export class DataTableRootNode<
     this.renderTextSelectionOverlay()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
+    this.renderColumnDragOverlay()
     this.renderTooltipLayer()
     this.renderScrollbars()
     this.renderScrollbarLayer()
@@ -1935,13 +2003,32 @@ export class DataTableRootNode<
     if (template) {
       schema.push(...template(context))
       this.applyCellEnterOpacity(schema, context, startIndex)
+      this.applyColumnDragCellOpacity(schema, context, startIndex)
       this.registerTextSelectionTargets(schema, context, startIndex)
       return
     }
 
     this.renderDefaultCell(schema, context)
     this.applyCellEnterOpacity(schema, context, startIndex)
+    this.applyColumnDragCellOpacity(schema, context, startIndex)
     this.registerTextSelectionTargets(schema, context, startIndex)
+  }
+
+  private applyColumnDragCellOpacity(
+    schema: NovaSchema,
+    context: DataTableCellContext<Row>,
+    startIndex: number,
+  ): void {
+    const drag = this.columnDragState
+    if (!drag?.active || drag.column.id !== context.column.id) return
+    const alpha = context.zone === 'header' ? 0.18 : 0.22
+    for (let index = startIndex; index < schema.length; index += 1) {
+      const item = schema[index]
+      if (!item) continue
+      item.styles = item.styles ?? {}
+      const currentOpacity = typeof item.styles.opacity === 'number' ? item.styles.opacity : 1
+      item.styles.opacity = currentOpacity * alpha
+    }
   }
 
   private applyCellEnterOpacity(
@@ -2003,7 +2090,7 @@ export class DataTableRootNode<
   private syncAnimationLoop(): void {
     if (this.lifecycleState === 'destroyed') return
 
-    if (this.visibleAnimatedCells) {
+    if (this.visibleAnimatedCells || this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) {
       if (!this.animationLoopLease) {
         this.animationLoopLease = this.nova.raph.acquireLoop('nova-datatable:animated-cells')
       }
@@ -2265,7 +2352,9 @@ export class DataTableRootNode<
     return rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
   }
 
-  private visibleColumnRects(region: VisibleColumnRegion = 'all'): Array<VisibleColumnRect<Row>> {
+  private visibleColumnRects(region: VisibleColumnRegion = 'all', animated = true): Array<VisibleColumnRect<Row>> {
+    if (this.columnDragState?.active) return this.visibleColumnRectsForDrag(region, animated)
+
     const left = this.resolvedColumns.filter(column => column.pinned === 'left')
     const center = this.resolvedColumns.filter(column => !column.pinned)
     const right = this.resolvedColumns.filter(column => column.pinned === 'right')
@@ -2274,7 +2363,7 @@ export class DataTableRootNode<
     if (region === 'all' || region === 'left') {
       let x = 0
       for (const column of left) {
-        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x, width: column.resolvedWidth })
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x: x + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0), width: column.resolvedWidth })
         x += column.resolvedWidth
       }
     }
@@ -2287,7 +2376,7 @@ export class DataTableRootNode<
         rects.push({
           column,
           columnIndex: this.columnIndexById.get(column.id) ?? 0,
-          x: this.viewport.bodyX + centerOffset - this.scrollX,
+          x: this.viewport.bodyX + centerOffset - this.scrollX + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0),
           width: column.resolvedWidth,
         })
         centerOffset += column.resolvedWidth
@@ -2297,12 +2386,106 @@ export class DataTableRootNode<
     if (region === 'all' || region === 'right') {
       let x = this.width - this.viewport.pinnedRightWidth
       for (const column of right) {
-        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x, width: column.resolvedWidth })
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x: x + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0), width: column.resolvedWidth })
         x += column.resolvedWidth
       }
     }
 
     return rects
+  }
+
+  private visibleColumnRectsForDrag(region: VisibleColumnRegion, animated: boolean): Array<VisibleColumnRect<Row>> {
+    const columns = this.resolveColumnDragPreviewColumns()
+    const left = columns.filter(column => column.pinned === 'left')
+    const center = columns.filter(column => !column.pinned)
+    const right = columns.filter(column => column.pinned === 'right')
+    const rects: Array<VisibleColumnRect<Row>> = []
+
+    if (region === 'all' || region === 'left') {
+      let x = 0
+      for (const column of left) {
+        const animatedX = x + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0)
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x: animatedX, width: column.resolvedWidth })
+        x += column.resolvedWidth
+      }
+    }
+
+    if (region === 'all' || region === 'center') {
+      let x = this.viewport.bodyX - this.scrollX
+      for (const column of center) {
+        const visible = x + column.resolvedWidth >= this.viewport.bodyX && x <= this.viewport.bodyX + this.viewport.bodyWidth
+        if (visible) {
+          const animatedX = x + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0)
+          rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x: animatedX, width: column.resolvedWidth })
+        }
+        x += column.resolvedWidth
+      }
+    }
+
+    if (region === 'all' || region === 'right') {
+      let x = this.width - this.viewport.pinnedRightWidth
+      for (const column of right) {
+        const animatedX = x + (animated ? this.resolveColumnDragLayoutOffset(column.id) : 0)
+        rects.push({ column, columnIndex: this.columnIndexById.get(column.id) ?? 0, x: animatedX, width: column.resolvedWidth })
+        x += column.resolvedWidth
+      }
+    }
+
+    return rects
+  }
+
+  private resolveColumnDragPreviewColumns(): Array<DataTableResolvedColumn<Row>> {
+    const drag = this.columnDragState
+    if (!drag?.active) return this.resolvedColumns
+    const columns = [...this.resolvedColumns]
+    const fromIndex = columns.findIndex(column => column.id === drag.column.id)
+    if (fromIndex < 0) return columns
+    const [column] = columns.splice(fromIndex, 1)
+    if (!column) return columns
+    columns.splice(Math.max(0, Math.min(columns.length, drag.targetIndex)), 0, column)
+    return columns
+  }
+
+  private captureColumnXById(): Map<string, number> {
+    const result = new Map<string, number>()
+    for (const rect of this.visibleColumnRects('all', false)) result.set(rect.column.id, rect.x)
+    return result
+  }
+
+  private startColumnLayoutMotion(before: Map<string, number>, after: Map<string, number>, draggedColumnId: string): void {
+    const now = performance.now()
+    for (const [columnId, previousX] of before) {
+      if (columnId === draggedColumnId) continue
+      const nextX = after.get(columnId)
+      if (nextX === undefined) continue
+      const delta = previousX - nextX
+      if (Math.abs(delta) < 0.5) continue
+      this.columnDragLayoutMotion.set(columnId, {
+        from: delta,
+        startedAt: now,
+        duration: 130,
+      })
+    }
+    this.queueAnimationLoopSync()
+  }
+
+  private resolveColumnDragLayoutOffset(columnId: string): number {
+    const motion = this.columnDragLayoutMotion.get(columnId)
+    if (!motion) return 0
+    const progress = Math.max(0, Math.min(1, (performance.now() - motion.startedAt) / motion.duration))
+    if (progress >= 1) {
+      this.columnDragLayoutMotion.delete(columnId)
+      return 0
+    }
+    const eased = 1 - Math.pow(1 - progress, 3)
+    return motion.from * (1 - eased)
+  }
+
+  private resolveColumnDragDropIndicatorX(): number | null {
+    const drag = this.columnDragState
+    if (!drag?.active) return null
+    const rect = this.visibleColumnRects('all', false).find(item => item.column.id === drag.column.id)
+    return rect ? rect.x : null
   }
 
   private renderInteractionOverlay(): void {
@@ -2455,6 +2638,79 @@ export class DataTableRootNode<
       state,
     })
     if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  private renderColumnDragOverlay(): void {
+    const drag = this.columnDragState
+    if (!drag?.active) return
+
+    const width = drag.column.resolvedWidth
+    const x = drag.pointerX - drag.grabOffsetX
+    const ghostRect = {
+      x,
+      y: 0,
+      width,
+      height: this.height,
+    }
+    const title = drag.column.title ?? drag.column.id
+    const schema: NovaSchema = [
+      {
+        type: 'rect',
+        ...ghostRect,
+        styles: {
+          background: 'rgba(248, 250, 252, 0.72)',
+          opacity: 0.92,
+          border: { color: '#2563eb', width: 1 },
+        },
+      },
+      {
+        type: 'rect',
+        x,
+        y: 0,
+        width,
+        height: this.headerHeight,
+        styles: {
+          background: 'rgba(219, 234, 254, 0.94)',
+          border: { color: '#2563eb', width: 1 },
+        },
+      },
+      {
+        type: 'text',
+        text: title,
+        x: x + 10,
+        y: 0,
+        width: Math.max(0, width - 20),
+        height: this.headerHeight,
+        styles: {
+          color: '#172033',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: this.fontSize,
+            weight: '800',
+          },
+          lineHeight: this.lineHeight,
+          align: { horizontal: drag.column.align, vertical: 'middle' },
+          ellipsis: true,
+        },
+      },
+    ]
+
+    const dropX = this.resolveColumnDragDropIndicatorX()
+    if (dropX !== null) {
+      schema.push({
+        type: 'rect',
+        x: dropX - 1,
+        y: 0,
+        width: 2,
+        height: this.height,
+        styles: {
+          background: '#2563eb',
+          opacity: 0.88,
+        },
+      })
+    }
+
+    this.renderer.schema(schema)
   }
 
   private renderTooltipLayer(): void {
