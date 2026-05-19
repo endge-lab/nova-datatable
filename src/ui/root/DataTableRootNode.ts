@@ -1136,6 +1136,15 @@ export class DataTableRootNode<
       event.cancelBubble = true
     })
 
+    this.on('mouseup', event => {
+      if (!this.textSelectionActive) return
+      this.textSelectionActive = false
+      this.textSelection.end()
+      this.releasePointerCapture(event)
+      this.refresh(['interaction'])
+      event.cancelBubble = true
+    })
+
     this.on('dblclick', event => {
       this.trackTooltipModifiers(event)
       const [x, y] = this.trackPointerPosition(event)
@@ -1146,9 +1155,9 @@ export class DataTableRootNode<
       }
     })
 
-    this.on('dragmove', (event, dx, dy, meta) => {
+    this.on('dragmove', (event, _dx, _dy, meta) => {
       if (this.scrollbarDragState) {
-        this.updateScrollbarDrag(dx, dy)
+        this.updateScrollbarDrag(meta.totalDx, meta.totalDy)
         event.cancelBubble = true
         return
       }
@@ -1164,12 +1173,15 @@ export class DataTableRootNode<
       }
       if (!this.resizeState) return
       const nextWidth = this.resizeState.startWidth + meta.totalDx
+      const [x, y] = this.toLocal(meta.x, meta.y)
+      this.lastPointerPosition = { x, y }
       this.applyColumnWidth(this.resizeState.column.id, nextWidth)
       event.cancelBubble = true
     })
 
     this.on('dragend', (event, meta) => {
       if (this.scrollbarDragState) {
+        this.updateScrollbarDrag(meta.totalDx, meta.totalDy)
         this.scrollbarDragState = null
         this.releasePointerCapture(event)
         this.scheduleScrollbarHide('scroll')
@@ -1192,6 +1204,7 @@ export class DataTableRootNode<
       }
       if (!this.resizeState) return
       this.resizeState = null
+      this.syncHoverAfterViewportChange()
       this.releasePointerCapture(event)
       event.cancelBubble = true
     })
@@ -2277,7 +2290,7 @@ export class DataTableRootNode<
           y: this.viewport.bodyY + match.rowIndex * this.rowHeight - this.scrollY,
           width: columnRect.width,
           height: this.rowHeight,
-        }, columnRect.column)
+        }, columnRect.column, 'body')
         if (!rect) continue
         const active = searchState.activeIndex >= 0 && searchState.matches[searchState.activeIndex] === match
         schema.push(this.createOverlayRect(rect, active ? 'rgba(244, 63, 94, 0.14)' : 'rgba(250, 204, 21, 0.14)', 1))
@@ -2322,7 +2335,7 @@ export class DataTableRootNode<
   private renderHoverOverlay(): void {
     const hover = this.hoverTarget
     const options = this.props.interaction.hover
-    if (!hover || !options || options.mode === 'none' || this.props.hoverAlpha <= 0) return
+    if (this.resizeState || !hover || !options || options.mode === 'none' || this.props.hoverAlpha <= 0) return
 
     const alpha = this.props.hoverAlpha
     const schema: NovaSchema = []
@@ -2339,7 +2352,7 @@ export class DataTableRootNode<
       schema.push(...this.createColumnOverlayRects(hover, options.columnColor, alpha, options.pinned))
     }
     if (modeHasCell(options.mode) && options.cellColor) {
-      const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column)
+      const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column, hover.zone)
       if (cellRect) schema.push(this.createOverlayRect(cellRect, options.cellColor, alpha))
     }
     if (schema.length > 0) this.renderer.schema(schema)
@@ -2358,7 +2371,7 @@ export class DataTableRootNode<
     if (selection.mode === 'row') schema.push(...this.createRowOverlayRects(target, options.color, alpha, true))
     else if (selection.mode === 'column') schema.push(...this.createColumnOverlayRects(target, options.color, alpha, true))
     else {
-      const cellRect = this.clipRectToColumnRegion(target.rect, target.column)
+      const cellRect = this.clipRectToColumnRegion(target.rect, target.column, target.zone)
       if (cellRect) schema.push(this.createOverlayRect(cellRect, options.color, alpha, options.borderColor))
     }
     if (schema.length > 0) this.renderer.schema(schema)
@@ -2369,13 +2382,17 @@ export class DataTableRootNode<
     if (!template) return
 
     const state = this.getInteractionState()
-    const hoverRects = this.hoverTarget
-      ? isGroupInteractionZone(this.hoverTarget.zone)
-        ? this.createRowRects(this.hoverTarget, true)
-        : [...this.createRowRects(this.hoverTarget, true), this.hoverTarget.rect]
+    const hoverTarget = this.resizeState ? null : this.hoverTarget
+    const hoverCellRect = hoverTarget && !isGroupInteractionZone(hoverTarget.zone)
+      ? this.clipRectToColumnRegion(hoverTarget.rect, hoverTarget.column, hoverTarget.zone)
+      : null
+    const hoverRects = hoverTarget
+      ? isGroupInteractionZone(hoverTarget.zone)
+        ? this.createRowRects(hoverTarget, true)
+        : [...this.createRowRects(hoverTarget, true), ...(hoverCellRect ? [hoverCellRect] : [])]
       : []
     const schema = template({
-      hover: state.hover,
+      hover: this.resizeState ? null : state.hover,
       selection: state.selection,
       viewport: this.viewport,
       rects: hoverRects,
@@ -2486,18 +2503,22 @@ export class DataTableRootNode<
     color: string,
     opacity: number,
     includePinned: boolean,
+    zone: DataTableCellContext<Row>['zone'] = 'body',
   ): NovaSchema {
+    const clippedRect = this.clipRectToVerticalRegion(rect, zone)
+    if (!clippedRect) return []
+
     const segments: Array<DataTableCellRect> = []
     if (includePinned && this.viewport.pinnedLeftWidth > 0) {
-      segments.push({ x: 0, y: rect.y, width: this.viewport.pinnedLeftWidth, height: rect.height })
+      segments.push({ x: 0, y: clippedRect.y, width: this.viewport.pinnedLeftWidth, height: clippedRect.height })
     }
-    segments.push({ x: this.viewport.bodyX, y: rect.y, width: this.viewport.bodyWidth, height: rect.height })
+    segments.push({ x: this.viewport.bodyX, y: clippedRect.y, width: this.viewport.bodyWidth, height: clippedRect.height })
     if (includePinned && this.viewport.pinnedRightWidth > 0) {
       segments.push({
         x: this.width - this.viewport.pinnedRightWidth,
-        y: rect.y,
+        y: clippedRect.y,
         width: this.viewport.pinnedRightWidth,
-        height: rect.height,
+        height: clippedRect.height,
       })
     }
     return segments.map(segment => this.createOverlayRect(segment, color, opacity))
@@ -2526,22 +2547,25 @@ export class DataTableRootNode<
   }
 
   private createRowRects(target: DataTableInteractionTarget<Row>, includePinned: boolean): Array<DataTableCellRect> {
+    const rowRect = this.clipRectToVerticalRegion(target.rect, target.zone)
+    if (!rowRect) return []
+
     const segments: Array<DataTableCellRect> = []
     if (includePinned && this.viewport.pinnedLeftWidth > 0) {
-      segments.push({ x: 0, y: target.rect.y, width: this.viewport.pinnedLeftWidth, height: target.rect.height })
+      segments.push({ x: 0, y: rowRect.y, width: this.viewport.pinnedLeftWidth, height: rowRect.height })
     }
     segments.push({
       x: this.viewport.bodyX,
-      y: target.rect.y,
+      y: rowRect.y,
       width: this.viewport.bodyWidth,
-      height: target.rect.height,
+      height: rowRect.height,
     })
     if (includePinned && this.viewport.pinnedRightWidth > 0) {
       segments.push({
         x: this.width - this.viewport.pinnedRightWidth,
-        y: target.rect.y,
+        y: rowRect.y,
         width: this.viewport.pinnedRightWidth,
-        height: target.rect.height,
+        height: rowRect.height,
       })
     }
     return segments
@@ -2550,6 +2574,7 @@ export class DataTableRootNode<
   private clipRectToColumnRegion(
     rect: DataTableCellRect,
     column: DataTableResolvedColumn<Row>,
+    zone?: DataTableCellContext<Row>['zone'],
   ): DataTableCellRect | null {
     const minX = column.pinned === 'left'
       ? 0
@@ -2564,11 +2589,41 @@ export class DataTableRootNode<
     const x = Math.max(minX, rect.x)
     const right = Math.min(maxX, rect.x + rect.width)
     if (right <= x) return null
-    return {
+    const columnRect = {
       x,
       y: rect.y,
       width: right - x,
       height: rect.height,
+    }
+    return zone ? this.clipRectToVerticalRegion(columnRect, zone) : columnRect
+  }
+
+  private clipRectToVerticalRegion(
+    rect: DataTableCellRect,
+    zone: DataTableCellContext<Row>['zone'],
+  ): DataTableCellRect | null {
+    const bounds = this.resolveVerticalRegionBounds(zone)
+    const y = Math.max(bounds.top, rect.y)
+    const bottom = Math.min(bounds.bottom, rect.y + rect.height)
+    if (bottom <= y) return null
+    return {
+      x: rect.x,
+      y,
+      width: rect.width,
+      height: bottom - y,
+    }
+  }
+
+  private resolveVerticalRegionBounds(zone: DataTableCellContext<Row>['zone']): { top: number; bottom: number } {
+    if (zone === 'header') return { top: 0, bottom: this.headerHeight }
+    if (zone === 'pinned-top') return { top: this.headerHeight, bottom: this.viewport.bodyY }
+    if (zone === 'pinned-bottom') {
+      const bottomRows = this.props.pinnedRows.bottom?.length ?? 0
+      return { top: this.height - bottomRows * this.rowHeight, bottom: this.height }
+    }
+    return {
+      top: this.viewport.bodyY,
+      bottom: this.viewport.bodyY + this.viewport.bodyHeight,
     }
   }
 

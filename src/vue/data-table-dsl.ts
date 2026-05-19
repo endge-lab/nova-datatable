@@ -25,6 +25,9 @@ const primitiveProps = [
   'highlightColor',
   'activeHighlightColor',
   'highlightActive',
+  'selectable',
+  'copyable',
+  'selectionScope',
   'if',
 ] as const
 

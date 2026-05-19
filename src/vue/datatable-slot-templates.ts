@@ -246,6 +246,15 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
       height: rect.height,
       active: readProp(node, 'active') as boolean | undefined,
       clip: readBooleanProp(node, 'clip') ? true : undefined,
+      meta: readBooleanProp(node, 'selectable')
+        ? {
+            textSelection: {
+              selectable: true,
+              copyable: readProp(node, 'copyable') !== false,
+              scope: readStringProp(node, 'selectionScope'),
+            },
+          }
+        : undefined,
       styles: {
         background: readStringProp(node, 'background'),
         border: (readProp(node, 'border') as any) ?? resolveRadiusBorder(readProp(node, 'radius')),

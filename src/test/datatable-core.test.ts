@@ -511,6 +511,56 @@ describe('DataTable scrollbars', () => {
 
     app.destroy()
   })
+
+  it('maps scrollbar drag using total drag distance', () => {
+    const app = createApp(640, 360)
+    const root = mountRoot(app)
+    root.setProps({
+      scrollbars: {
+        visibility: 'always',
+        thickness: 8,
+        minThumbSize: 40,
+      },
+    } as never)
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 632, clientY: 90 }))
+    root.eventHandlers.dragmove?.(
+      new MouseEvent('mousemove', { clientX: 632, clientY: 190 }),
+      0,
+      5,
+      {
+        pointerId: 1,
+        startX: 632,
+        startY: 90,
+        x: 632,
+        y: 190,
+        dx: 0,
+        dy: 5,
+        totalDx: 0,
+        totalDy: 100,
+      },
+    )
+
+    expect(root.getApi().getViewport().scrollY).toBeGreaterThan(1000)
+
+    root.eventHandlers.dragend?.(
+      new MouseEvent('mouseup', { clientX: 632, clientY: 210 }),
+      {
+        pointerId: 1,
+        startX: 632,
+        startY: 90,
+        x: 632,
+        y: 210,
+        dx: 0,
+        dy: 20,
+        totalDx: 0,
+        totalDy: 120,
+      },
+    )
+
+    expect(root.getApi().getViewport().scrollY).toBeGreaterThan(1200)
+    app.destroy()
+  })
 })
 
 describe('DataTable editing', () => {
@@ -775,6 +825,7 @@ describe('DataTableViewPipeline', () => {
     syncPipeline(pipeline, store)
 
     pipeline.setSearch({ text: 'a', scope: 'cells', columns: ['name'], match: 'contains', highlight: 'cell-text' })
+    expect(pipeline.getQuery().search?.filter).toBe(true)
     expect(pipeline.getSearchState().matches.map(match => match.rowId)).toEqual(['row-b', 'row-c'])
     expect(pipeline.findNext()).toMatchObject({ rowId: 'row-c', columnId: 'name' })
     expect(pipeline.findPrevious()).toMatchObject({ rowId: 'row-b', columnId: 'name' })

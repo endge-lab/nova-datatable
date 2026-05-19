@@ -216,7 +216,7 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           caseSensitive: view?.search?.caseSensitive ?? false,
           columns: view?.search?.columns ?? [],
           highlight: view?.search?.highlight ?? 'cell-text',
-          filter: view?.search?.filter ?? false,
+          filter: view?.search?.filter ?? true,
           highlightColor: view?.search?.highlightColor ?? '#b45309',
           activeHighlightColor: view?.search?.activeHighlightColor ?? '#be123c',
           controlled: view?.search?.controlled ?? false,
