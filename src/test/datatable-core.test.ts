@@ -52,10 +52,16 @@ function create2DContextStub(): CanvasRenderingContext2D {
   }
   canvasContextStub = state
   return new Proxy(state, {
+    /**
+     * Возвращает значение состояния текущего класса.
+     */
     get(target, prop) {
       if (!(prop in target)) target[prop] = vi.fn()
       return target[prop]
     },
+    /**
+     * Обновляет значение состояния текущего класса.
+     */
     set(target, prop, value) {
       target[prop] = value
       ;(target.__sets as Array<[PropertyKey, unknown]>).push([prop, value])

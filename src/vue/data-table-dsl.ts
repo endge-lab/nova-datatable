@@ -36,6 +36,9 @@ function createDataTableDslMarker(name: string, props: ComponentObjectPropsOptio
     name,
     inheritAttrs: false,
     props,
+    /**
+     * Обновляет значение состояния текущего класса.
+     */
     setup(_props, { slots }) {
       return () => slots.default?.() ?? null
     },

@@ -566,7 +566,13 @@ implements DataTableStoreApi<Row> {
    * Возвращает страницу.
    */
   private getPage(pageIndex: number, create: true): DataTablePage<Row>
+  /**
+   * Возвращает значение состояния DataTableStore.
+   */
   private getPage(pageIndex: number, create?: false): DataTablePage<Row> | undefined
+  /**
+   * Возвращает значение состояния DataTableStore.
+   */
   private getPage(pageIndex: number, create = false): DataTablePage<Row> | undefined {
     let page = this.pages.get(pageIndex)
     if (!page && create) {
@@ -605,6 +611,9 @@ implements DataTableStoreApi<Row> {
     return row[this.rowKey] as DataTableRowId
   }
 
+  /**
+   * Выполняет внутренний шаг reindexDenseLocations для DataTableStore.
+   */
   private reindexDenseLocations(start = 0): void {
     if (!this.denseRows) return
 
@@ -650,6 +659,9 @@ implements DataTableStoreApi<Row> {
     columns.add(columnId)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableStore.
+   */
   private resolveDirtyCells(): Array<DataTableDirtyCell> {
     const cells: Array<DataTableDirtyCell> = []
     for (const [rowId, columnIds] of this.dirtyCells) {

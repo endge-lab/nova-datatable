@@ -32,6 +32,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
   private rowCount = 0
   private revision = 0
 
+  /**
+   * Вычисляет производное значение DataTableSummaryEngine.
+   */
   compute(rows: Array<Row>, rules: Array<DataTableSummaryRule<Row>>): DataTableSummaryResult {
     this.rules = [...rules]
     this.accumulators.clear()
@@ -48,6 +51,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     return this.snapshot()
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableSummaryEngine.
+   */
   applyRowChange(previous: Row | undefined, next: Row | undefined, index = 0): DataTableSummaryResult {
     if (!previous && !next) return this.snapshot()
     if (!previous && next) this.rowCount += 1
@@ -61,6 +67,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     return this.snapshot()
   }
 
+  /**
+   * Выполняет действие snapshot в рамках ответственности DataTableSummaryEngine.
+   */
   snapshot(): DataTableSummaryResult {
     const values: Record<string, unknown> = {}
     for (const [id, accumulator] of this.accumulators) {
@@ -73,6 +82,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     }
   }
 
+  /**
+   * Выполняет внутренний шаг addValue для DataTableSummaryEngine.
+   */
   private addValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
     const accumulator = this.accumulators.get(rule.id)
     if (!accumulator) return
@@ -90,6 +102,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     accumulator.values.set(value, (accumulator.values.get(value) ?? 0) + 1)
   }
 
+  /**
+   * Удаляет сущность из runtime-коллекции DataTableSummaryEngine.
+   */
   private removeValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
     const accumulator = this.accumulators.get(rule.id)
     if (!accumulator) return
@@ -115,6 +130,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableSummaryEngine.
+   */
   private resolveNumber(rule: DataTableSummaryRule<Row>, row: Row, index: number): number | undefined {
     const raw = rule.value
       ? rule.value(row, index)

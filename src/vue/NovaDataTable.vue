@@ -231,6 +231,9 @@ const DataTableDomEditorSlot = defineComponent({
       required: true,
     },
   },
+  /**
+   * Обновляет значение состояния текущего класса.
+   */
   setup(componentProps) {
     return () => componentProps.template(componentProps.context)
   },

@@ -353,11 +353,17 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Обрабатывает входящее событие DataTableRootNode.
+   */
   protected override onMount(): void {
     super.onMount()
     this.setupTrackpadGestureEvents()
   }
 
+  /**
+   * Обрабатывает входящее событие DataTableRootNode.
+   */
   protected override onUnmount(): void {
     this.teardownTrackpadGestureEvents()
     super.onUnmount()
@@ -419,34 +425,58 @@ export class DataTableRootNode<
     return Math.max(24, Math.round(this.props.headerHeight * this.zoomHeaderScale))
   }
 
+  /**
+   * Возвращает zoom Value для DataTableRootNode.
+   */
   private get zoomValue(): number {
     return this.props.zoom ? this.props.zoom.value : 1
   }
 
+  /**
+   * Возвращает zoom Row Scale для DataTableRootNode.
+   */
   private get zoomRowScale(): number {
     return this.props.zoom ? this.props.zoom.rowScale : 1
   }
 
+  /**
+   * Возвращает zoom Header Scale для DataTableRootNode.
+   */
   private get zoomHeaderScale(): number {
     return this.props.zoom ? this.props.zoom.headerScale : 1
   }
 
+  /**
+   * Возвращает zoom Column Scale для DataTableRootNode.
+   */
   private get zoomColumnScale(): number {
     return this.props.zoom ? this.props.zoom.columnScale : 1
   }
 
+  /**
+   * Возвращает zoom Text Scale для DataTableRootNode.
+   */
   private get zoomTextScale(): number {
     return this.props.zoom ? this.props.zoom.textScale : 1
   }
 
+  /**
+   * Возвращает zoom Icon Scale для DataTableRootNode.
+   */
   private get zoomIconScale(): number {
     return this.props.zoom ? this.props.zoom.iconScale : 1
   }
 
+  /**
+   * Возвращает font Size для DataTableRootNode.
+   */
   private get fontSize(): number {
     return Math.max(9, Math.round((this.props.fontSize ?? 13) * this.zoomTextScale))
   }
 
+  /**
+   * Возвращает line Height для DataTableRootNode.
+   */
   private get lineHeight(): number {
     return Math.max(10, Math.round((this.props.lineHeight ?? 18) * this.zoomTextScale))
   }
@@ -632,6 +662,9 @@ export class DataTableRootNode<
     this.refresh(['custom'])
   }
 
+  /**
+   * Выполняет внутренний шаг tableOptions для DataTableRootNode.
+   */
   private tableOptions(next?: Partial<DataTableRootOptions<Row>>): DataTableRootOptions<Row> {
     if (!next) {
       return {
@@ -656,6 +689,9 @@ export class DataTableRootNode<
     return this.tableOptions()
   }
 
+  /**
+   * Возвращает значение состояния DataTableRootNode.
+   */
   private getZoomState(): DataTableZoomState {
     return {
       value: this.zoomValue,
@@ -669,6 +705,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setZoom(value: number | DataTableZoomOptions): void {
     const current = this.props.zoom
     const nextValue = typeof value === 'number' ? value : value.value ?? current?.value ?? 1
@@ -687,10 +726,16 @@ export class DataTableRootNode<
     this.applyZoom(nextZoom)
   }
 
+  /**
+   * Сбрасывает состояние к базовым значениям DataTableRootNode.
+   */
   private resetZoom(): void {
     this.applyZoom({ value: 1 })
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyZoom(zoom: DataTableZoomOptions): void {
     const previousViewport = this.viewport
     const pointer = this.lastPointerPosition
@@ -721,17 +766,26 @@ export class DataTableRootNode<
     this.props.onZoomChange?.(this.getZoomState())
   }
 
+  /**
+   * Выполняет внутренний шаг tableData для DataTableRootNode.
+   */
   private tableData(rows?: Array<Row>): Array<Row> {
     if (rows) this.setRows(rows)
     return this.store.getRows()
   }
 
+  /**
+   * Выполняет внутренний шаг addRows для DataTableRootNode.
+   */
   private addRows(row: Row | Array<Row>): void {
     if (Array.isArray(row)) this.store.insertMany(row)
     else this.store.insert(row)
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateRows(items: Array<Partial<Row> & { id: DataTableRowId }> | Partial<Row> & { id: DataTableRowId }): void {
     const patches = Array.isArray(items) ? items : [items]
     for (const patch of patches) {
@@ -741,22 +795,34 @@ export class DataTableRootNode<
     this.refresh(['data'])
   }
 
+  /**
+   * Удаляет сущность из runtime-коллекции DataTableRootNode.
+   */
   private removeRows(ids: DataTableRowId | Array<DataTableRowId>): void {
     if (Array.isArray(ids)) this.store.removeMany(ids)
     else this.store.remove(ids)
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setRows(rows: Array<Row>): void {
     this.store.setRows(rows)
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг replaceRange для DataTableRootNode.
+   */
   private replaceRange(start: number, rows: Array<Row>): void {
     this.store.replaceRange(start, rows)
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyDeltas(deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>): void {
     const items = Array.isArray(deltas) ? deltas : [deltas]
     if (items.length === 0) return
@@ -768,16 +834,25 @@ export class DataTableRootNode<
     queueMicrotask(() => this.flushDeltasWithinBudget())
   }
 
+  /**
+   * Принудительно завершает накопленные изменения DataTableRootNode.
+   */
   private flushDeltas(): void {
     this.deltaFlushQueued = false
     this.flushDeltaQueue(false)
   }
 
+  /**
+   * Принудительно завершает накопленные изменения DataTableRootNode.
+   */
   private flushDeltasWithinBudget(): void {
     this.deltaFlushQueued = false
     this.flushDeltaQueue(true)
   }
 
+  /**
+   * Принудительно завершает накопленные изменения DataTableRootNode.
+   */
   private flushDeltaQueue(useBudget: boolean): void {
     if (this.pendingDeltas.length === 0) {
       return
@@ -804,6 +879,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг isDirtyStateVisible для DataTableRootNode.
+   */
   private isDirtyStateVisible(dirty: DataTableDirtyState): boolean {
     if (dirty.structural) return true
 
@@ -823,15 +901,24 @@ export class DataTableRootNode<
     return false
   }
 
+  /**
+   * Выполняет внутренний шаг batch для DataTableRootNode.
+   */
   private batch(callback: (api: DataTableRootApi<Row>) => void): void {
     this.store.batch(() => callback(this.api))
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Возвращает значение состояния DataTableRootNode.
+   */
   private getViewState(): DataTableViewState {
     return this.viewPipeline.getState()
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setSort(sort: Parameters<DataTableRootApi<Row>['setSort']>[0]): void {
     this.viewPipeline.setSort(sort)
     this.emitViewQuery('sort')
@@ -839,6 +926,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearSort(columnId?: string): void {
     this.viewPipeline.clearSort(columnId)
     this.emitViewQuery('sort')
@@ -846,6 +936,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setFilter(columnId: string, filter: Parameters<DataTableRootApi<Row>['setFilter']>[1]): void {
     this.viewPipeline.setFilter(columnId, filter)
     this.emitViewQuery('filter')
@@ -853,6 +946,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setFilters(filters: Parameters<DataTableRootApi<Row>['setFilters']>[0]): void {
     this.viewPipeline.setFilters(filters)
     this.emitViewQuery('filter')
@@ -860,6 +956,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearFilter(columnId?: string): void {
     this.viewPipeline.clearFilter(columnId)
     this.emitViewQuery('filter')
@@ -867,18 +966,27 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
     this.viewPipeline.setSearch(query)
     this.emitViewQuery('search')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearSearch(): void {
     this.viewPipeline.clearSearch()
     this.emitViewQuery('search')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Находит сущность по runtime-критериям DataTableRootNode.
+   */
   private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
     const match = this.viewPipeline.findNext()
     if (match) this.scrollToSearchMatch(match)
@@ -887,6 +995,9 @@ export class DataTableRootNode<
     return match
   }
 
+  /**
+   * Находит сущность по runtime-критериям DataTableRootNode.
+   */
   private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
     const match = this.viewPipeline.findPrevious()
     if (match) this.scrollToSearchMatch(match)
@@ -895,6 +1006,9 @@ export class DataTableRootNode<
     return match
   }
 
+  /**
+   * Переводит focus в целевое состояние DataTableRootNode.
+   */
   private focusSearchMatch(index: number): ReturnType<DataTableRootApi<Row>['focusSearchMatch']> {
     const match = this.viewPipeline.focusSearchMatch(index)
     if (match) this.scrollToSearchMatch(match)
@@ -903,6 +1017,9 @@ export class DataTableRootNode<
     return match
   }
 
+  /**
+   * Выполняет внутренний шаг scrollToSearchMatch для DataTableRootNode.
+   */
   private scrollToSearchMatch(match: NonNullable<ReturnType<DataTableRootApi<Row>['findNext']>>): void {
     let nextScrollX = this.scrollX
     if (match.columnId) {
@@ -924,6 +1041,9 @@ export class DataTableRootNode<
     this.setScroll(nextScrollX, match.rowIndex * this.rowHeight)
   }
 
+  /**
+   * Выполняет внутренний шаг reorderRows для DataTableRootNode.
+   */
   private reorderRows(payload: Parameters<DataTableRootApi<Row>['reorderRows']>[0]): void {
     const mode = payload.mode ?? ((this.props.view.rowOrdering && this.props.view.rowOrdering.mode) || 'view')
     if (mode === 'store') {
@@ -938,6 +1058,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг reorderColumns для DataTableRootNode.
+   */
   private reorderColumns(payload: Parameters<DataTableRootApi<Row>['reorderColumns']>[0]): void {
     const next = this.viewPipeline.reorderColumns(payload, this.props.columns)
     this.props.onColumnOrderChange?.(next)
@@ -945,6 +1068,9 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setColumnOrder(order: Array<string>, reason: 'drag' | 'api' = 'api'): void {
     const nextOrder = this.viewPipeline.setColumnOrder(order, this.props.columns)
     this.props.onColumnOrderChange?.({
@@ -958,6 +1084,9 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  /**
+   * Сбрасывает состояние к базовым значениям DataTableRootNode.
+   */
   private resetColumnOrder(): void {
     this.viewPipeline.resetColumnOrder()
     this.props.onColumnOrderChange?.({
@@ -971,6 +1100,9 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setGrouping(groups: Parameters<DataTableRootApi<Row>['setGrouping']>[0]): void {
     this.viewPipeline.setGrouping(groups)
     this.emitViewQuery('grouping')
@@ -978,6 +1110,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearGrouping(): void {
     this.viewPipeline.clearGrouping()
     this.emitViewQuery('grouping')
@@ -985,6 +1120,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Переключает флаг состояния DataTableRootNode.
+   */
   private toggleGroup(groupId: string): void {
     const group = this.viewPipeline.toggleGroup(groupId)
     if (group) this.props.onGroupToggle?.(group)
@@ -992,30 +1130,45 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг expandGroup для DataTableRootNode.
+   */
   private expandGroup(groupId: string): void {
     this.viewPipeline.expandGroup(groupId)
     this.emitViewQuery('grouping')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг collapseGroup для DataTableRootNode.
+   */
   private collapseGroup(groupId: string): void {
     this.viewPipeline.collapseGroup(groupId)
     this.emitViewQuery('grouping')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг expandAllGroups для DataTableRootNode.
+   */
   private expandAllGroups(): void {
     this.viewPipeline.expandAllGroups()
     this.emitViewQuery('grouping')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг collapseAllGroups для DataTableRootNode.
+   */
   private collapseAllGroups(): void {
     this.viewPipeline.collapseAllGroups()
     this.emitViewQuery('grouping')
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Сбрасывает состояние к базовым значениям DataTableRootNode.
+   */
   private resetView(): void {
     this.viewPipeline.reset()
     this.emitViewQuery('all')
@@ -1023,6 +1176,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'columns', 'layout'])
   }
 
+  /**
+   * Публикует событие во внутренний event bus DataTableRootNode.
+   */
   private emitViewQuery(kind: 'sort' | 'filter' | 'search' | 'row' | 'column' | 'grouping' | 'all'): void {
     const state = this.viewPipeline.getState()
     if (kind === 'sort' || kind === 'all') this.props.onSortChange?.(state.sort)
@@ -1032,10 +1188,16 @@ export class DataTableRootNode<
     this.props.onQueryChange?.(state.query)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveSourceQuery(): DataTableQueryState | undefined {
     return this.viewPipeline.isServerControlled() ? undefined : this.viewPipeline.getQuery()
   }
 
+  /**
+   * Синхронизирует актуальное состояние DataTableRootNode.
+   */
   private refresh(kinds: Array<string> = ['data', 'layout', 'viewport']): void {
     this.invalidation.bumpMany(kinds)
     this.resolvedColumns = this.resolveColumns()
@@ -1046,6 +1208,9 @@ export class DataTableRootNode<
     this.nova.invalidate()
   }
 
+  /**
+   * Выполняет внутренний шаг suppressTextSelectionIndexFor для DataTableRootNode.
+   */
   private suppressTextSelectionIndexFor(reason: 'scroll' | 'zoom'): void {
     const text = this.props.performance.text
     if (!text || !text.disableTextSelectionIndexOnScroll || this.textSelectionActive) return
@@ -1056,6 +1221,9 @@ export class DataTableRootNode<
     this.suppressTextSelectionIndexUntil = Math.max(this.suppressTextSelectionIndexUntil, performance.now() + duration)
   }
 
+  /**
+   * Выполняет внутренний шаг requestTextRefinement для DataTableRootNode.
+   */
   private requestTextRefinement(reason: 'scroll' | 'zoom'): void {
     const text = this.props.performance.text
     if (!text || text.raster !== 'deferred') return
@@ -1067,11 +1235,17 @@ export class DataTableRootNode<
     this.nova.invalidate()
   }
 
+  /**
+   * Выполняет внутренний шаг continueTextRefinementIfNeeded для DataTableRootNode.
+   */
   private continueTextRefinementIfNeeded(): void {
     if (performance.now() >= this.textRefinementUntil) return
     this.nova.invalidate()
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
     const columns = resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
     const scale = this.zoomColumnScale
@@ -1089,6 +1263,9 @@ export class DataTableRootNode<
     return resolved
   }
 
+  /**
+   * Синхронизирует состояние между слоями DataTableRootNode.
+   */
   private syncViewPipeline(): void {
     this.viewPipeline.sync({
       columns: this.resolvedColumns,
@@ -1097,6 +1274,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createViewport(): DataTableViewport {
     return createDataTableViewport({
       width: this.width || this.props.width,
@@ -1114,6 +1294,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setupEvents(): void {
     this.on('wheel', event => {
       this.trackTooltipModifiers(event)
@@ -1312,6 +1495,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleZoomWheel(event: WheelEvent): boolean {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled) return false
@@ -1326,10 +1512,16 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Выполняет внутренний шаг isTrackpadPinchWheel для DataTableRootNode.
+   */
   private isTrackpadPinchWheel(event: WheelEvent, options: DataTableResolvedZoomWheelOptions): boolean {
     return options.pinch && event.ctrlKey && Number.isFinite(event.deltaY) && event.deltaY !== 0
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setupTrackpadGestureEvents(): void {
     const element = this.canvas.element
     element.removeEventListener('wheel', this.handleTrackpadWheelCapture, true)
@@ -1338,6 +1530,9 @@ export class DataTableRootNode<
     this.addWindowGestureEvents()
   }
 
+  /**
+   * Выполняет внутренний шаг teardownTrackpadGestureEvents для DataTableRootNode.
+   */
   private teardownTrackpadGestureEvents(): void {
     const element = this.canvas.element
     element.removeEventListener('wheel', this.handleTrackpadWheelCapture, true)
@@ -1345,6 +1540,9 @@ export class DataTableRootNode<
     this.gestureActive = false
   }
 
+  /**
+   * Выполняет внутренний шаг addWindowGestureEvents для DataTableRootNode.
+   */
   private addWindowGestureEvents(): void {
     if (typeof window === 'undefined') return
     window.addEventListener('gesturestart', this.handleGestureStart, { passive: false, capture: true })
@@ -1352,6 +1550,9 @@ export class DataTableRootNode<
     window.addEventListener('gestureend', this.handleGestureEnd, true)
   }
 
+  /**
+   * Удаляет сущность из runtime-коллекции DataTableRootNode.
+   */
   private removeWindowGestureEvents(): void {
     if (typeof window === 'undefined') return
     window.removeEventListener('gesturestart', this.handleGestureStart, true)
@@ -1359,6 +1560,9 @@ export class DataTableRootNode<
     window.removeEventListener('gestureend', this.handleGestureEnd, true)
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleTrackpadWheelCaptureEvent(event: WheelEvent): void {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !this.isTrackpadPinchWheel(event, zoom.wheel)) return
@@ -1370,6 +1574,9 @@ export class DataTableRootNode<
     event.cancelBubble = true
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleTrackpadGestureStart(event: DataTableGestureEvent): void {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !zoom.wheel.pinch) return
@@ -1381,6 +1588,9 @@ export class DataTableRootNode<
     event.cancelBubble = true
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleTrackpadGestureChange(event: DataTableGestureEvent): void {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel || !zoom.wheel.enabled || !zoom.wheel.pinch || !this.gestureActive) return
@@ -1392,6 +1602,9 @@ export class DataTableRootNode<
     event.cancelBubble = true
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleTrackpadGestureEnd(event: DataTableGestureEvent): void {
     if (!this.gestureActive) return
     this.gestureActive = false
@@ -1400,6 +1613,9 @@ export class DataTableRootNode<
     event.cancelBubble = true
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyZoomValue(value: number): void {
     const zoom = this.props.zoom
     if (!zoom || !zoom.wheel) return
@@ -1414,6 +1630,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Выполняет внутренний шаг isWheelModifierActive для DataTableRootNode.
+   */
   private isWheelModifierActive(event: WheelEvent, modifier: TooltipModifier | Array<TooltipModifier>): boolean {
     if (Array.isArray(modifier)) return modifier.some(item => this.isWheelModifierActive(event, item))
     if (modifier === 'ctrl') return event.ctrlKey
@@ -1423,6 +1642,9 @@ export class DataTableRootNode<
     return false
   }
 
+  /**
+   * Выполняет внутренний шаг trackGesturePointerPosition для DataTableRootNode.
+   */
   private trackGesturePointerPosition(event: DataTableGestureEvent): boolean {
     if (!Number.isFinite(event.clientX) || !Number.isFinite(event.clientY)) return this.pointerInside
     const rect = this.canvas.element.getBoundingClientRect()
@@ -1434,10 +1656,16 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Выполняет внутренний шаг isLocalPointInsideRoot для DataTableRootNode.
+   */
   private isLocalPointInsideRoot(x: number, y: number): boolean {
     return x >= 0 && x <= this.width && y >= 0 && y <= this.height
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setupTooltipKeyboardEvents(): void {
     if (typeof window === 'undefined') return
 
@@ -1457,6 +1685,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleHeaderAction(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
     if (!target.column.sortable || !this.props.view.sorting) return
     this.viewPipeline.cycleSort(target.column.id, event.shiftKey)
@@ -1465,6 +1696,9 @@ export class DataTableRootNode<
     this.refresh(['data', 'layout'])
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startColumnDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
     if (!this.canDragColumn(target)) return false
 
@@ -1486,6 +1720,9 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Выполняет внутренний шаг canDragColumn для DataTableRootNode.
+   */
   private canDragColumn(target: DataTableInteractionTarget<Row>): boolean {
     return target.zone === 'header'
       && !!this.props.view.columnOrdering
@@ -1493,6 +1730,9 @@ export class DataTableRootNode<
       && target.column.reorderable !== false
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateColumnDrag(meta: NovaDragEventMeta): void {
     const drag = this.columnDragState
     if (!drag) return
@@ -1521,6 +1761,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Фиксирует подготовленные изменения DataTableRootNode.
+   */
   private commitColumnDrag(meta: NovaDragEventMeta): void {
     const drag = this.columnDragState
     if (!drag) return
@@ -1555,6 +1798,9 @@ export class DataTableRootNode<
     this.refresh(['columns', 'layout'])
   }
 
+  /**
+   * Выполняет внутренний шаг suppressNextHeaderClickOnce для DataTableRootNode.
+   */
   private suppressNextHeaderClickOnce(): void {
     this.suppressNextHeaderClick = true
     setTimeout(() => {
@@ -1562,6 +1808,9 @@ export class DataTableRootNode<
     }, 0)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragTargetIndex(meta: NovaDragEventMeta): number | undefined {
     const drag = this.columnDragState
     if (!drag) return undefined
@@ -1578,6 +1827,9 @@ export class DataTableRootNode<
     return this.resolveColumnDragInsertionIndex(targetIndex, x >= target.x + target.width / 2)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragEdgeTargetIndex(x: number, allowCrossPinned: boolean): number | undefined {
     const drag = this.columnDragState
     if (!drag) return undefined
@@ -1589,6 +1841,9 @@ export class DataTableRootNode<
     return drag.targetIndex
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragInsertionIndex(targetIndex: number, after: boolean): number {
     const drag = this.columnDragState
     if (!drag || targetIndex < 0) return targetIndex
@@ -1598,6 +1853,9 @@ export class DataTableRootNode<
     return Math.max(0, Math.min(this.resolvedColumns.length - 1, insertionIndex))
   }
 
+  /**
+   * Выполняет внутренний шаг autoScrollColumnDrag для DataTableRootNode.
+   */
   private autoScrollColumnDrag(x: number): void {
     const drag = this.columnDragState
     if (!drag || drag.pinned) return
@@ -1608,6 +1866,9 @@ export class DataTableRootNode<
     if (nextX !== this.scrollX) this.setScroll(nextX, this.scrollY)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderGrid(): void {
     const headerY = 0
     const topRows = this.props.pinnedRows.top ?? []
@@ -1645,6 +1906,9 @@ export class DataTableRootNode<
     this.queueAnimationLoopSync()
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderPartitionedRowZone(
     zone: DataTableCellContext<Row>['zone'],
     rows: Array<Row> | Array<RenderedTableRow<Row>>,
@@ -1703,6 +1967,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderBodyRows(): void {
     const rows: Array<RenderedTableRow<Row>> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
@@ -1716,6 +1983,9 @@ export class DataTableRootNode<
     this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.rowHeight, true)
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createRenderedBodyRow(viewRow: DataTableViewRow<Row>, rowIndex: number): RenderedTableRow<Row> | null {
     if (viewRow.kind === 'data') {
       if (!viewRow.row) return null
@@ -1753,6 +2023,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderClippedRowZone(
     zone: DataTableCellContext<Row>['zone'],
     rows: Array<Row> | Array<RenderedTableRow<Row>>,
@@ -1772,6 +2045,9 @@ export class DataTableRootNode<
     this.renderer.clearClip()
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderRowZone(
     zone: DataTableCellContext<Row>['zone'],
     rows: Array<Row> | Array<RenderedTableRow<Row>>,
@@ -1826,6 +2102,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Нормализует входные данные DataTableRootNode.
+   */
   private normalizeRenderedRow(
     zone: DataTableCellContext<Row>['zone'],
     rowInput: Row | RenderedTableRow<Row>,
@@ -1850,6 +2129,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderGroupLikeRow(
     schema: NovaSchema,
     row: RenderedGroupRow<Row>,
@@ -1875,6 +2157,9 @@ export class DataTableRootNode<
     schema.push(...this.renderDefaultGroupRow(row, rect))
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createRegionRect(columnRegion: VisibleColumnRegion, y: number, height: number): DataTableCellRect | null {
     if (columnRegion === 'left') {
       if (this.viewport.pinnedLeftWidth <= 0) return null
@@ -1887,6 +2172,9 @@ export class DataTableRootNode<
     return { x: this.viewport.bodyX, y, width: this.viewport.bodyWidth, height }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createGroupTemplateContext(
     row: RenderedGroupRow<Row>,
     rect: DataTableCellRect,
@@ -1911,6 +2199,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderDefaultGroupRow(row: RenderedGroupRow<Row>, rect: DataTableCellRect): NovaSchema {
     const group = row.group
     const depthOffset = (group?.depth ?? 0) * 14
@@ -1952,6 +2243,9 @@ export class DataTableRootNode<
     ]
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createCellState(
     rect: DataTableCellRect,
     rowId: DataTableRowId,
@@ -2028,6 +2322,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
     const startIndex = schema.length
     const template = context.zone === 'header'
@@ -2051,6 +2348,9 @@ export class DataTableRootNode<
     this.registerTextSelectionTargets(schema, context, startIndex)
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyTextPerformanceHints(schema: NovaSchema, startIndex: number): void {
     const textOptions = this.props.performance.text
     if (!textOptions) return
@@ -2083,6 +2383,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyColumnDragCellOpacity(
     schema: NovaSchema,
     context: DataTableCellContext<Row>,
@@ -2100,6 +2403,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyCellEnterOpacity(
     schema: NovaSchema,
     context: DataTableCellContext<Row>,
@@ -2116,6 +2422,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveCellEnterAlpha(context: DataTableCellContext<Row>): number {
     const cellsMotion = this.props.interaction.motion && this.props.interaction.motion.cells
     if (!cellsMotion || cellsMotion.enter === 'none' || context.zone === 'header') return 1
@@ -2136,6 +2445,9 @@ export class DataTableRootNode<
     return progress
   }
 
+  /**
+   * Выполняет внутренний шаг finalizeVisibleCellKeys для DataTableRootNode.
+   */
   private finalizeVisibleCellKeys(): void {
     this.visibleCellKeys = this.nextVisibleCellKeys
     for (const key of [...this.cellEnterStartedAt.keys()]) {
@@ -2143,10 +2455,16 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createCellKey(context: DataTableCellContext<Row>): string {
     return `${context.zone}:${String(context.rowId)}:${context.column.id}`
   }
 
+  /**
+   * Добавляет действие в очередь выполнения DataTableRootNode.
+   */
   private queueAnimationLoopSync(): void {
     if (this.animationLoopSyncQueued) return
     this.animationLoopSyncQueued = true
@@ -2156,6 +2474,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Синхронизирует состояние между слоями DataTableRootNode.
+   */
   private syncAnimationLoop(): void {
     if (this.lifecycleState === 'destroyed') return
 
@@ -2171,11 +2492,17 @@ export class DataTableRootNode<
     this.releaseAnimationLoop()
   }
 
+  /**
+   * Выполняет внутренний шаг releaseAnimationLoop для DataTableRootNode.
+   */
   private releaseAnimationLoop(): void {
     this.animationLoopLease?.release()
     this.animationLoopLease = null
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
     const { rect, value, column, zone, rowIndex } = context
     const isHeader = zone === 'header'
@@ -2276,6 +2603,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Регистрирует сущность в runtime-слое DataTableRootNode.
+   */
   private registerTextSelectionTargets(schema: NovaSchema, context: DataTableCellContext<Row>, startIndex: number): void {
     if (!this.props.textSelection || !this.props.textSelection.enabled) return
     if (this.isTextSelectionIndexSuppressed()) return
@@ -2316,10 +2646,16 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг isTextSelectionIndexSuppressed для DataTableRootNode.
+   */
   private isTextSelectionIndexSuppressed(): boolean {
     return !this.textSelectionActive && performance.now() < this.suppressTextSelectionIndexUntil
   }
 
+  /**
+   * Выполняет внутренний шаг isTextSelectionZoneEnabled для DataTableRootNode.
+   */
   private isTextSelectionZoneEnabled(zone: DataTableCellContext<Row>['zone']): boolean {
     const options = this.props.textSelection
     if (!options || !options.enabled) return false
@@ -2329,6 +2665,9 @@ export class DataTableRootNode<
     return false
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderTextSelectionOverlay(): void {
     if (!this.props.textSelection || !this.props.textSelection.enabled) return
     const ranges = this.textSelection.getRanges()
@@ -2358,6 +2697,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderDefaultCellSearchTextHighlights(
     text: string,
     rect: DataTableCellRect,
@@ -2411,6 +2753,9 @@ export class DataTableRootNode<
     return schema
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveDefaultCellBackground(
     context: DataTableCellContext<Row>,
     isHeader: boolean,
@@ -2426,6 +2771,9 @@ export class DataTableRootNode<
     return rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
   }
 
+  /**
+   * Выполняет внутренний шаг visibleColumnRects для DataTableRootNode.
+   */
   private visibleColumnRects(region: VisibleColumnRegion = 'all', animated = true): Array<VisibleColumnRect<Row>> {
     if (this.columnDragState?.active) return this.visibleColumnRectsForDrag(region, animated)
 
@@ -2468,6 +2816,9 @@ export class DataTableRootNode<
     return rects
   }
 
+  /**
+   * Выполняет внутренний шаг visibleColumnRectsForDrag для DataTableRootNode.
+   */
   private visibleColumnRectsForDrag(region: VisibleColumnRegion, animated: boolean): Array<VisibleColumnRect<Row>> {
     const columns = this.resolveColumnDragPreviewColumns()
     const left = columns.filter(column => column.pinned === 'left')
@@ -2508,6 +2859,9 @@ export class DataTableRootNode<
     return rects
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragPreviewColumns(): Array<DataTableResolvedColumn<Row>> {
     const drag = this.columnDragState
     if (!drag?.active) return this.resolvedColumns
@@ -2520,12 +2874,18 @@ export class DataTableRootNode<
     return columns
   }
 
+  /**
+   * Выполняет внутренний шаг captureColumnXById для DataTableRootNode.
+   */
   private captureColumnXById(): Map<string, number> {
     const result = new Map<string, number>()
     for (const rect of this.visibleColumnRects('all', false)) result.set(rect.column.id, rect.x)
     return result
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startColumnLayoutMotion(before: Map<string, number>, after: Map<string, number>, draggedColumnId: string): void {
     const now = performance.now()
     for (const [columnId, previousX] of before) {
@@ -2543,6 +2903,9 @@ export class DataTableRootNode<
     this.queueAnimationLoopSync()
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragLayoutOffset(columnId: string): number {
     const motion = this.columnDragLayoutMotion.get(columnId)
     if (!motion) return 0
@@ -2555,6 +2918,9 @@ export class DataTableRootNode<
     return motion.from * (1 - eased)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnDragDropIndicatorX(): number | null {
     const drag = this.columnDragState
     if (!drag?.active) return null
@@ -2562,11 +2928,17 @@ export class DataTableRootNode<
     return rect ? rect.x : null
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderInteractionOverlay(): void {
     this.renderHoverOverlay()
     this.renderSelectionOverlay()
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderSearchOverlay(): void {
     const searchState = this.viewPipeline.getSearchState()
     const highlight = searchState.query.highlight ?? 'cell-text'
@@ -2613,6 +2985,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderPinnedBottomGroupPanel(): void {
     const template = this.props.pinnedBottomTemplate
     const grouping = this.props.view.grouping
@@ -2645,6 +3020,9 @@ export class DataTableRootNode<
     this.renderer.clearClip()
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderHoverOverlay(): void {
     const hover = this.hoverTarget
     const options = this.props.interaction.hover
@@ -2671,6 +3049,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderSelectionOverlay(): void {
     const selection = this.selection
     if (!selection || this.props.selection === false || !this.props.selection.enabled || this.props.selectionAlpha <= 0) return
@@ -2690,6 +3071,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderInteractionLayer(): void {
     const template = this.props.interactionLayerTemplate
     if (!template) return
@@ -2714,6 +3098,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderColumnDragOverlay(): void {
     const drag = this.columnDragState
     if (!drag?.active) return
@@ -2787,6 +3174,9 @@ export class DataTableRootNode<
     this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderTooltipLayer(): void {
     const options = this.props.tooltip
     const target = this.tooltipTarget
@@ -2836,6 +3226,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyTooltipMotion(schema: NovaSchema, alpha: number): void {
     const offsetY = Math.round((1 - alpha) * 5)
     for (const item of schema) {
@@ -2847,6 +3240,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveTooltipContent(
     cell: DataTableCellContext<Row>,
     target: DataTableInteractionTarget<Row>,
@@ -2875,6 +3271,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createRowOverlayRects(
     target: DataTableInteractionTarget<Row>,
     color: string,
@@ -2884,6 +3283,9 @@ export class DataTableRootNode<
     return this.createRowRects(target, includePinned).map(rect => this.createOverlayRect(rect, color, opacity))
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createSelectionRangeOverlayRects(
     range: DataTableSelectionRange,
     color: string,
@@ -2935,6 +3337,9 @@ export class DataTableRootNode<
     return schema
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveSelectionCellRect(rowIndex: number, columnId: string): DataTableCellRect | null {
     if (rowIndex < this.viewport.rowRange.start || rowIndex >= this.viewport.rowRange.end) return null
     const columnRect = this.visibleColumnRects().find(item => item.column.id === columnId)
@@ -2948,6 +3353,9 @@ export class DataTableRootNode<
     return columnClippedRect ? this.clipRectToVerticalRegion(columnClippedRect, 'body') : null
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createRowOverlayRectsFromRect(
     rect: DataTableCellRect,
     color: string,
@@ -2974,6 +3382,9 @@ export class DataTableRootNode<
     return segments.map(segment => this.createOverlayRect(segment, color, opacity))
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createColumnOverlayRects(
     target: DataTableInteractionTarget<Row>,
     color: string,
@@ -2996,6 +3407,9 @@ export class DataTableRootNode<
     return [this.createOverlayRect(rect, color, opacity)]
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createRowRects(target: DataTableInteractionTarget<Row>, includePinned: boolean): Array<DataTableCellRect> {
     const rowRect = this.clipRectToVerticalRegion(target.rect, target.zone)
     if (!rowRect) return []
@@ -3021,6 +3435,9 @@ export class DataTableRootNode<
     return segments
   }
 
+  /**
+   * Выполняет внутренний шаг clipRectToColumnRegion для DataTableRootNode.
+   */
   private clipRectToColumnRegion(
     rect: DataTableCellRect,
     column: DataTableResolvedColumn<Row>,
@@ -3048,6 +3465,9 @@ export class DataTableRootNode<
     return zone ? this.clipRectToVerticalRegion(columnRect, zone) : columnRect
   }
 
+  /**
+   * Выполняет внутренний шаг clipRectToVerticalRegion для DataTableRootNode.
+   */
   private clipRectToVerticalRegion(
     rect: DataTableCellRect,
     zone: DataTableCellContext<Row>['zone'],
@@ -3064,6 +3484,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveVerticalRegionBounds(zone: DataTableCellContext<Row>['zone']): { top: number; bottom: number } {
     if (zone === 'header') return { top: 0, bottom: this.headerHeight }
     if (zone === 'pinned-top') return { top: this.headerHeight, bottom: this.viewport.bodyY }
@@ -3077,6 +3500,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createOverlayRect(
     rect: DataTableCellRect,
     background: string,
@@ -3097,6 +3523,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateHover(target: DataTableInteractionTarget<Row> | null): void {
     const previous = this.hoverActive ? this.hoverTarget : null
     if (sameInteractionTarget(previous, target)) {
@@ -3126,6 +3555,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearHover(): void {
     this.updateHover(null)
   }
@@ -3144,6 +3576,9 @@ export class DataTableRootNode<
     this.syncTooltipTarget(target)
   }
 
+  /**
+   * Синхронизирует состояние между слоями DataTableRootNode.
+   */
   private syncTooltipTarget(target: DataTableInteractionTarget<Row> | null = this.hoverActive ? this.hoverTarget : null): void {
     if (!this.canShowTooltipForTarget(target)) {
       this.scheduleTooltipClose()
@@ -3162,6 +3597,9 @@ export class DataTableRootNode<
     this.scheduleTooltipOpen(target)
   }
 
+  /**
+   * Выполняет внутренний шаг canShowTooltipForTarget для DataTableRootNode.
+   */
   private canShowTooltipForTarget(target: DataTableInteractionTarget<Row> | null): boolean {
     const options = this.props.tooltip
     if (!options || !options.enabled || !target) return false
@@ -3170,6 +3608,9 @@ export class DataTableRootNode<
     return this.createCellContext(target) !== null
   }
 
+  /**
+   * Планирует отложенное выполнение DataTableRootNode.
+   */
   private scheduleTooltipOpen(target: DataTableInteractionTarget<Row>): void {
     this.clearTooltipTimers()
     const delay = this.props.tooltip ? this.props.tooltip.delay : 0
@@ -3180,6 +3621,9 @@ export class DataTableRootNode<
     this.tooltipOpenTimer = setTimeout(() => this.openTooltip(target), delay)
   }
 
+  /**
+   * Открывает presentation-состояние DataTableRootNode.
+   */
   private openTooltip(target: DataTableInteractionTarget<Row>): void {
     if (!this.canShowTooltipForTarget(target)) return
     this.tooltipTarget = target
@@ -3187,6 +3631,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Планирует отложенное выполнение DataTableRootNode.
+   */
   private scheduleTooltipClose(): void {
     if (!this.tooltipTarget && this.props.tooltipAlpha <= 0 && !this.tooltipOpenTimer) return
     this.clearTooltipOpenTimer()
@@ -3199,12 +3646,18 @@ export class DataTableRootNode<
     this.tooltipHideTimer = setTimeout(() => this.closeTooltip(), delay)
   }
 
+  /**
+   * Закрывает presentation-состояние DataTableRootNode.
+   */
   private closeTooltip(): void {
     this.clearTooltipTimers()
     this.animateTooltipAlpha(0)
     this.refresh(['interaction'])
   }
 
+  /**
+   * Выполняет внутренний шаг animateTooltipAlpha для DataTableRootNode.
+   */
   private animateTooltipAlpha(value: number): void {
     const options = this.props.tooltip
     const animation = options && options.animation
@@ -3220,23 +3673,35 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearTooltipTimers(): void {
     this.clearTooltipOpenTimer()
     this.clearTooltipHideTimer()
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearTooltipOpenTimer(): void {
     if (!this.tooltipOpenTimer) return
     clearTimeout(this.tooltipOpenTimer)
     this.tooltipOpenTimer = null
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearTooltipHideTimer(): void {
     if (!this.tooltipHideTimer) return
     clearTimeout(this.tooltipHideTimer)
     this.tooltipHideTimer = null
   }
 
+  /**
+   * Выполняет внутренний шаг trackTooltipModifiers для DataTableRootNode.
+   */
   private trackTooltipModifiers(event: MouseEvent | WheelEvent): void {
     const previous = this.isTooltipModifierSatisfied()
     this.tooltipModifiers.ctrl = event.ctrlKey
@@ -3246,6 +3711,9 @@ export class DataTableRootNode<
     if (previous !== this.isTooltipModifierSatisfied()) this.syncTooltipTarget()
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateTooltipModifierFromKey(event: KeyboardEvent, pressed: boolean): boolean {
     const previous = this.isTooltipModifierSatisfied()
     if (event.key === 'Control') this.tooltipModifiers.ctrl = pressed
@@ -3257,12 +3725,18 @@ export class DataTableRootNode<
     return previous !== this.isTooltipModifierSatisfied()
   }
 
+  /**
+   * Выполняет внутренний шаг isTooltipModifierSatisfied для DataTableRootNode.
+   */
   private isTooltipModifierSatisfied(): boolean {
     const options = this.props.tooltip
     if (!options || options.modifier === false) return true
     return this.tooltipModifiers[options.modifier]
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateSelection(target: DataTableInteractionTarget<Row>, event?: MouseEvent): void {
     if (!this.isSelectableTarget(target)) return
     const options = this.props.selection
@@ -3291,6 +3765,9 @@ export class DataTableRootNode<
     }, anchor)
   }
 
+  /**
+   * Обновляет состояние выбора DataTableRootNode.
+   */
   private selectCell(rowId: DataTableRowId, columnId: string, options: DataTableSelectionUpdateOptions = {}): void {
     const column = this.resolvedColumns.find(item => item.id === columnId)
     if (!column) return
@@ -3301,6 +3778,9 @@ export class DataTableRootNode<
     if (options.scrollIntoView) this.scrollCellIntoView(rowIndex, column)
   }
 
+  /**
+   * Обновляет состояние выбора DataTableRootNode.
+   */
   private selectRow(rowId: DataTableRowId, options: DataTableSelectionUpdateOptions = {}): void {
     const rowIndex = this.findViewRowIndexById(rowId)
     if (rowIndex === undefined) return
@@ -3310,6 +3790,9 @@ export class DataTableRootNode<
     this.applySelectionRange(this.createSelectionRange(anchor, anchor, 'row'), options, anchor)
   }
 
+  /**
+   * Обновляет состояние выбора DataTableRootNode.
+   */
   private selectColumn(columnId: string, options: DataTableSelectionUpdateOptions = {}): void {
     const columnIndex = this.resolvedColumns.findIndex(item => item.id === columnId)
     if (columnIndex < 0) return
@@ -3318,20 +3801,32 @@ export class DataTableRootNode<
     this.applySelectionRange(this.createSelectionRange(anchor, anchor, 'column'), options, anchor)
   }
 
+  /**
+   * Обновляет состояние выбора DataTableRootNode.
+   */
   private selectRange(range: DataTableSelectionRange, options: DataTableSelectionUpdateOptions = {}): void {
     this.applySelectionRange(this.normalizeSelectionRange(range), options)
   }
 
+  /**
+   * Выполняет внутренний шаг addSelectionRange для DataTableRootNode.
+   */
   private addSelectionRange(range: DataTableSelectionRange): void {
     this.selectRange(range, { append: true })
   }
 
+  /**
+   * Удаляет сущность из runtime-коллекции DataTableRootNode.
+   */
   private removeSelectionRange(rangeId: string): void {
     if (!this.selection) return
     const ranges = this.selection.ranges.filter(range => range.id !== rangeId)
     this.commitSelectionState({ ...this.selection, ranges, previewRange: null }, { emitActive: false })
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setSelection(selection: DataTableSelectionState | null): void {
     if (this.props.selection === false || !this.props.selection.enabled || this.props.selection.mode === 'none') {
       this.clearSelection()
@@ -3348,6 +3843,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearSelection(): void {
     if (!this.selectionActive && !this.selection && !this.selectionDragState) return
     this.selectionActive = false
@@ -3360,6 +3858,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applySelectionRange(
     range: DataTableSelectionRange,
     options: DataTableSelectionUpdateOptions = {},
@@ -3394,6 +3895,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Фиксирует подготовленные изменения DataTableRootNode.
+   */
   private commitSelectionState(selection: DataTableSelectionState, options: { emitActive?: boolean; emitPreview?: boolean } = {}): void {
     this.selection = selection.ranges.length > 0 || selection.previewRange || selection.activeCell ? selection : null
     this.selectionActive = !!this.selection
@@ -3405,6 +3909,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Выполняет внутренний шаг cloneSelectionState для DataTableRootNode.
+   */
   private cloneSelectionState(): DataTableSelectionState | null {
     if (!this.selection) return null
     return {
@@ -3416,6 +3923,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг tryHeaderSelection для DataTableRootNode.
+   */
   private tryHeaderSelection(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
     const options = this.props.selection
     if (!options || !options.enabled || !options.gestures.headerSelectColumn || !options.allowedUnits.columns) return false
@@ -3428,6 +3938,9 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startSelectionDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
     const options = this.props.selection
     if (!options || !options.enabled || !options.gestures.dragRange || !this.isSelectableTarget(target)) return
@@ -3439,6 +3952,9 @@ export class DataTableRootNode<
     this.capturePointer(event)
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateSelectionDrag(meta: NovaDragEventMeta): void {
     const drag = this.selectionDragState
     if (!drag) return
@@ -3469,6 +3985,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Фиксирует подготовленные изменения DataTableRootNode.
+   */
   private commitSelectionDrag(): void {
     const drag = this.selectionDragState
     if (!drag) return
@@ -3481,6 +4000,9 @@ export class DataTableRootNode<
     this.props.onSelectionPreviewChange?.(null)
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createEmptySelection(): DataTableSelectionState {
     return {
       mode: this.props.selection === false ? 'none' : this.props.selection.mode,
@@ -3491,6 +4013,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createSelectionAnchor(target: DataTableInteractionTarget<Row>): DataTableSelectionAnchor | null {
     if (target.rowId === undefined) return null
     return {
@@ -3501,6 +4026,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createSelectionRange(
     start: DataTableSelectionAnchor,
     end: DataTableSelectionAnchor,
@@ -3524,6 +4052,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Нормализует входные данные DataTableRootNode.
+   */
   private normalizeSelectionRange(range: DataTableSelectionRange): DataTableSelectionRange {
     const startRowIndex = Math.min(range.startRowIndex ?? 0, range.endRowIndex ?? range.startRowIndex ?? 0)
     const endRowIndex = Math.max(range.startRowIndex ?? 0, range.endRowIndex ?? range.startRowIndex ?? 0)
@@ -3539,6 +4070,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует входные данные DataTableRootNode.
+   */
   private normalizeSelectionColumns(range: DataTableSelectionRange): Array<string> {
     if (range.unit === 'row') return this.resolvedColumns.map(column => column.id)
     if (range.columnIds?.length) return this.sortColumnIdsByResolvedOrder(range.columnIds)
@@ -3550,16 +4084,25 @@ export class DataTableRootNode<
     return this.resolvedColumns.slice(min, max + 1).map(column => column.id)
   }
 
+  /**
+   * Выполняет внутренний шаг sortColumnIdsByResolvedOrder для DataTableRootNode.
+   */
   private sortColumnIdsByResolvedOrder(columnIds: Array<string>): Array<string> {
     const source = new Set(columnIds)
     return this.resolvedColumns.filter(column => source.has(column.id)).map(column => column.id)
   }
 
+  /**
+   * Выполняет внутренний шаг nextSelectionRangeId для DataTableRootNode.
+   */
   private nextSelectionRangeId(): string {
     this.selectionIdCounter += 1
     return `selection-${this.selectionIdCounter}`
   }
 
+  /**
+   * Выполняет внутренний шаг anchorFromRange для DataTableRootNode.
+   */
   private anchorFromRange(range: DataTableSelectionRange): DataTableSelectionAnchor | null {
     const columnId = range.columnIds?.[0] ?? range.startColumnId
     if (!columnId) return null
@@ -3571,6 +4114,9 @@ export class DataTableRootNode<
     return { rowId, rowIndex, columnId, columnIndex }
   }
 
+  /**
+   * Выполняет внутренний шаг isSelectableTarget для DataTableRootNode.
+   */
   private isSelectableTarget(target: DataTableInteractionTarget<Row>): boolean {
     if (this.props.selection === false || !this.props.selection.enabled) return false
     if (target.zone === 'body' || target.zone === 'pinned-top' || target.zone === 'pinned-bottom') return target.rowId !== undefined
@@ -3578,6 +4124,9 @@ export class DataTableRootNode<
     return false
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveSelectionUnit(target: DataTableInteractionTarget<Row>): DataTableSelectionUnit {
     if (target.zone === 'header') return 'column'
     const mode = this.props.selection === false ? 'cell' : this.props.selection.mode
@@ -3585,6 +4134,9 @@ export class DataTableRootNode<
     return 'cell'
   }
 
+  /**
+   * Выполняет внутренний шаг isSelectionUnitAllowed для DataTableRootNode.
+   */
   private isSelectionUnitAllowed(unit: DataTableSelectionUnit): boolean {
     if (this.props.selection === false) return false
     if (unit === 'cell') return this.props.selection.allowedUnits.cells
@@ -3592,11 +4144,17 @@ export class DataTableRootNode<
     return this.props.selection.allowedUnits.columns
   }
 
+  /**
+   * Выполняет внутренний шаг isSelectionToggleEvent для DataTableRootNode.
+   */
   private isSelectionToggleEvent(event?: MouseEvent): boolean {
     if (!event || this.props.selection === false || this.props.selection.cardinality !== 'multiple') return false
     return (event.ctrlKey && this.props.selection.gestures.ctrlToggle) || (event.metaKey && this.props.selection.gestures.metaToggle)
   }
 
+  /**
+   * Выполняет внутренний шаг autoScrollSelectionDrag для DataTableRootNode.
+   */
   private autoScrollSelectionDrag(x: number, y: number): void {
     if (this.props.selection === false || !this.props.selection.gestures.autoScrollOnDrag) return
     const edge = 24
@@ -3609,10 +4167,16 @@ export class DataTableRootNode<
     if (nextX !== this.scrollX || nextY !== this.scrollY) this.setScroll(nextX, nextY)
   }
 
+  /**
+   * Находит сущность по runtime-критериям DataTableRootNode.
+   */
   private findViewRowIndexById(rowId: DataTableRowId): number | undefined {
     return this.viewPipeline.findViewIndexByRowId(rowId)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveSelectionHit(rowId: DataTableRowId, rowIndex: number, columnId: string): {
     selected: boolean
     rowSelected: boolean
@@ -3630,22 +4194,34 @@ export class DataTableRootNode<
     return { selected: false, rowSelected: false, columnSelected: false }
   }
 
+  /**
+   * Выполняет внутренний шаг isCellSelected для DataTableRootNode.
+   */
   private isCellSelected(rowId: DataTableRowId, columnId: string): boolean {
     const rowIndex = this.findViewRowIndexById(rowId)
     if (rowIndex === undefined) return false
     return this.resolveSelectionHit(rowId, rowIndex, columnId).selected
   }
 
+  /**
+   * Выполняет внутренний шаг isRowSelected для DataTableRootNode.
+   */
   private isRowSelected(rowId: DataTableRowId): boolean {
     const rowIndex = this.findViewRowIndexById(rowId)
     if (rowIndex === undefined) return false
     return (this.selection?.ranges ?? []).some(range => range.unit === 'row' && rowIndex >= (range.startRowIndex ?? rowIndex) && rowIndex <= (range.endRowIndex ?? rowIndex))
   }
 
+  /**
+   * Выполняет внутренний шаг isColumnSelected для DataTableRootNode.
+   */
   private isColumnSelected(columnId: string): boolean {
     return (this.selection?.ranges ?? []).some(range => range.unit === 'column' && (range.columnIds ?? []).includes(columnId))
   }
 
+  /**
+   * Выполняет внутренний шаг copySelection для DataTableRootNode.
+   */
   private copySelection(): string {
     if (this.props.clipboard === false || this.props.clipboard.copy === false || !this.selection || this.selection.ranges.length === 0) return ''
     const payload = {
@@ -3662,6 +4238,9 @@ export class DataTableRootNode<
     return text
   }
 
+  /**
+   * Выполняет внутренний шаг pasteClipboard для DataTableRootNode.
+   */
   private async pasteClipboard(text?: string): Promise<DataTablePasteResult<Row>> {
     const emptyResult = { committed: 0, skipped: 0, invalid: [], deltas: [] } satisfies DataTablePasteResult<Row>
     if (this.props.clipboard === false || this.props.clipboard.paste === false || !this.props.clipboard.paste.enabled) return emptyResult
@@ -3713,6 +4292,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг readClipboardText для DataTableRootNode.
+   */
   private async readClipboardText(): Promise<string> {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) return ''
     try {
@@ -3722,6 +4304,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг formatSelectionCopy для DataTableRootNode.
+   */
   private formatSelectionCopy(selection: DataTableSelectionState, clipboard: DataTableResolvedClipboardOptions<Row>): string {
     const blocks: Array<string> = []
     const format = clipboard.copy ? clipboard.copy.format : 'tsv'
@@ -3744,6 +4329,9 @@ export class DataTableRootNode<
     return blocks.filter(Boolean).join(format === 'html' ? '' : '\n\n')
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private async createPasteResult(matrix: Array<Array<string>>): Promise<DataTablePasteResult<Row>> {
     const result = { committed: 0, skipped: 0, invalid: [], deltas: [] } satisfies DataTablePasteResult<Row>
     const target = this.resolvePasteTarget()
@@ -3795,6 +4383,9 @@ export class DataTableRootNode<
     return result
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolvePasteTarget(): { rowIndex: number; columns: Array<DataTableResolvedColumn<Row>> } | null {
     const active = this.selection?.activeCell
     const range = this.selection?.ranges[0]
@@ -3809,6 +4400,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveRowsForSelectionRange(range: DataTableSelectionRange): Array<{ row?: Row; rowId?: DataTableRowId; rowIndex: number; storeIndex?: number }> {
     const start = Math.max(0, range.startRowIndex ?? 0)
     const end = Math.min(this.viewPipeline.rowCount - 1, range.endRowIndex ?? start)
@@ -3824,6 +4418,9 @@ export class DataTableRootNode<
     return rows
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnsForSelectionRange(range: DataTableSelectionRange, onlyVisible: boolean): Array<DataTableResolvedColumn<Row>> {
     const ids = range.unit === 'row'
       ? this.resolvedColumns.map(column => column.id)
@@ -3832,6 +4429,9 @@ export class DataTableRootNode<
     return this.resolvedColumns.filter(column => ids.includes(column.id) && (!visible || visible.has(column.id)))
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createCopyPasteCellContext(
     row: Row,
     rowId: DataTableRowId,
@@ -3858,6 +4458,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг canPasteCell для DataTableRootNode.
+   */
   private canPasteCell(context: DataTableCellContext<Row>): boolean {
     const column = context.column
     if (column.paste === false) return false
@@ -3867,6 +4470,9 @@ export class DataTableRootNode<
     return editable === true
   }
 
+  /**
+   * Разбирает входное значение DataTableRootNode.
+   */
   private parsePasteValue(raw: unknown, context: DataTableCellContext<Row>): unknown {
     if (context.column.parsePasteValue) return context.column.parsePasteValue(String(raw ?? ''), context)
     if (context.column.type === 'number') return raw === '' || raw === null || raw === undefined ? null : Number(String(raw).replace(',', '.'))
@@ -3881,12 +4487,18 @@ export class DataTableRootNode<
     return raw
   }
 
+  /**
+   * Проверяет входное значение DataTableRootNode.
+   */
   private async validatePasteValue(value: unknown, context: DataTableCellContext<Row>): Promise<true | string> {
     if (context.column.validatePasteValue) return context.column.validatePasteValue(value, context)
     if (context.column.type === 'number' && value !== null && !Number.isFinite(value)) return 'Invalid number'
     return true
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startTextSelectionAt(x: number, y: number, event: MouseEvent): boolean {
     if (!this.props.textSelection || !this.props.textSelection.enabled) return false
     if (!this.textSelection.start(x, y)) return false
@@ -3898,22 +4510,34 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateTextSelectionAt(globalX: number, globalY: number): void {
     const [x, y] = this.toLocal(globalX, globalY)
     if (!this.textSelection.update(x, y)) return
     this.refresh(['interaction'])
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setupTextSelectionKeyboardEvents(): void {
     if (typeof window === 'undefined') return
     window.addEventListener('keydown', this.handleTextSelectionKeydown)
   }
 
+  /**
+   * Выполняет внутренний шаг teardownTextSelectionKeyboardEvents для DataTableRootNode.
+   */
   private teardownTextSelectionKeyboardEvents(): void {
     if (typeof window === 'undefined') return
     window.removeEventListener('keydown', this.handleTextSelectionKeydown)
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleTextSelectionKeydownEvent(event: KeyboardEvent): void {
     const copy = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'c'
     const paste = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'v'
@@ -3936,6 +4560,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг formatTextSelectionCopy для DataTableRootNode.
+   */
   private formatTextSelectionCopy(ranges: Array<NovaTextSelectionRange<DataTableTextSelectionContext>>): string {
     if (!this.props.textSelection || this.props.textSelection.copyFormat !== 'tsv' || ranges.length <= 1) {
       return ranges
@@ -3960,16 +4587,25 @@ export class DataTableRootNode<
       .join('\n')
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setupEditingKeyboardEvents(): void {
     if (typeof window === 'undefined') return
     window.addEventListener('keydown', this.handleEditingKeydown)
   }
 
+  /**
+   * Выполняет внутренний шаг teardownEditingKeyboardEvents для DataTableRootNode.
+   */
   private teardownEditingKeyboardEvents(): void {
     if (typeof window === 'undefined') return
     window.removeEventListener('keydown', this.handleEditingKeydown)
   }
 
+  /**
+   * Обрабатывает runtime-событие DataTableRootNode.
+   */
   private handleEditingKeydownEvent(event: KeyboardEvent): void {
     if (event.key !== 'Enter' || this.editingState || !this.selectionActive || !this.selection) return
     if (!this.isEditTriggerEnabled('enter')) return
@@ -3980,10 +4616,16 @@ export class DataTableRootNode<
     event.stopPropagation()
   }
 
+  /**
+   * Выполняет внутренний шаг isEditTriggerEnabled для DataTableRootNode.
+   */
   private isEditTriggerEnabled(trigger: 'doubleClick' | 'enter' | 'programmatic'): boolean {
     return this.props.editing !== false && this.props.editing.trigger.includes(trigger)
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startEditFromTarget(target: DataTableInteractionTarget<Row>, trigger: 'doubleClick' | 'enter' | 'programmatic'): boolean {
     if (!this.isEditTriggerEnabled(trigger)) return false
     const context = this.createCellContext(target)
@@ -3991,6 +4633,9 @@ export class DataTableRootNode<
     return this.openEditor(context)
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startEdit(rowId: DataTableRowId, columnId: string): boolean {
     if (this.props.editing === false) return false
 
@@ -4001,6 +4646,9 @@ export class DataTableRootNode<
     return this.openEditor(context)
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveEditTarget(rowId: DataTableRowId, columnId: string, ensureVisible = false): DataTableInteractionTarget<Row> | null {
     const column = this.resolvedColumns.find(item => item.id === columnId)
     if (!column) return null
@@ -4041,6 +4689,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolvePinnedEditTarget(rowId: DataTableRowId, column: DataTableResolvedColumn<Row>): DataTableInteractionTarget<Row> | null {
     const zones: Array<{ zone: 'pinned-top' | 'pinned-bottom'; rows: Array<Row>; y: (index: number) => number }> = [
       {
@@ -4083,6 +4734,9 @@ export class DataTableRootNode<
     return null
   }
 
+  /**
+   * Выполняет внутренний шаг scrollCellIntoView для DataTableRootNode.
+   */
   private scrollCellIntoView(rowIndex: number, column: DataTableResolvedColumn<Row>): void {
     let nextX = this.scrollX
     if (!column.pinned) {
@@ -4109,6 +4763,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг canEditCell для DataTableRootNode.
+   */
   private canEditCell(context: DataTableCellContext<Row>): boolean {
     if (this.props.editing === false) return false
     if (context.zone !== 'body' && context.zone !== 'pinned-top' && context.zone !== 'pinned-bottom') return false
@@ -4120,6 +4777,9 @@ export class DataTableRootNode<
     return this.props.editing.onBeforeEditStart?.(context) !== false
   }
 
+  /**
+   * Открывает presentation-состояние DataTableRootNode.
+   */
   private openEditor(context: DataTableCellContext<Row>): boolean {
     if (this.props.editing === false) return false
     if (this.editingState) this.cancelEdit()
@@ -4143,6 +4803,9 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Фиксирует подготовленные изменения DataTableRootNode.
+   */
   private async commitEdit(value?: unknown): Promise<void> {
     if (!this.editingState || this.props.editing === false) return
 
@@ -4188,6 +4851,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг cancelEdit для DataTableRootNode.
+   */
   private cancelEdit(): void {
     const state = this.editingState
     if (!state) return
@@ -4198,14 +4864,23 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Выполняет внутренний шаг cloneEditingState для DataTableRootNode.
+   */
   private cloneEditingState(): DataTableEditingState<Row> | null {
     return this.editingState ? { ...this.editingState } : null
   }
 
+  /**
+   * Публикует событие во внутренний event bus DataTableRootNode.
+   */
   private emitEditingChange(): void {
     this.props.onEditingChange?.(this.cloneEditingState())
   }
 
+  /**
+   * Обновляет значение состояния DataTableRootNode.
+   */
   private setEditingInvalid(message: string): void {
     if (!this.editingState) return
 
@@ -4218,6 +4893,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Применяет подготовленное состояние DataTableRootNode.
+   */
   private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): void {
     if (state.zone === 'body') {
       this.store.setCell(state.rowId, state.column.id, value)
@@ -4230,6 +4908,9 @@ export class DataTableRootNode<
     state.row[key as keyof Row] = value as Row[keyof Row]
   }
 
+  /**
+   * Разбирает входное значение DataTableRootNode.
+   */
   private parseEditValue(raw: unknown, context: DataTableEditContext<Row>): unknown {
     const editor = this.resolveEditorType(context.column)
     if (context.column.parseEditValue) return context.column.parseEditValue(raw, context)
@@ -4241,6 +4922,9 @@ export class DataTableRootNode<
     return raw
   }
 
+  /**
+   * Выполняет внутренний шаг formatEditValue для DataTableRootNode.
+   */
   private formatEditValue(value: unknown, context: DataTableCellContext<Row>): unknown {
     const editContext = {
       ...context,
@@ -4254,6 +4938,9 @@ export class DataTableRootNode<
     return value
   }
 
+  /**
+   * Проверяет входное значение DataTableRootNode.
+   */
   private async validateEditValue(value: unknown, context: DataTableEditContext<Row>): Promise<true | string> {
     if (context.column.validateEditValue) return context.column.validateEditValue(value, context)
     if (typeof context.column.editor === 'object' && context.column.editor.validate) {
@@ -4262,12 +4949,18 @@ export class DataTableRootNode<
     return true
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveEditorType(column: DataTableResolvedColumn<Row>): DataTableEditorType {
     if (typeof column.editor === 'string') return column.editor
     if (typeof column.editor === 'object') return column.editor.type
     return 'text'
   }
 
+  /**
+   * Синхронизирует состояние между слоями DataTableRootNode.
+   */
   private syncEditingRect(): void {
     if (!this.editingState) return
 
@@ -4306,6 +4999,9 @@ export class DataTableRootNode<
     this.emitEditingChange()
   }
 
+  /**
+   * Возвращает значение состояния DataTableRootNode.
+   */
   private getInteractionState(): DataTableInteractionState<Row> {
     return {
       hover: this.hoverActive ? this.hoverTarget : null,
@@ -4315,6 +5011,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг animateInteractionAlpha для DataTableRootNode.
+   */
   private animateInteractionAlpha(key: 'hoverAlpha' | 'selectionAlpha', value: number): void {
     const motion = this.props.interaction.motion
     if (motion === false) {
@@ -4328,6 +5027,9 @@ export class DataTableRootNode<
     })
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveInteractionTargetAt(x: number, y: number): DataTableInteractionTarget<Row> | null {
     if (x < 0 || y < 0 || x > this.width || y > this.height) return null
 
@@ -4373,6 +5075,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveRowAt(y: number): {
     row?: Row
     rowId?: DataTableRowId
@@ -4453,6 +5158,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveColumnAt(x: number): VisibleColumnRect<Row> | null {
     for (const rect of this.visibleColumnRects('left')) {
       if (x >= rect.x && x <= rect.x + rect.width) return rect
@@ -4467,6 +5175,9 @@ export class DataTableRootNode<
     return null
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createCellContext(target: DataTableInteractionTarget<Row>): DataTableCellContext<Row> | null {
     if (isGroupInteractionZone(target.zone) || !target.row || target.rowId === undefined) return null
     return {
@@ -4508,6 +5219,9 @@ export class DataTableRootNode<
     return this.toLocal(position.x, position.y)
   }
 
+  /**
+   * Выполняет внутренний шаг hitResizeHandle для DataTableRootNode.
+   */
   private hitResizeHandle(x: number, y: number): VisibleColumnRect<Row> | null {
     if (y < 0 || y > this.headerHeight) return null
 
@@ -4519,6 +5233,9 @@ export class DataTableRootNode<
     return null
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderScrollbars(): void {
     if (this.props.scrollbars === false || !this.props.scrollbars.nativeRenderer) return
     const geometry = this.createScrollbarGeometry()
@@ -4537,6 +5254,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderScrollbarLayer(): void {
     const template = this.props.scrollbarLayerTemplate
     if (!template || this.props.scrollbars === false) return
@@ -4545,6 +5265,9 @@ export class DataTableRootNode<
     if (schema.length > 0) this.renderer.schema(schema)
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createScrollbarLayerContext(): DataTableScrollbarLayerContext<Row> {
     const geometry = this.createScrollbarGeometry()
     return {
@@ -4566,6 +5289,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createScrollbarGeometry(): { horizontal: DataTableScrollbarGeometry | null; vertical: DataTableScrollbarGeometry | null } {
     if (this.props.scrollbars === false) return { horizontal: null, vertical: null }
 
@@ -4579,6 +5305,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createVerticalScrollbarGeometry(options: DataTableResolvedScrollbarAxisOptions): DataTableScrollbarGeometry {
     const inset = 4
     const trackHeight = Math.max(1, this.viewport.bodyHeight - inset * 2)
@@ -4598,6 +5327,9 @@ export class DataTableRootNode<
     }) as DataTableScrollbarGeometry
   }
 
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
   private createHorizontalScrollbarGeometry(options: DataTableResolvedScrollbarAxisOptions): DataTableScrollbarGeometry {
     const inset = 4
     const trackWidth = Math.max(1, this.viewport.bodyWidth - inset * 2)
@@ -4617,6 +5349,9 @@ export class DataTableRootNode<
     }) as DataTableScrollbarGeometry
   }
 
+  /**
+   * Возвращает значение состояния DataTableRootNode.
+   */
   private getScrollbarState(): DataTableScrollbarState {
     return {
       alpha: this.resolveScrollbarAlpha(),
@@ -4626,24 +5361,36 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveScrollbarAlpha(): number {
     if (this.props.scrollbars === false) return 0
     if (this.hasAlwaysVisibleScrollbar()) return 1
     return this.scrollbarAlpha
   }
 
+  /**
+   * Выполняет внутренний шаг hasAlwaysVisibleScrollbar для DataTableRootNode.
+   */
   private hasAlwaysVisibleScrollbar(): boolean {
     if (this.props.scrollbars === false) return false
     return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'always' && this.viewport.maxScrollX > 0)
       || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'always' && this.viewport.maxScrollY > 0)
   }
 
+  /**
+   * Выполняет внутренний шаг hasHoverVisibleScrollbar для DataTableRootNode.
+   */
   private hasHoverVisibleScrollbar(): boolean {
     if (this.props.scrollbars === false) return false
     return (this.props.scrollbars.horizontal !== false && this.props.scrollbars.horizontal.visibility === 'hover' && this.viewport.maxScrollX > 0)
       || (this.props.scrollbars.vertical !== false && this.props.scrollbars.vertical.visibility === 'hover' && this.viewport.maxScrollY > 0)
   }
 
+  /**
+   * Выполняет внутренний шаг hitScrollbar для DataTableRootNode.
+   */
   private hitScrollbar(x: number, y: number): DataTableScrollbarAxis | null {
     if (this.resolveScrollbarAlpha() <= 0) return null
     const geometry = this.createScrollbarGeometry()
@@ -4652,6 +5399,9 @@ export class DataTableRootNode<
     return null
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateHoveredScrollbarAxis(x: number, y: number): void {
     const next = this.hitScrollbar(x, y)
     if (next === this.hoveredScrollbarAxis) return
@@ -4659,6 +5409,9 @@ export class DataTableRootNode<
     this.refresh(['interaction'])
   }
 
+  /**
+   * Запускает runtime-процесс DataTableRootNode.
+   */
   private startScrollbarDrag(axis: DataTableScrollbarAxis, event: MouseEvent): void {
     const geometry = this.createScrollbarGeometry()
     const item = axis === 'horizontal' ? geometry.horizontal : geometry.vertical
@@ -4674,6 +5427,9 @@ export class DataTableRootNode<
     this.capturePointer(event)
   }
 
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
   private updateScrollbarDrag(dx: number, dy: number): void {
     const drag = this.scrollbarDragState
     if (!drag) return
@@ -4688,6 +5444,9 @@ export class DataTableRootNode<
     }
   }
 
+  /**
+   * Выполняет внутренний шаг revealScrollbars для DataTableRootNode.
+   */
   private revealScrollbars(reason: DataTableScrollbarVisibility): void {
     if (!this.shouldRevealScrollbars(reason)) return
     this.clearScrollbarHideTimer()
@@ -4698,6 +5457,9 @@ export class DataTableRootNode<
     this.scheduleScrollbarHide(reason)
   }
 
+  /**
+   * Выполняет внутренний шаг shouldRevealScrollbars для DataTableRootNode.
+   */
   private shouldRevealScrollbars(reason: DataTableScrollbarVisibility): boolean {
     if (this.props.scrollbars === false) return false
     if (reason === 'hover') {
@@ -4715,6 +5477,9 @@ export class DataTableRootNode<
     return this.hasAlwaysVisibleScrollbar()
   }
 
+  /**
+   * Планирует отложенное выполнение DataTableRootNode.
+   */
   private scheduleScrollbarHide(reason: DataTableScrollbarVisibility): void {
     if (this.props.scrollbars === false || this.hasAlwaysVisibleScrollbar() || this.scrollbarDragState) return
     this.clearScrollbarHideTimer()
@@ -4725,12 +5490,18 @@ export class DataTableRootNode<
     }, this.props.scrollbars.hideDelay)
   }
 
+  /**
+   * Очищает накопленное состояние DataTableRootNode.
+   */
   private clearScrollbarHideTimer(): void {
     if (!this.scrollbarHideTimer) return
     clearTimeout(this.scrollbarHideTimer)
     this.scrollbarHideTimer = null
   }
 
+  /**
+   * Нормализует и возвращает итоговое значение DataTableRootNode.
+   */
   private resolveRenderedRowId(zone: DataTableCellContext<Row>['zone'], row: Row, rowIndex: number): DataTableRowId {
     if (zone === 'body') return this.viewPipeline.getRowIdAt(rowIndex) ?? row.id ?? rowIndex
     return row.id ?? `${zone}:${rowIndex}`
