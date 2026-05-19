@@ -1646,6 +1646,32 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('supports row and column selection without expanding selected cells', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      selection: {
+        mode: 'mixed',
+        cardinality: 'multiple',
+        allowedUnits: { cells: true, rows: true, columns: true },
+      },
+      clipboard: {
+        copy: { format: 'tsv', onlyVisibleColumns: true },
+        paste: false,
+      },
+    } as never)
+
+    root.getApi().selectRow('row-0')
+    expect(root.getApi().isRowSelected('row-0')).toBe(true)
+    expect(root.getApi().copySelection()).toBe('Row 0\tactive\t0')
+
+    root.getApi().selectColumn('amount', { append: true })
+    expect(root.getApi().isColumnSelected('amount')).toBe(true)
+    expect(root.getApi().getSelection()?.ranges).toHaveLength(2)
+
+    app.destroy()
+  })
+
   it('renders clipped row-column hover overlay without crossing pinned boundaries', () => {
     const app = createApp(620, 220)
     const root = mountRoot(app)
