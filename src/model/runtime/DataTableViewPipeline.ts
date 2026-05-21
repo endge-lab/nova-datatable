@@ -49,6 +49,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private searchMatches: Array<DataTableSearchMatch> = []
   private searchActiveIndex = -1
   private searchTotalOverride: number | undefined
+  private searchLoading = false
+  private searchCursor: string | undefined
+  private searchPreviousCursor: string | undefined
+  private searchHasMore = false
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
   private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
@@ -293,8 +297,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   setFilter(columnId: string, filter: Omit<DataTableFilterRule, 'columnId'> | DataTableFilterRule): void {
     const next = { ...filter, columnId } as DataTableFilterRule
-    const rules = flattenFilterRules(this.filters)
-    this.filters = [...rules.filter(rule => rule.columnId !== columnId), next]
+    this.filters = setFilterRule(this.filters, columnId, next)
     this.rebuild()
   }
 
@@ -310,8 +313,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearFilter(columnId?: string): void {
-    const rules = flattenFilterRules(this.filters)
-    this.filters = columnId ? rules.filter(rule => rule.columnId !== columnId) : []
+    this.filters = columnId ? removeFilterRule(this.filters, columnId) : []
     this.rebuild()
   }
 
@@ -321,6 +323,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   setSearch(query: string | DataTableSearchQuery): void {
     this.search = this.createSearchQuery(query)
     this.searchTotalOverride = undefined
+    this.searchLoading = false
+    this.searchCursor = undefined
+    this.searchPreviousCursor = undefined
+    this.searchHasMore = false
     this.rebuild()
   }
 
@@ -332,6 +338,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.searchMatches = []
     this.searchActiveIndex = -1
     this.searchTotalOverride = undefined
+    this.searchLoading = false
+    this.searchCursor = undefined
+    this.searchPreviousCursor = undefined
+    this.searchHasMore = false
     this.rebuild()
   }
 
@@ -379,17 +389,41 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       activeIndex: this.searchActiveIndex,
       activeMatch,
       total: this.searchTotalOverride ?? this.searchMatches.length,
+      loading: this.searchLoading,
+      cursor: this.searchCursor,
+      previousCursor: this.searchPreviousCursor,
+      hasMore: this.searchHasMore,
       mode: this.view.search ? this.view.search.mode : 'off',
       local: this.localSearch,
     }
   }
 
   /**
+   * Обновляет loading state server-side поиска.
+   */
+  setServerSearchLoading(loading: boolean): void {
+    this.searchLoading = loading
+  }
+
+  /**
    * Подставляет результаты server-side поиска без локального скана строк.
    */
-  setServerSearchResult(result: { matches: Array<DataTableSearchMatch>; total?: number }, activeIndex = 0): void {
+  setServerSearchResult(
+    result: {
+      matches: Array<DataTableSearchMatch>
+      total?: number
+      cursor?: string
+      previousCursor?: string
+      hasMore?: boolean
+    },
+    activeIndex = 0,
+  ): void {
     this.searchMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
     this.searchTotalOverride = result.total
+    this.searchCursor = result.cursor
+    this.searchPreviousCursor = result.previousCursor
+    this.searchHasMore = result.hasMore ?? !!result.cursor
+    this.searchLoading = false
     this.searchActiveIndex = this.searchMatches.length === 0
       ? -1
       : clampInteger(activeIndex, 0, this.searchMatches.length - 1)
@@ -398,10 +432,23 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Добавляет следующую server-side страницу поиска без локального скана строк.
    */
-  appendServerSearchResult(result: { matches: Array<DataTableSearchMatch>; total?: number }, activeIndex?: number): void {
+  appendServerSearchResult(
+    result: {
+      matches: Array<DataTableSearchMatch>
+      total?: number
+      cursor?: string
+      previousCursor?: string
+      hasMore?: boolean
+    },
+    activeIndex?: number,
+  ): void {
     const nextMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
     this.searchMatches = [...this.searchMatches, ...nextMatches]
     this.searchTotalOverride = result.total ?? this.searchTotalOverride
+    this.searchCursor = result.cursor
+    this.searchPreviousCursor = result.previousCursor ?? this.searchPreviousCursor
+    this.searchHasMore = result.hasMore ?? !!result.cursor
+    this.searchLoading = false
     if (this.searchMatches.length === 0) {
       this.searchActiveIndex = -1
       return
@@ -410,6 +457,39 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
     } else if (this.searchActiveIndex < 0) {
       this.searchActiveIndex = 0
+    }
+  }
+
+  /**
+   * Добавляет предыдущую server-side страницу поиска без локального скана строк.
+   */
+  prependServerSearchResult(
+    result: {
+      matches: Array<DataTableSearchMatch>
+      total?: number
+      cursor?: string
+      previousCursor?: string
+      hasMore?: boolean
+    },
+    activeIndex?: number,
+  ): void {
+    const previousMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
+    this.searchMatches = [...previousMatches, ...this.searchMatches]
+    this.searchTotalOverride = result.total ?? this.searchTotalOverride
+    this.searchCursor = result.cursor ?? this.searchCursor
+    this.searchPreviousCursor = result.previousCursor
+    this.searchHasMore = this.searchHasMore || !!this.searchCursor
+    this.searchLoading = false
+    if (this.searchMatches.length === 0) {
+      this.searchActiveIndex = -1
+      return
+    }
+    if (typeof activeIndex === 'number') {
+      this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
+    } else {
+      this.searchActiveIndex = previousMatches.length > 0
+        ? previousMatches.length - 1
+        : Math.max(0, this.searchActiveIndex)
     }
   }
 
@@ -581,6 +661,11 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.search = this.createSearchQuery('')
     this.searchMatches = []
     this.searchActiveIndex = -1
+    this.searchTotalOverride = undefined
+    this.searchLoading = false
+    this.searchCursor = undefined
+    this.searchPreviousCursor = undefined
+    this.searchHasMore = false
     this.rowOrder = []
     this.columnOrder = this.view.columnOrdering ? [...this.view.columnOrdering.order] : []
     this.groupingGroupsOverride = null
@@ -772,6 +857,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       this.searchMatches = []
       this.searchActiveIndex = -1
       this.searchTotalOverride = undefined
+      this.searchLoading = false
+      this.searchCursor = undefined
+      this.searchPreviousCursor = undefined
+      this.searchHasMore = false
       return
     }
 
@@ -785,6 +874,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     }
     this.searchMatches = matches
     this.searchTotalOverride = undefined
+    this.searchLoading = false
+    this.searchCursor = undefined
+    this.searchPreviousCursor = undefined
+    this.searchHasMore = false
     if (matches.length === 0) this.searchActiveIndex = -1
     else if (this.searchActiveIndex < 0) this.searchActiveIndex = 0
     else this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1)
@@ -966,11 +1059,21 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     }
 
     if (group.expanded) {
+      if (showGroupFooters && this.view.groupingPinnedRows && this.view.groupingPinnedRows.placement === 'group-start') {
+        target.push({
+          kind: 'group-footer',
+          group,
+          rowId: `${group.groupId}:footer`,
+          storeIndex: -1,
+          viewIndex: target.length,
+          depth: group.depth,
+        })
+      }
       for (const child of group.children) {
         if ('kind' in child && child.kind === 'data') target.push({ ...child, viewIndex: target.length })
         else this.appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters)
       }
-      if (showGroupFooters) {
+      if (showGroupFooters && (!this.view.groupingPinnedRows || this.view.groupingPinnedRows.placement !== 'group-start')) {
         target.push({
           kind: 'group-footer',
           group,
@@ -1158,6 +1261,48 @@ function cloneFilterNode(rule: DataTableFilterRule | DataTableFilterExpression):
     }
   }
   return { ...rule }
+}
+
+function setFilterRule(
+  filters: DataTableFilterState | DataTableFilterExpression,
+  columnId: string,
+  next: DataTableFilterRule,
+): DataTableFilterState | DataTableFilterExpression {
+  if (Array.isArray(filters)) {
+    return [...filters.filter(rule => rule.columnId !== columnId), { ...next }]
+  }
+
+  const expression = removeFilterRule(filters, columnId) as DataTableFilterExpression
+  return {
+    logic: expression.logic,
+    rules: [...expression.rules, { ...next }],
+  }
+}
+
+function removeFilterRule(
+  filters: DataTableFilterState | DataTableFilterExpression,
+  columnId: string,
+): DataTableFilterState | DataTableFilterExpression {
+  if (Array.isArray(filters)) return filters.filter(rule => rule.columnId !== columnId).map(rule => ({ ...rule }))
+
+  return {
+    logic: filters.logic,
+    rules: filters.rules
+      .map(rule => removeFilterNode(rule, columnId))
+      .filter((rule): rule is DataTableFilterRule | DataTableFilterExpression => rule !== null),
+  }
+}
+
+function removeFilterNode(
+  rule: DataTableFilterRule | DataTableFilterExpression,
+  columnId: string,
+): DataTableFilterRule | DataTableFilterExpression | null {
+  if (!('logic' in rule)) return rule.columnId === columnId ? null : { ...rule }
+
+  const rules = rule.rules
+    .map(child => removeFilterNode(child, columnId))
+    .filter((child): child is DataTableFilterRule | DataTableFilterExpression => child !== null)
+  return rules.length === 0 ? null : { logic: rule.logic, rules }
 }
 
 function flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState {

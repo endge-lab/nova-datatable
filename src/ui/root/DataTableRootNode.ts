@@ -32,6 +32,7 @@ import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidationScope'
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
+import { DataTableSummaryEngine, type DataTableSummaryRule } from '@/model/runtime/DataTableSummaryEngine'
 import {
   DATATABLE_ROOT_NODE_DESCRIPTOR,
   normalizeDataTableRootProps,
@@ -48,6 +49,8 @@ import type {
   DataTableEditContext,
   DataTableEditingState,
   DataTableEditorType,
+  DataTableFilterOperator,
+  DataTableFilterRule,
   DataTableGroupNode,
   DataTableGroupTemplateContext,
   DataTableHoverMode,
@@ -67,6 +70,7 @@ import type {
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableRowId,
+  DataTableSearchDirection,
   DataTableSearchHighlightMode,
   DataTablePasteParseFormat,
   DataTableSelectionAnchor,
@@ -118,6 +122,12 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
   columnIndex: number
   x: number
   width: number
+}
+
+interface FilterUiTarget<Row extends Record<string, any>> {
+  column: DataTableResolvedColumn<Row>
+  rect: DataTableCellRect
+  action: 'operator' | 'value' | 'clear'
 }
 
 interface ScrollbarDragState {
@@ -194,6 +204,7 @@ export class DataTableRootNode<
   private viewPipeline: DataTableViewPipeline<Row>
   private serverRowModel: DataTableServerRowModel<Row>
   private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
+  private readonly summaryEngine = new DataTableSummaryEngine<Row>()
   private readonly widthOverrides = new Map<string, number>()
   private columnStateOverride: DataTableColumnState | null = null
   private readonly columnIndexById = new Map<string, number>()
@@ -242,7 +253,10 @@ export class DataTableRootNode<
   private serverSummaryRequestId = 0
   private serverSearchRequestId = 0
   private serverSearchCursor: string | undefined
+  private serverSearchPreviousCursor: string | undefined
+  private serverSearchHasMore = false
   private serverSearchInFlight = false
+  private serverSearchResolveRequestId = 0
   private gestureStartZoomValue = 1
   private gestureActive = false
   private deltaFlushQueued = false
@@ -564,6 +578,7 @@ export class DataTableRootNode<
       return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
+    this.syncSummaryState()
   }
 
   /**
@@ -1031,6 +1046,7 @@ export class DataTableRootNode<
         this.refresh(['data', 'summary'])
       }
       this.store.clearDirtyState()
+      this.syncSummaryState()
     } while (this.pendingDeltas.length > 0 && (!useBudget || performance.now() - startedAt < budget))
 
     if (this.pendingDeltas.length > 0 && useBudget) {
@@ -1143,6 +1159,8 @@ export class DataTableRootNode<
   private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
     this.viewPipeline.setSearch(query)
     this.serverSearchCursor = undefined
+    this.serverSearchPreviousCursor = undefined
+    this.serverSearchHasMore = false
     this.emitViewQuery('search')
     this.requestServerSearchIfNeeded(0)
     this.refresh(['data', 'layout'])
@@ -1154,7 +1172,11 @@ export class DataTableRootNode<
   private clearSearch(): void {
     this.viewPipeline.clearSearch()
     this.serverSearchRequestId += 1
+    this.serverSearchResolveRequestId += 1
     this.serverSearchCursor = undefined
+    this.serverSearchPreviousCursor = undefined
+    this.serverSearchHasMore = false
+    this.serverSearchInFlight = false
     this.emitViewQuery('search')
     this.refresh(['data', 'layout'])
   }
@@ -1163,10 +1185,10 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
-    if (this.isServerRowModelActive() && this.serverSearchCursor) {
+    if (this.isServerRowModelActive() && (this.serverSearchCursor || this.serverSearchHasMore)) {
       const state = this.viewPipeline.getSearchState()
       if (state.matches.length === 0 || state.activeIndex >= state.matches.length - 1) {
-        this.requestServerSearchPage({ append: true, activeIndex: state.matches.length })
+        this.requestServerSearchPage({ mode: 'append', activeIndex: state.matches.length })
         this.emitViewQuery('search')
         this.refresh(['data', 'layout'])
         return state.activeMatch
@@ -1184,6 +1206,16 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
+    if (this.isServerRowModelActive() && this.serverSearchPreviousCursor) {
+      const state = this.viewPipeline.getSearchState()
+      if (state.matches.length === 0 || state.activeIndex <= 0) {
+        this.requestServerSearchPage({ mode: 'prepend' })
+        this.emitViewQuery('search')
+        this.refresh(['data', 'layout'])
+        return state.activeMatch
+      }
+    }
+
     const match = this.viewPipeline.findPrevious()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -1206,6 +1238,47 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг scrollToSearchMatch для DataTableRootNode.
    */
   private scrollToSearchMatch(match: NonNullable<ReturnType<DataTableRootApi<Row>['findNext']>>): void {
+    if (this.isServerRowModelActive() && match.rowId !== undefined) {
+      this.resolveServerSearchRowAndScroll(match)
+      return
+    }
+
+    let nextScrollX = this.scrollX
+    if (match.columnId) {
+      const centerColumns = this.resolvedColumns.filter(column => !column.pinned)
+      let columnX = 0
+      for (const column of centerColumns) {
+        if (column.id === match.columnId) break
+        columnX += column.resolvedWidth
+      }
+      const column = centerColumns.find(item => item.id === match.columnId)
+      if (column) {
+        if (columnX < this.scrollX) nextScrollX = columnX
+        else if (columnX + column.resolvedWidth > this.scrollX + this.viewport.bodyWidth) {
+          nextScrollX = columnX + column.resolvedWidth - this.viewport.bodyWidth
+        }
+      }
+    }
+
+    this.setScroll(nextScrollX, match.rowIndex * this.rowHeight)
+  }
+
+  /**
+   * Фокусирует server-side search match через source.resolveRowIndex без локального скана.
+   */
+  private resolveServerSearchRowAndScroll(match: DataTableSearchState['activeMatch']): void {
+    if (!match || match.rowId === undefined) return
+    const requestId = ++this.serverSearchResolveRequestId
+    void this.serverRowModel.resolveRowIndex(match.rowId).then(rowIndex => {
+      if (requestId !== this.serverSearchResolveRequestId) return
+      this.scrollToResolvedSearchPosition({ ...match, rowIndex: rowIndex ?? match.rowIndex })
+    })
+  }
+
+  /**
+   * Прокручивает таблицу к найденной строке/ячейке.
+   */
+  private scrollToResolvedSearchPosition(match: NonNullable<DataTableSearchState['activeMatch']>): void {
     let nextScrollX = this.scrollX
     if (match.columnId) {
       const centerColumns = this.resolvedColumns.filter(column => !column.pinned)
@@ -1455,16 +1528,84 @@ export class DataTableRootNode<
   }
 
   /**
+   * Синхронизирует summary для server и client режимов без участия render pass.
+   */
+  private syncSummaryState(): void {
+    if (this.isServerRowModelActive()) {
+      if (this.props.view.serverRowModel && this.props.view.serverRowModel.loadSummary) return
+      const revision = this.store.takeRevision()
+      if (this.summaryState.source === 'server'
+        && !this.summaryState.loading
+        && this.summaryState.revision === revision
+        && this.summaryState.rowCount === this.store.rowCount) {
+        return
+      }
+      this.summaryState = {
+        values: { rowCount: this.store.rowCount },
+        rowCount: this.store.rowCount,
+        revision,
+        source: 'server',
+        loading: false,
+      }
+      this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+      return
+    }
+
+    if (this.store.rowCount > this.props.performance.maxClientRows) return
+    const revision = this.store.takeRevision()
+    if (this.summaryState.source === 'client'
+      && !this.summaryState.loading
+      && this.summaryState.revision === revision
+      && this.summaryState.rowCount === this.viewPipeline.rowCount) {
+      return
+    }
+
+    const rows = this.viewPipeline.getViewRows()
+      .filter((row): row is Extract<DataTableViewRow<Row>, { kind: 'data' }> => row.kind === 'data' && !!row.row)
+      .map(row => row.row as Row)
+    const result = this.summaryEngine.compute(rows, this.resolveSummaryRules(rows))
+    this.summaryState = {
+      values: { ...result.values, rowCount: result.rowCount },
+      rowCount: result.rowCount,
+      revision,
+      source: 'client',
+      loading: false,
+    }
+    this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+  }
+
+  /**
+   * Подбирает компактный набор summary-правил для client-mode runtime.
+   */
+  private resolveSummaryRules(rows: Array<Row>): Array<DataTableSummaryRule<Row>> {
+    const rules: Array<DataTableSummaryRule<Row>> = [{ id: 'rowCount', aggregate: 'count' }]
+    const sample = rows.slice(0, 50)
+    for (const column of this.resolvedColumns) {
+      if (rules.length >= 10) break
+      const candidate = column.field ?? column.id
+      const numeric = column.type === 'number'
+        || sample.some(row => Number.isFinite(Number(row[candidate as keyof Row])))
+      if (!numeric) continue
+      rules.push({
+        id: `${column.id}:sum`,
+        field: candidate,
+        aggregate: 'sum',
+      })
+    }
+    return rules
+  }
+
+  /**
    * Делегирует поиск server-side source, когда локальный pipeline не должен сканировать строки.
    */
   private requestServerSearchIfNeeded(activeIndex = this.viewPipeline.getSearchState().activeIndex): void {
-    this.requestServerSearchPage({ append: false, activeIndex })
+    this.requestServerSearchPage({ mode: 'replace', activeIndex })
   }
 
   /**
    * Запрашивает страницу server-side поиска и обновляет navigation state.
    */
-  private requestServerSearchPage(options: { append: boolean; activeIndex?: number }): void {
+  private requestServerSearchPage(options: { mode: 'replace' | 'append' | 'prepend'; activeIndex?: number }): void {
     const search = this.viewPipeline.getSearchState().query
     if (!search.text || !this.isServerRowModelActive()) return
     if (this.serverSearchInFlight) return
@@ -1472,11 +1613,19 @@ export class DataTableRootNode<
     this.syncServerRowModel()
     const requestId = ++this.serverSearchRequestId
     this.serverSearchInFlight = true
-    void this.serverRowModel.search(search, this.serverSearchCursor).then(result => {
+    this.viewPipeline.setServerSearchLoading(true)
+    this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+    const direction: DataTableSearchDirection = options.mode === 'prepend' ? 'previous' : 'next'
+    const cursor = options.mode === 'prepend' ? this.serverSearchPreviousCursor : this.serverSearchCursor
+    void this.serverRowModel.search(search, cursor, direction).then(result => {
       if (!result || requestId !== this.serverSearchRequestId) return
       this.serverSearchCursor = result.cursor
-      if (options.append) {
+      this.serverSearchPreviousCursor = result.previousCursor
+      this.serverSearchHasMore = result.hasMore ?? !!result.cursor
+      if (options.mode === 'append') {
         this.viewPipeline.appendServerSearchResult(result, options.activeIndex)
+      } else if (options.mode === 'prepend') {
+        this.viewPipeline.prependServerSearchResult(result, options.activeIndex)
       } else {
         this.viewPipeline.setServerSearchResult(result, Math.max(0, options.activeIndex ?? 0))
       }
@@ -1485,7 +1634,11 @@ export class DataTableRootNode<
       this.props.onSearchChange?.(this.viewPipeline.getSearchState())
       this.refresh(['data', 'interaction'])
     }).finally(() => {
-      if (requestId === this.serverSearchRequestId) this.serverSearchInFlight = false
+      if (requestId === this.serverSearchRequestId) {
+        this.serverSearchInFlight = false
+        this.viewPipeline.setServerSearchLoading(false)
+        this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+      }
     })
   }
 
@@ -1780,6 +1933,15 @@ export class DataTableRootNode<
       const target = this.resolveInteractionTargetAt(x, y)
       if (target) {
         if (target.zone === 'header') {
+          const filterTarget = this.resolveFilterUiTarget(target, x, y, event)
+          if (filterTarget && this.handleFilterUiAction(filterTarget)) {
+            event.cancelBubble = true
+            return
+          }
+          if (this.filterRowHeight > 0 && y >= this.headerHeight - this.filterRowHeight) {
+            event.cancelBubble = true
+            return
+          }
           if (this.startColumnDrag(target, event)) {
             event.cancelBubble = true
             return
@@ -2241,6 +2403,70 @@ export class DataTableRootNode<
   }
 
   /**
+   * Определяет интерактивную область filter UI в header.
+   */
+  private resolveFilterUiTarget(
+    target: DataTableInteractionTarget<Row>,
+    x: number,
+    y: number,
+    event: MouseEvent,
+  ): FilterUiTarget<Row> | null {
+    if (!this.props.view.filterUi || !target.column.filter) return null
+    const filterRowHeight = this.filterRowHeight
+    const headerMainHeight = this.headerHeight - filterRowHeight
+    const rect: DataTableCellRect = {
+      x: target.rect.x,
+      y: 0,
+      width: target.rect.width,
+      height: this.headerHeight,
+    }
+
+    if (filterRowHeight > 0 && y >= headerMainHeight && this.props.view.filterUi.filterRow) {
+      rect.y = headerMainHeight
+      rect.height = filterRowHeight
+      const active = filterStateHasColumn(this.viewPipeline.getState().filters, target.column.id)
+      if ((active && x >= rect.x + rect.width - 18) || event.altKey || event.metaKey) {
+        return { column: target.column, rect, action: 'clear' }
+      }
+      if (x <= rect.x + Math.min(58, rect.width * 0.42)) return { column: target.column, rect, action: 'operator' }
+      return { column: target.column, rect, action: 'value' }
+    }
+
+    if (this.props.view.filterUi.headerMenu && y < headerMainHeight && x >= rect.x + rect.width - 28) {
+      rect.height = headerMainHeight
+      return {
+        column: target.column,
+        rect,
+        action: filterStateHasColumn(this.viewPipeline.getState().filters, target.column.id) && event.altKey
+          ? 'clear'
+          : 'value',
+      }
+    }
+    return null
+  }
+
+  /**
+   * Применяет быстрый built-in filter UI action.
+   */
+  private handleFilterUiAction(target: FilterUiTarget<Row>): boolean {
+    const active = resolveColumnFilterRule(this.viewPipeline.getState().filters, target.column.id)
+    if (target.action === 'clear') {
+      this.clearFilter(target.column.id)
+      return true
+    }
+
+    const filter = target.column.filter
+    const operator = target.action === 'operator'
+      ? resolveNextFilterOperator(filter, active?.operator)
+      : active?.operator ?? resolveDefaultFilterOperator(filter)
+    const value = target.action === 'value'
+      ? resolveNextFilterValue(filter, active?.value)
+      : active?.value ?? resolveDefaultFilterValue(filter)
+    this.setFilter(target.column.id, { operator, value })
+    return true
+  }
+
+  /**
    * Запускает runtime-процесс DataTableRootNode.
    */
   private startColumnDrag(target: DataTableInteractionTarget<Row>, event: MouseEvent): boolean {
@@ -2593,17 +2819,55 @@ export class DataTableRootNode<
         continue
       }
 
-      const label = active
-        ? summarizeColumnFilters(viewState.filters, columnRect.column.id)
+      const rule = resolveColumnFilterRule(viewState.filters, columnRect.column.id)
+      const operatorLabel = rule
+        ? formatFilterOperator(rule.operator)
+        : formatFilterOperator(resolveDefaultFilterOperator(columnRect.column.filter))
+      const valueLabel = rule
+        ? formatFilterValue(rule.value)
         : resolveFilterPlaceholder(columnRect.column.filter)
+      const label = valueLabel
       if (!label) continue
+
+      const chipWidth = Math.min(54, Math.max(32, Math.floor(rect.width * 0.36)))
+      schema.push({
+        type: 'rect',
+        x: rect.x + 4,
+        y: rect.y + 3,
+        width: chipWidth,
+        height: Math.max(0, rect.height - 6),
+        styles: {
+          background: active ? '#dbeafe' : '#eef2f7',
+          border: { color: active ? '#93c5fd' : '#d8e0ea', width: 1 },
+          radius: 4,
+        },
+      })
+      schema.push({
+        type: 'text',
+        text: operatorLabel,
+        x: rect.x + 8,
+        y: rect.y,
+        width: Math.max(0, chipWidth - 8),
+        height: rect.height,
+        styles: {
+          color: active ? '#1d4ed8' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: Math.max(9, this.fontSize - 3),
+            weight: '700',
+          },
+          lineHeight: Math.max(10, this.lineHeight - 3),
+          align: { horizontal: 'center', vertical: 'middle' },
+          ellipsis: true,
+        },
+      })
 
       schema.push({
         type: 'text',
         text: label,
-        x: rect.x + 8,
+        x: rect.x + chipWidth + 10,
         y: rect.y,
-        width: Math.max(0, rect.width - 16),
+        width: Math.max(0, rect.width - chipWidth - (active ? 30 : 16)),
         height: rect.height,
         styles: {
           color: active ? '#1d4ed8' : '#64748b',
@@ -2617,6 +2881,27 @@ export class DataTableRootNode<
           ellipsis: true,
         },
       })
+
+      if (active) {
+        schema.push({
+          type: 'text',
+          text: 'x',
+          x: rect.x + rect.width - 18,
+          y: rect.y,
+          width: 14,
+          height: rect.height,
+          styles: {
+            color: '#64748b',
+            font: {
+              family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+              size: Math.max(12, this.fontSize),
+              weight: '800',
+            },
+            lineHeight: Math.max(10, this.lineHeight),
+            align: { horizontal: 'center', vertical: 'middle' },
+          },
+        })
+      }
     }
 
     this.renderer.clip(clipX, y, clipWidth, height)
@@ -6034,7 +6319,8 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг hitResizeHandle для DataTableRootNode.
    */
   private hitResizeHandle(x: number, y: number): VisibleColumnRect<Row> | null {
-    if (y < 0 || y > this.headerHeight) return null
+    const resizeHeight = this.headerHeight - this.filterRowHeight
+    if (y < 0 || y > resizeHeight) return null
 
     for (const rect of this.visibleColumnRects()) {
       if (!rect.column.resizable) continue
@@ -6377,14 +6663,14 @@ function summarizeColumnFilters(filters: DataTableViewState['filters'], columnId
   if (rules.length === 0) return ''
   return rules
     .slice(0, 2)
-    .map(rule => `${rule.operator} ${formatFilterValue(rule.value)}`)
+    .map(rule => `${formatFilterOperator(rule.operator)} ${formatFilterValue(rule.value)}`)
     .join(' · ')
 }
 
 function collectColumnFilterRules(
   filters: DataTableViewState['filters'],
   columnId: string,
-): Array<{ operator: string; value: unknown }> {
+): Array<DataTableFilterRule> {
   if (Array.isArray(filters)) return filters.filter(rule => rule.columnId === columnId)
   return filters.rules.flatMap(rule => (
     'logic' in rule
@@ -6393,6 +6679,98 @@ function collectColumnFilterRules(
         ? [rule]
         : []
   ))
+}
+
+function resolveColumnFilterRule(filters: DataTableViewState['filters'], columnId: string): DataTableFilterRule | undefined {
+  return collectColumnFilterRules(filters, columnId)[0]
+}
+
+function resolveDefaultFilterOperator(filter: unknown): DataTableFilterOperator {
+  const operators = resolveFilterOperators(filter)
+  return resolveFilterConfigValue(filter, 'defaultOperator') as DataTableFilterOperator | undefined
+    ?? operators[0]
+    ?? 'contains'
+}
+
+function resolveNextFilterOperator(filter: unknown, current?: DataTableFilterOperator): DataTableFilterOperator {
+  const operators = resolveFilterOperators(filter)
+  if (!current) return operators[0] ?? resolveDefaultFilterOperator(filter)
+  const index = operators.indexOf(current)
+  return operators[(index + 1) % operators.length] ?? resolveDefaultFilterOperator(filter)
+}
+
+function resolveFilterOperators(filter: unknown): Array<DataTableFilterOperator> {
+  const configured = resolveFilterConfigValue(filter, 'operators')
+  if (Array.isArray(configured) && configured.length > 0) return configured as Array<DataTableFilterOperator>
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'number') return ['equals', 'gt', 'gte', 'lt', 'lte']
+  if (preset === 'date') return ['equals', 'gt', 'lt']
+  if (preset === 'set') return ['in', 'notIn']
+  if (preset === 'boolean') return ['is', 'isNot']
+  return ['contains', 'equals', 'startsWith', 'endsWith']
+}
+
+function resolveDefaultFilterValue(filter: unknown): unknown {
+  const defaultValue = resolveFilterConfigValue(filter, 'defaultValue')
+  if (defaultValue !== undefined) return defaultValue
+  const options = resolveFilterOptions(filter)
+  if (options.length > 0) {
+    const operator = resolveDefaultFilterOperator(filter)
+    if (operator === 'in' || operator === 'notIn') return [options[0]]
+    return options[0]
+  }
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'number') return 0
+  if (preset === 'boolean') return true
+  return ''
+}
+
+function resolveNextFilterValue(filter: unknown, current: unknown): unknown {
+  const options = resolveFilterOptions(filter)
+  if (options.length === 0) return current ?? resolveDefaultFilterValue(filter)
+  const currentValue = Array.isArray(current) ? current[0] : current
+  const index = options.findIndex(option => Object.is(option, currentValue))
+  const next = options[(index + 1) % options.length] ?? options[0]
+  const operator = resolveDefaultFilterOperator(filter)
+  return operator === 'in' || operator === 'notIn' ? [next] : next
+}
+
+function resolveFilterOptions(filter: unknown): Array<unknown> {
+  const options = resolveFilterConfigValue(filter, 'options')
+  if (Array.isArray(options)) return options
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'boolean') return [true, false]
+  return []
+}
+
+function resolveFilterConfigValue(filter: unknown, key: string): unknown {
+  if (!filter || typeof filter !== 'object') return undefined
+  return (filter as Record<string, unknown>)[key]
+}
+
+function formatFilterOperator(operator: DataTableFilterOperator): string {
+  const labels: Record<DataTableFilterOperator, string> = {
+    contains: 'has',
+    equals: '=',
+    startsWith: '^',
+    endsWith: '$',
+    gt: '>',
+    gte: '>=',
+    lt: '<',
+    lte: '<=',
+    between: '<>',
+    in: 'in',
+    notIn: 'not',
+    is: 'is',
+    isNot: 'not',
+  }
+  return labels[operator] ?? operator
 }
 
 function formatFilterValue(value: unknown): string {

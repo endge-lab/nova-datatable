@@ -284,7 +284,7 @@ describe('DataTableStore', () => {
     dispose?.()
 
     expect(loadSummary).toHaveBeenCalledWith(query)
-    expect(search).toHaveBeenCalledWith({ text: 'Row 10' }, query, 'cursor')
+    expect(search).toHaveBeenCalledWith({ text: 'Row 10' }, query, 'cursor', undefined)
     expect(resolveRowIndex).toHaveBeenCalledWith('row-10', query)
     expect(subscribe).toHaveBeenCalledWith(query, expect.any(Function))
     expect(unsubscribe).toHaveBeenCalled()
@@ -492,7 +492,7 @@ describe('DataTableServerRowModel', () => {
       expect.objectContaining({ revision: 1, requestId: 1, signal: expect.objectContaining({ aborted: false }) }),
     )
     expect(loadSummary).toHaveBeenCalledWith(query)
-    expect(search).toHaveBeenCalledWith({ text: 'Row 2' }, query, undefined)
+    expect(search).toHaveBeenCalledWith({ text: 'Row 2' }, query, undefined, 'next')
     expect(subscribe).toHaveBeenCalledTimes(2)
     expect(subscribe).toHaveBeenLastCalledWith(query, expect.any(Function))
     expect(model.snapshot()).toMatchObject({
@@ -1201,6 +1201,120 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.getViewRowAt(2)?.storeIndex).toBe(2)
   })
 
+  it('prepends previous server search pages and exposes cursor state', () => {
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: { rowCount: 10_000_000 },
+    })
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([{ id: 'name', field: 'name' }], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: false,
+        filtering: false,
+        search: {
+          mode: 'server',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: ['name'],
+          highlight: 'cell-text',
+          filter: true,
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
+        serverRowModel: { enabled: true, authoritative: true, subscribe: false, loadSummary: false },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+        groupingPinnedRows: false,
+      },
+    })
+
+    pipeline.setSearch('Row')
+    pipeline.setServerSearchLoading(true)
+    expect(pipeline.getSearchState().loading).toBe(true)
+    pipeline.setServerSearchResult({
+      matches: [{ rowId: 'row-10', rowIndex: 10, columnId: 'name', value: 'Row 10', ranges: [{ start: 0, end: 3 }] }],
+      total: 3,
+      cursor: '20',
+      previousCursor: '9',
+      hasMore: true,
+    })
+    pipeline.prependServerSearchResult({
+      matches: [
+        { rowId: 'row-8', rowIndex: 8, columnId: 'name', value: 'Row 8', ranges: [{ start: 0, end: 3 }] },
+        { rowId: 'row-9', rowIndex: 9, columnId: 'name', value: 'Row 9', ranges: [{ start: 0, end: 3 }] },
+      ],
+      total: 3,
+      cursor: '20',
+      previousCursor: '7',
+    })
+
+    expect(pipeline.getSearchState()).toMatchObject({
+      activeIndex: 1,
+      cursor: '20',
+      previousCursor: '7',
+      hasMore: true,
+      loading: false,
+    })
+    expect(pipeline.getSearchState().matches.map(match => match.rowId)).toEqual(['row-8', 'row-9', 'row-10'])
+  })
+
+  it('preserves filter expression logic when patching a single column filter', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([
+        { id: 'status', field: 'status', filter: 'set' },
+        { id: 'name', field: 'name', filter: 'text' },
+        { id: 'amount', field: 'amount', filter: 'number' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance(undefined),
+      view: {
+        sorting: false,
+        filtering: {
+          mode: 'client',
+          controlled: false,
+          initial: {
+            logic: 'or',
+            rules: [
+              { columnId: 'status', operator: 'equals', value: 'active' },
+              { columnId: 'name', operator: 'contains', value: 'B' },
+            ],
+          },
+        },
+        search: false,
+        serverRowModel: false,
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+        groupingPinnedRows: false,
+      },
+    })
+
+    pipeline.setFilter('amount', { operator: 'gt', value: 10 })
+    expect(pipeline.getState().filters).toMatchObject({
+      logic: 'or',
+      rules: expect.arrayContaining([
+        { columnId: 'status', operator: 'equals', value: 'active' },
+        { columnId: 'name', operator: 'contains', value: 'B' },
+        { columnId: 'amount', operator: 'gt', value: 10 },
+      ]),
+    })
+    pipeline.clearFilter('name')
+    expect(pipeline.getState().filters).toMatchObject({
+      logic: 'or',
+      rules: expect.not.arrayContaining([
+        expect.objectContaining({ columnId: 'name' }),
+      ]),
+    })
+  })
+
   it('groups rows after filter and sort and exposes aggregate view rows', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
@@ -1231,6 +1345,31 @@ describe('DataTableViewPipeline', () => {
 
     pipeline.sync({ columns, view: createGroupingView('none'), performance: normalizeDataTablePerformance(undefined) })
     expect(pipeline.getGroupingState().expandedGroups).toEqual([])
+  })
+
+  it('places group footer rows before children when grouping pinned policy requests group-start', () => {
+    const store = createPipelineStore()
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    const columns = resolveDataTableColumns<Row>([
+      { id: 'status', field: 'status', filter: 'set' },
+      { id: 'amount', field: 'amount', sortable: true },
+    ], {}, new Map(), store)
+
+    pipeline.sync({
+      columns,
+      performance: normalizeDataTablePerformance(undefined),
+      view: {
+        ...createGroupingView('all'),
+        groupingPinnedRows: {
+          global: 'show',
+          insideGroup: true,
+          placement: 'group-start',
+        },
+      },
+    })
+    pipeline.setFilter('status', { operator: 'equals', value: 'active' })
+
+    expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['group', 'group-footer', 'data', 'data', 'grand-footer'])
   })
 
   it('keeps server grouping as query state without local materialization', () => {

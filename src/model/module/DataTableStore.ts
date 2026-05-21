@@ -7,6 +7,7 @@ import type {
   DataTableRange,
   DataTableRowId,
   DataTableRowKey,
+  DataTableSearchDirection,
   DataTableSearchQuery,
   DataTableSearchResult,
   DataTableSourceRequestContext,
@@ -467,9 +468,10 @@ implements DataTableStoreApi<Row> {
     search: DataTableSearchQuery,
     query?: DataTableQueryState,
     cursor?: string,
+    direction?: DataTableSearchDirection,
   ): Promise<DataTableSearchResult | undefined> {
     if (!this.source?.search) return undefined
-    const result = await this.source.search(search, query, cursor)
+    const result = await this.source.search(search, query, cursor, direction)
     return result ?? undefined
   }
 

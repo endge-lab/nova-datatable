@@ -190,6 +190,43 @@ describe('NovaDataTable benchmarks', () => {
     model.snapshot()
   }, { iterations: 20 })
 
+  bench('server search next previous cursor navigation', async () => {
+    const store = createDataTableStore<BenchRow>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        search: (_search, _query, cursor, direction = 'next') => {
+          const base = Number(cursor ?? (direction === 'previous' ? 500_000 : 0))
+          const start = direction === 'previous' ? Math.max(0, base - 80) : base
+          const matches = Array.from({ length: 80 }, (_item, index) => {
+            const rowIndex = start + index
+            return {
+              rowId: `row-${rowIndex}`,
+              rowIndex,
+              columnId: 'name',
+              value: `Customer ${rowIndex}`,
+              ranges: [{ start: 0, end: 8 }],
+            }
+          })
+          return {
+            matches,
+            total: 10_000,
+            cursor: String(start + 80),
+            previousCursor: start > 0 ? String(start - 1) : undefined,
+            hasMore: true,
+          }
+        },
+        resolveRowIndex: rowId => Number(String(rowId).replace('row-', '')),
+      },
+    })
+    const model = new DataTableServerRowModel(store, delta => store.applyDeltaBatch(delta))
+    model.sync({ sort: [], filters: [], rowOrder: [], columnOrder: [] }, { subscribe: false })
+    await model.search({ text: 'Customer', scope: 'cells', columns: ['name'] })
+    await model.search({ text: 'Customer', scope: 'cells', columns: ['name'] }, '80', 'next')
+    await model.search({ text: 'Customer', scope: 'cells', columns: ['name'] }, '79', 'previous')
+    await model.resolveRowIndex('row-500000')
+  }, { iterations: 20 })
+
   bench('100k client multi-sort', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
     const pipeline = new DataTableViewPipeline(store)
@@ -238,6 +275,35 @@ describe('NovaDataTable benchmarks', () => {
         { columnId: 'amount', operator: 'gte', value: 50_000 },
       ],
     })
+    pipeline.getViewRows()
+  }, { iterations: 3 })
+
+  bench('100k client OR filter expression', () => {
+    const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })
+    const pipeline = new DataTableViewPipeline(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<BenchRow>([
+        { id: 'status', field: 'status', filter: 'set' },
+        { id: 'amount', field: 'amount', filter: 'number' },
+        { id: 'name', field: 'name', filter: 'text' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: normalizeDataTableView({
+        sorting: false,
+        filtering: { mode: 'client' },
+        search: false,
+        grouping: false,
+      }),
+    })
+    pipeline.setFilters({
+      logic: 'or',
+      rules: [
+        { columnId: 'status', operator: 'equals', value: 'active' },
+        { columnId: 'amount', operator: 'gte', value: 90_000 },
+        { columnId: 'name', operator: 'contains', value: '777' },
+      ],
+    })
+    pipeline.setFilter('amount', { operator: 'lt', value: 10_000 })
     pipeline.getViewRows()
   }, { iterations: 3 })
 
@@ -328,6 +394,28 @@ describe('NovaDataTable benchmarks', () => {
       new Map(),
       store,
     )
+  })
+
+  bench('column drag layout preview over 1k columns', () => {
+    const columns = Array.from({ length: 1_000 }, (_item, index) => ({
+      id: `column-${index}`,
+      width: 80 + (index % 5) * 8,
+    }))
+    let insertionIndex = 0
+    let cursorX = 24_000
+    for (let frame = 0; frame < 120; frame += 1) {
+      cursorX += 17
+      let x = 0
+      for (let index = 0; index < columns.length; index += 1) {
+        const width = columns[index]!.width
+        if (cursorX < x + width / 2) {
+          insertionIndex = index
+          break
+        }
+        x += width
+      }
+    }
+    if (insertionIndex < 0) throw new Error('Invalid column insertion index')
   })
 
   bench('selection overlay intersections for 1M logical selected rows', () => {

@@ -3,6 +3,7 @@ import type {
   DataTableQueryState,
   DataTableRange,
   DataTableRowId,
+  DataTableSearchDirection,
   DataTableSearchQuery,
   DataTableSearchResult,
   DataTableStoreApi,
@@ -112,8 +113,12 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
   /**
    * Делегирует поиск source adapter с текущим query.
    */
-  search(search: DataTableSearchQuery, cursor?: string): Promise<DataTableSearchResult | undefined> {
-    return this.store.searchSource(search, this.query ?? undefined, cursor)
+  search(
+    search: DataTableSearchQuery,
+    cursor?: string,
+    direction: DataTableSearchDirection = 'next',
+  ): Promise<DataTableSearchResult | undefined> {
+    return this.store.searchSource(search, this.query ?? undefined, cursor, direction)
   }
 
   /**

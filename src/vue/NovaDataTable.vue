@@ -608,6 +608,12 @@ function onEditorInput(event: Event): void {
     editorDraft.value = (target as HTMLInputElement).checked
     return
   }
+  if (activeEditorType.value === 'select') {
+    const options = normalizeSelectOptions(activeEditorOptions.value)
+    const selected = options.find(option => String(option.value) === target.value)
+    editorDraft.value = selected ? selected.value : target.value
+    return
+  }
   editorDraft.value = target.value
 }
 

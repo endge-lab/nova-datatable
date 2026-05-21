@@ -44,6 +44,7 @@ export type DataTableFilterOperator =
 export type DataTableSearchScope = 'rows' | 'cells'
 export type DataTableSearchMatchMode = 'contains' | 'startsWith' | 'equals' | 'regex'
 export type DataTableSearchHighlightMode = 'none' | 'row' | 'cell' | 'text' | 'cell-text' | 'row-cell' | 'row-cell-text'
+export type DataTableSearchDirection = 'next' | 'previous'
 export type DataTableHoverMode = 'none' | 'row' | 'column' | 'cell' | 'row-column' | 'row-cell' | 'column-cell'
 export type DataTableSelectionUnit = 'cell' | 'row' | 'column'
 export type DataTableSelectionCardinality = 'single' | 'multiple'
@@ -129,6 +130,8 @@ export interface DataTableSearchResult {
   matches: Array<DataTableSearchMatch>
   total?: number
   cursor?: string
+  previousCursor?: string
+  hasMore?: boolean
 }
 
 export interface DataTableSearchState {
@@ -139,6 +142,10 @@ export interface DataTableSearchState {
   total: number
   mode: DataTableViewMode | 'off'
   local: boolean
+  loading: boolean
+  cursor?: string
+  previousCursor?: string
+  hasMore: boolean
 }
 
 export interface DataTableSelectionAnchor {
@@ -546,6 +553,7 @@ export interface DataTableLazySource<Row extends Record<string, any>> {
     search: DataTableSearchQuery,
     query?: DataTableQueryState,
     cursor?: string,
+    direction?: DataTableSearchDirection,
   ) => Promise<DataTableSearchResult | void> | DataTableSearchResult | void
   resolveRowIndex?: (rowId: DataTableRowId, query?: DataTableQueryState) => Promise<number | undefined> | number | undefined
   subscribe?: (query: DataTableQueryState, emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void) => (() => void) | void
@@ -1035,6 +1043,7 @@ export interface DataTableFilterConfig<Row extends Record<string, any> = Record<
   type?: DataTableFilterPreset | string
   operators?: Array<DataTableFilterOperator>
   defaultOperator?: DataTableFilterOperator
+  defaultValue?: unknown
   options?: Array<unknown>
   predicate?: (context: DataTableFilterContext<Row>) => boolean
   serialize?: (value: unknown) => unknown
@@ -1512,7 +1521,12 @@ export interface DataTableStoreApi<Row extends Record<string, any> = Record<stri
   clearDirtyState: () => void
   ensureRange: (range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext) => Promise<void>
   loadSummary: (query?: DataTableQueryState) => Promise<Record<string, unknown> | undefined>
-  searchSource: (search: DataTableSearchQuery, query?: DataTableQueryState, cursor?: string) => Promise<DataTableSearchResult | undefined>
+  searchSource: (
+    search: DataTableSearchQuery,
+    query?: DataTableQueryState,
+    cursor?: string,
+    direction?: DataTableSearchDirection,
+  ) => Promise<DataTableSearchResult | undefined>
   resolveSourceRowIndex: (rowId: DataTableRowId, query?: DataTableQueryState) => Promise<number | undefined>
   subscribe: (query: DataTableQueryState, emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void) => (() => void) | void
   batch: (callback: (store: DataTableStoreApi<Row>) => void) => void
