@@ -396,6 +396,31 @@ describe('NovaDataTable benchmarks', () => {
     )
   })
 
+  bench('100x50 visible render plan generation', () => {
+    const visibleRows = rows(100)
+    const visibleColumns = Array.from({ length: 50 }, (_item, index) => ({
+      id: `column-${index}`,
+      field: index % 3 === 0 ? 'name' : index % 3 === 1 ? 'status' : 'amount',
+      x: index * 96,
+      width: 96,
+    }))
+    const plan: Array<{ key: string; x: number; y: number; width: number; text: string }> = []
+    for (let rowIndex = 0; rowIndex < visibleRows.length; rowIndex += 1) {
+      const row = visibleRows[rowIndex]!
+      const y = 40 + rowIndex * 32
+      for (const column of visibleColumns) {
+        plan.push({
+          key: `${row.id}:${column.id}`,
+          x: column.x,
+          y,
+          width: column.width,
+          text: String(row[column.field as keyof BenchRow] ?? ''),
+        })
+      }
+    }
+    if (plan.length !== 5_000) throw new Error('Render plan did not cover 100x50 cells')
+  })
+
   bench('column drag layout preview over 1k columns', () => {
     const columns = Array.from({ length: 1_000 }, (_item, index) => ({
       id: `column-${index}`,
@@ -444,5 +469,41 @@ describe('NovaDataTable benchmarks', () => {
       ]
     })
     if (deltas.length !== 20_000) throw new Error('Invalid paste delta count')
+  })
+
+  bench('state persistence serialize restore for 1k columns', () => {
+    const state = {
+      version: 1 as const,
+      savedAt: Date.now(),
+      columnState: {
+        widths: Object.fromEntries(Array.from({ length: 1_000 }, (_item, index) => [`column-${index}`, 80 + index % 120])),
+        order: Array.from({ length: 1_000 }, (_item, index) => `column-${999 - index}`),
+        hidden: Array.from({ length: 100 }, (_item, index) => `column-${index * 3}`),
+        pinned: {
+          left: ['column-0', 'column-1'],
+          right: ['column-998', 'column-999'],
+        },
+      },
+      sort: [
+        { columnId: 'column-20', direction: 'asc' as const },
+        { columnId: 'column-40', direction: 'desc' as const },
+      ],
+      filters: {
+        logic: 'and' as const,
+        rules: [
+          { columnId: 'column-2', operator: 'contains', value: 'active' },
+          { columnId: 'column-4', operator: 'gte', value: 100 },
+        ],
+      },
+      search: { text: 'Customer', scope: 'cells' as const, columns: ['column-10', 'column-11'] },
+      grouping: {
+        enabled: true,
+        groups: [{ id: 'status', field: 'status' }],
+        expanded: 'all' as const,
+      },
+    }
+    const encoded = JSON.stringify(state)
+    const restored = JSON.parse(encoded) as typeof state
+    if (restored.columnState.order.length !== 1_000) throw new Error('Invalid restored column order')
   })
 })
