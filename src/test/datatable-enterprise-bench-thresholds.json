@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "mode": "warning",
+  "description": "Soft enterprise-grid benchmark budgets. These are documentation/triage thresholds, not hard CI blockers.",
+  "thresholds": {
+    "10M lazy store initialization": { "meanMsMax": 0.01 },
+    "server/lazy query update on 10M rows": { "meanMsMax": 0.05 },
+    "10M lazy search query stays sparse": { "meanMsMax": 0.05 },
+    "server search next previous cursor navigation": { "meanMsMax": 0.2 },
+    "100x50 visible render plan generation": { "meanMsMax": 2 },
+    "column drag layout preview over 1k columns": { "meanMsMax": 1 },
+    "10k paste cells parse and delta generation": { "meanMsMax": 8 },
+    "paste 10k typed cells through public root API": { "meanMsMax": 40 },
+    "undo/redo playback for 10k deltas": { "meanMsMax": 40 },
+    "nested column group layout for 1k columns": { "meanMsMax": 8 },
+    "build 100k worker index": { "meanMsMax": 30 },
+    "query 100k worker index with filter sort search and paging": { "meanMsMax": 50 }
+  }
+}
