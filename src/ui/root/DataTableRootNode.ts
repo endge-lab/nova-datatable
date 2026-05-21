@@ -737,7 +737,7 @@ export class DataTableRootNode<
     const runtimeOrder = this.viewPipeline.getState().columnOrder
     return {
       widths,
-      order: runtimeOrder.length > 0 ? [...runtimeOrder] : [...merged.order],
+      order: this.resolveColumnStateOrder(runtimeOrder, merged),
       hidden: [...merged.hidden],
       pinned: {
         left: [...merged.pinned.left],
@@ -1059,6 +1059,10 @@ export class DataTableRootNode<
    * Планирует применение server/SSE deltas не чаще одного раза за frame.
    */
   private scheduleDeltaFlush(): void {
+    if (!this.nova.raph.loopEnabled && typeof queueMicrotask === 'function') {
+      queueMicrotask(() => this.flushDeltasWithinBudget())
+      return
+    }
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(() => this.flushDeltasWithinBudget())
       return
@@ -1800,6 +1804,41 @@ export class DataTableRootNode<
         right: [...state.pinned.right],
       },
     }
+  }
+
+  /**
+   * Возвращает публичный порядок колонок, сохраняя hidden columns в columnState.
+   */
+  private resolveColumnStateOrder(
+    runtimeOrder: Array<string>,
+    merged: DataTableResolvedColumnState,
+  ): Array<string> {
+    const allColumnIds = this.props.columns.map(column => column.id)
+    const baseline = merged.order.length > 0
+      ? this.mergeColumnOrderWithAllColumns(merged.order, allColumnIds)
+      : allColumnIds
+    if (runtimeOrder.length === 0) return baseline
+    return this.mergeColumnOrderWithAllColumns(runtimeOrder, baseline)
+  }
+
+  /**
+   * Дополняет order отсутствующими колонками без потери исходного порядка.
+   */
+  private mergeColumnOrderWithAllColumns(order: Array<string>, allColumnIds: Array<string>): Array<string> {
+    const columnSet = new Set(allColumnIds)
+    const seen = new Set<string>()
+    const result: Array<string> = []
+    for (const columnId of order) {
+      if (!columnSet.has(columnId) || seen.has(columnId)) continue
+      seen.add(columnId)
+      result.push(columnId)
+    }
+    for (const columnId of allColumnIds) {
+      if (seen.has(columnId)) continue
+      seen.add(columnId)
+      result.push(columnId)
+    }
+    return result
   }
 
   /**
@@ -2609,6 +2648,7 @@ export class DataTableRootNode<
     const drag = this.columnDragState
     if (!drag) return undefined
     const visible = this.visibleColumnRects('all', false)
+      .filter(item => item.column.id !== drag.column.id)
       .filter(item => (allowCrossPinned || item.column.pinned === drag.pinned) && item.column.reorderable !== false)
     if (visible.length === 0) return drag.targetIndex
     if (x < 0) return this.resolveColumnDragInsertionIndex(this.resolvedColumns.findIndex(column => column.id === visible[0]?.column.id), false)

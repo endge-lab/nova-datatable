@@ -843,7 +843,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       caseSensitive: raw.caseSensitive ?? options?.caseSensitive ?? false,
       columns: raw.columns ?? options?.columns ?? [],
       highlight: raw.highlight ?? options?.highlight ?? 'cell-text',
-      filter: raw.filter ?? options?.filter ?? true,
+      filter: raw.filter ?? true,
       highlightColor: raw.highlightColor ?? options?.highlightColor ?? '#b45309',
       activeHighlightColor: raw.activeHighlightColor ?? options?.activeHighlightColor ?? '#be123c',
     }
