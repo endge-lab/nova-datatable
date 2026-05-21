@@ -7,6 +7,9 @@ import type {
   DataTableRange,
   DataTableRowId,
   DataTableRowKey,
+  DataTableSearchQuery,
+  DataTableSearchResult,
+  DataTableSourceRequestContext,
   DataTableStoreApi,
   DataTableStoreOptions,
 } from '@/model/types/datatable.types'
@@ -47,6 +50,7 @@ implements DataTableStoreApi<Row> {
   private structuralDirty = false
   private summaryDirty = false
   private estimatedRowCount = 0
+  private latestRequestRevision = 0
 
   /**
    * Создает store с in-memory или lazy source.
@@ -417,7 +421,7 @@ implements DataTableStoreApi<Row> {
   /**
    * Гарантирует загрузку lazy range.
    */
-  async ensureRange(range: DataTableRange, query?: DataTableQueryState): Promise<void> {
+  async ensureRange(range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext): Promise<void> {
     if (!this.source?.loadRange) return
 
     const start = clampInteger(range.start, 0, this.rowCount)
@@ -427,13 +431,15 @@ implements DataTableStoreApi<Row> {
     const key = `${start}:${end}:${JSON.stringify(query ?? {})}`
     const pending = this.pendingRanges.get(key)
     if (pending) return pending
+    if (context) this.latestRequestRevision = Math.max(this.latestRequestRevision, context.revision)
 
     const promise = Promise.resolve(
       query === undefined
-        ? this.source.loadRange({ start, end })
-        : this.source.loadRange({ start, end }, query),
+        ? this.source.loadRange({ start, end }, undefined, context)
+        : this.source.loadRange({ start, end }, query, context),
     )
       .then(rows => {
+        if (context && context.revision < this.latestRequestRevision) return undefined
         if (Array.isArray(rows)) this.replaceRange(start, rows)
         return undefined
       })
@@ -443,6 +449,45 @@ implements DataTableStoreApi<Row> {
 
     this.pendingRanges.set(key, promise)
     return promise
+  }
+
+  /**
+   * Загружает server-side summary для текущего query.
+   */
+  async loadSummary(query?: DataTableQueryState): Promise<Record<string, unknown> | undefined> {
+    if (!this.source?.loadSummary) return undefined
+    const summary = await this.source.loadSummary(query)
+    return summary ?? undefined
+  }
+
+  /**
+   * Делегирует поиск в lazy/source adapter.
+   */
+  async searchSource(
+    search: DataTableSearchQuery,
+    query?: DataTableQueryState,
+    cursor?: string,
+  ): Promise<DataTableSearchResult | undefined> {
+    if (!this.source?.search) return undefined
+    const result = await this.source.search(search, query, cursor)
+    return result ?? undefined
+  }
+
+  /**
+   * Делегирует resolve row index в lazy/source adapter.
+   */
+  async resolveSourceRowIndex(rowId: DataTableRowId, query?: DataTableQueryState): Promise<number | undefined> {
+    return this.source?.resolveRowIndex?.(rowId, query)
+  }
+
+  /**
+   * Подписывается на server-side deltas.
+   */
+  subscribe(
+    query: DataTableQueryState,
+    emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void,
+  ): (() => void) | void {
+    return this.source?.subscribe?.(query, emitDelta)
   }
 
   /**

@@ -63,6 +63,10 @@ export type DataTableZoomMode = 'density' | 'layout' | 'text' | 'custom'
 export type DataTableZoomAffect = 'rows' | 'headers' | 'columns' | 'text' | 'icons'
 export type DataTableEditTrigger = 'doubleClick' | 'enter' | 'programmatic'
 export type DataTableEditorType = 'text' | 'number' | 'select' | 'checkbox' | 'date'
+export type DataTableKeyboardTabAction = 'move' | 'commit-edit'
+export type DataTableKeyboardEnterAction = 'edit' | 'move'
+export type DataTableActiveCellDirection = 'up' | 'down' | 'left' | 'right' | 'page-up' | 'page-down' | 'home' | 'end'
+export type DataTableGroupingPinnedPlacement = 'group-start' | 'group-end'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -362,6 +366,18 @@ export interface DataTableGroupingQueryState<Row extends Record<string, any> = R
   footerPlacement: DataTableGroupFooterPlacement
 }
 
+export interface DataTableGroupingPinnedRowsOptions {
+  global?: 'show' | 'hide'
+  insideGroup?: boolean
+  placement?: DataTableGroupingPinnedPlacement
+}
+
+export interface DataTableResolvedGroupingPinnedRowsOptions {
+  global: 'show' | 'hide'
+  insideGroup: boolean
+  placement: DataTableGroupingPinnedPlacement
+}
+
 export interface DataTableQueryState {
   sort: DataTableSortState
   filters: DataTableFilterState | DataTableFilterExpression
@@ -369,6 +385,12 @@ export interface DataTableQueryState {
   rowOrder: Array<DataTableRowId>
   columnOrder: Array<string>
   grouping?: DataTableGroupingQueryState
+}
+
+export interface DataTableSourceRequestContext {
+  revision: number
+  requestId: number
+  signal?: AbortSignal
 }
 
 export type DataTableRowKey<Row extends Record<string, any>> = keyof Row | ((row: Row, index: number) => DataTableRowId)
@@ -413,6 +435,73 @@ export interface DataTableResolvedPerformanceOptions {
   text: false | DataTableResolvedTextPerformanceOptions
 }
 
+export interface DataTableServerRowModelOptions {
+  enabled?: boolean
+  authoritative?: boolean
+  subscribe?: boolean
+  loadSummary?: boolean
+}
+
+export interface DataTableResolvedServerRowModelOptions {
+  enabled: boolean
+  authoritative: boolean
+  subscribe: boolean
+  loadSummary: boolean
+}
+
+export interface DataTableKeyboardNavigationOptions {
+  enabled?: boolean
+  arrows?: boolean
+  tab?: DataTableKeyboardTabAction | false
+  enter?: DataTableKeyboardEnterAction | false
+  pageKeys?: boolean
+  homeEnd?: boolean
+  shiftSelection?: boolean
+  ctrlMetaShortcuts?: boolean
+}
+
+export interface DataTableResolvedKeyboardNavigationOptions {
+  enabled: boolean
+  arrows: boolean
+  tab: DataTableKeyboardTabAction | false
+  enter: DataTableKeyboardEnterAction | false
+  pageKeys: boolean
+  homeEnd: boolean
+  shiftSelection: boolean
+  ctrlMetaShortcuts: boolean
+}
+
+export interface DataTableColumnState {
+  widths?: Record<string, number>
+  order?: Array<string>
+  hidden?: Array<string>
+  pinned?: DataTablePinnedColumns
+}
+
+export interface DataTableResolvedColumnState {
+  widths: Record<string, number>
+  order: Array<string>
+  hidden: Array<string>
+  pinned: {
+    left: Array<string>
+    right: Array<string>
+  }
+}
+
+export interface DataTableKeyboardAction {
+  type: 'move' | 'select-all' | 'copy' | 'paste' | 'edit' | 'cancel' | 'commit'
+  key: string
+  direction?: DataTableActiveCellDirection
+}
+
+export interface DataTableSummaryState {
+  values: Record<string, unknown>
+  rowCount: number
+  revision: number
+  source: 'client' | 'server'
+  loading: boolean
+}
+
 export type DataTableTextPerformanceMode = 'quality' | 'balanced' | 'fast' | 'ultra-fast'
 export type DataTableTextPerformanceCache = 'none' | 'visible-reuse'
 export type DataTableTextPerformanceRaster = 'sync' | 'deferred'
@@ -447,7 +536,11 @@ export interface DataTableResolvedTextPerformanceOptions {
 export interface DataTableLazySource<Row extends Record<string, any>> {
   rowCount: number
   getRow?: (index: number) => Row | undefined
-  loadRange?: (range: DataTableRange, query?: DataTableQueryState) => Promise<Array<Row> | void> | Array<Row> | void
+  loadRange?: (
+    range: DataTableRange,
+    query?: DataTableQueryState,
+    context?: DataTableSourceRequestContext,
+  ) => Promise<Array<Row> | void> | Array<Row> | void
   loadSummary?: (query?: DataTableQueryState) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
   search?: (
     search: DataTableSearchQuery,
@@ -1000,16 +1093,19 @@ export interface DataTableViewOptions {
   sorting?: false | DataTableViewSortingOptions
   filtering?: false | DataTableViewFilteringOptions
   search?: false | DataTableViewSearchOptions
+  serverRowModel?: false | DataTableServerRowModelOptions
   rowOrdering?: false | DataTableRowOrderingOptions
   columnOrdering?: false | DataTableColumnOrderingOptions
   filterUi?: false | DataTableFilterUiOptions
   grouping?: false | DataTableViewGroupingOptions
+  groupingPinnedRows?: false | DataTableGroupingPinnedRowsOptions
 }
 
 export interface DataTableResolvedViewOptions {
   sorting: false | Required<Omit<DataTableViewSortingOptions, 'initial'>> & { initial: DataTableSortState }
   filtering: false | Required<Omit<DataTableViewFilteringOptions, 'initial'>> & { initial: DataTableFilterState | DataTableFilterExpression }
   search: false | Required<DataTableViewSearchOptions>
+  serverRowModel: false | DataTableResolvedServerRowModelOptions
   rowOrdering: false | Required<DataTableRowOrderingOptions>
   columnOrdering: false | Required<DataTableColumnOrderingOptions>
   filterUi: false | Required<DataTableFilterUiOptions>
@@ -1017,6 +1113,7 @@ export interface DataTableResolvedViewOptions {
     groups: Array<DataTableGroupRule>
     expanded: 'all' | 'none' | Array<string>
   }
+  groupingPinnedRows: false | DataTableResolvedGroupingPinnedRowsOptions
 }
 
 export interface DataTableViewState {
@@ -1198,6 +1295,8 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   textSelection?: false | DataTableTextSelectionOptions
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<Row>
+  keyboardNavigation?: false | DataTableKeyboardNavigationOptions
+  columnState?: DataTableColumnState
   performance?: DataTablePerformanceOptions
 }
 
@@ -1216,10 +1315,13 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   pinnedBottomTemplate?: DataTableGroupTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
+  onColumnStateChange?: (state: DataTableResolvedColumnState) => void
   onSortChange?: (state: DataTableSortState) => void
   onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
   onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
+  onServerQueryChange?: (query: DataTableQueryState) => void
+  onSummaryChange?: (summary: DataTableSummaryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
   onGroupingChange?: (state: DataTableGroupingState<Row>) => void
@@ -1237,6 +1339,7 @@ export interface DataTableRootProps<Row extends Record<string, any> = Record<str
   onPasteError?: DataTableClipboardOptions<Row>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<Row> | null) => void
+  onKeyboardAction?: (action: DataTableKeyboardAction) => void
 }
 
 export interface DataTableRootResolvedProps<Row extends Record<string, any> = Record<string, any>>
@@ -1256,6 +1359,8 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   textSelection: false | DataTableResolvedTextSelectionOptions
   zoom: false | DataTableResolvedZoomOptions
   editing: false | DataTableResolvedEditingOptions<Row>
+  keyboardNavigation: false | DataTableResolvedKeyboardNavigationOptions
+  columnState: DataTableResolvedColumnState
   performance: DataTableResolvedPerformanceOptions
   hoverAlpha: number
   selectionAlpha: number
@@ -1270,10 +1375,13 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   pinnedBottomTemplate?: DataTableGroupTemplate<Row>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<Row>) => void
+  onColumnStateChange?: (state: DataTableResolvedColumnState) => void
   onSortChange?: (state: DataTableSortState) => void
   onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
   onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
+  onServerQueryChange?: (query: DataTableQueryState) => void
+  onSummaryChange?: (summary: DataTableSummaryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
   onGroupingChange?: (state: DataTableGroupingState<Row>) => void
@@ -1291,6 +1399,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   onPasteError?: DataTableClipboardOptions<Row>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<Row> | null) => void
+  onKeyboardAction?: (action: DataTableKeyboardAction) => void
 }
 
 export interface DataTableColumnResizePayload<Row extends Record<string, any> = Record<string, any>> {
@@ -1313,8 +1422,17 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   autosizeColumn: (columnId: string) => boolean
   autosizeColumns: (columnIds?: Array<string>) => void
   resetColumnWidth: (columnId: string) => boolean
+  getColumnState: () => DataTableResolvedColumnState
+  setColumnState: (state: DataTableColumnState) => void
+  resetColumnState: () => void
+  hideColumn: (columnId: string) => void
+  showColumn: (columnId: string) => void
+  pinColumn: (columnId: string, side: DataTablePinnedColumnSide) => void
+  unpinColumn: (columnId: string) => void
   scrollTo: (x: number, y: number) => void
   scrollToRow: (rowIndex: number) => void
+  focusCell: (rowId: DataTableRowId, columnId: string) => boolean
+  moveActiveCell: (direction: DataTableActiveCellDirection, options?: { extend?: boolean }) => boolean
   getZoom: () => DataTableZoomState
   setZoom: (value: number | DataTableZoomOptions) => void
   resetZoom: () => void
@@ -1392,7 +1510,11 @@ export interface DataTableStoreApi<Row extends Record<string, any> = Record<stri
   applyDeltaBatch: (deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void
   getDirtyState: () => DataTableDirtyState
   clearDirtyState: () => void
-  ensureRange: (range: DataTableRange, query?: DataTableQueryState) => Promise<void>
+  ensureRange: (range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext) => Promise<void>
+  loadSummary: (query?: DataTableQueryState) => Promise<Record<string, unknown> | undefined>
+  searchSource: (search: DataTableSearchQuery, query?: DataTableQueryState, cursor?: string) => Promise<DataTableSearchResult | undefined>
+  resolveSourceRowIndex: (rowId: DataTableRowId, query?: DataTableQueryState) => Promise<number | undefined>
+  subscribe: (query: DataTableQueryState, emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void) => (() => void) | void
   batch: (callback: (store: DataTableStoreApi<Row>) => void) => void
   takeRevision: () => number
   takeDataRevision: () => number

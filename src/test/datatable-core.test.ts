@@ -12,9 +12,15 @@ import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
+import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
-import { NovaDataTableSchema, type DataTableCellContext } from '@/model/types/datatable.types'
+import {
+  NovaDataTableSchema,
+  type DataTableCellContext,
+  type DataTableQueryState,
+  type DataTableSourceRequestContext,
+} from '@/model/types/datatable.types'
 import { normalizeDataTableEditing, normalizeDataTablePerformance, normalizeDataTableScrollbars, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
@@ -188,7 +194,7 @@ describe('DataTableStore', () => {
     expect(store.rowCount).toBe(10_000_000)
     expect(store.loadedRowCount).toBe(4)
     expect(store.getRowAt(1_002)?.id).toBe('row-1002')
-    expect(loadRange).toHaveBeenCalledWith({ start: 1_000, end: 1_004 })
+    expect(loadRange).toHaveBeenCalledWith({ start: 1_000, end: 1_004 }, undefined, undefined)
   })
 
   it('passes query state into lazy range adapters', async () => {
@@ -209,7 +215,79 @@ describe('DataTableStore', () => {
 
     await store.ensureRange({ start: 0, end: 5 }, query)
 
-    expect(loadRange).toHaveBeenCalledWith({ start: 0, end: 5 }, query)
+    expect(loadRange).toHaveBeenCalledWith({ start: 0, end: 5 }, query, undefined)
+  })
+
+  it('passes server source context into lazy range adapters and ignores stale responses', async () => {
+    const loadRange = vi.fn((
+      range: { start: number; end: number },
+      _query: DataTableQueryState | undefined,
+      context: DataTableSourceRequestContext | undefined,
+    ) => {
+      if (context?.revision === 1) return rows(range.end - range.start, 100)
+      return rows(range.end - range.start, range.start)
+    })
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 100,
+        loadRange,
+      },
+    })
+    const query: DataTableQueryState = {
+      sort: [],
+      filters: [],
+      rowOrder: [],
+      columnOrder: [],
+    }
+
+    await store.ensureRange({ start: 0, end: 2 }, query, { revision: 2, requestId: 2 })
+    await store.ensureRange({ start: 10, end: 12 }, query, { revision: 1, requestId: 1 })
+
+    expect(loadRange).toHaveBeenNthCalledWith(1, { start: 0, end: 2 }, query, { revision: 2, requestId: 2 })
+    expect(loadRange).toHaveBeenNthCalledWith(2, { start: 10, end: 12 }, query, { revision: 1, requestId: 1 })
+    expect(store.getRowAt(0)?.id).toBe('row-0')
+    expect(store.getRowAt(10)).toBeUndefined()
+  })
+
+  it('delegates summary search resolve and subscribe through the lazy source contract', async () => {
+    const query: DataTableQueryState = {
+      sort: [{ columnId: 'amount', direction: 'desc' }],
+      filters: [{ columnId: 'status', operator: 'equals', value: 'active' }],
+      rowOrder: [],
+      columnOrder: [],
+    }
+    const loadSummary = vi.fn(() => ({ count: 100 }))
+    const search = vi.fn(() => ({
+      matches: [{ rowId: 'row-10', rowIndex: 10, columnId: 'name', value: 'Row 10', ranges: [{ start: 0, end: 3 }] }],
+      total: 1,
+      cursor: 'next',
+    }))
+    const resolveRowIndex = vi.fn(() => 10)
+    const unsubscribe = vi.fn()
+    const subscribe = vi.fn(() => unsubscribe)
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        loadSummary,
+        search,
+        resolveRowIndex,
+        subscribe,
+      },
+    })
+
+    await expect(store.loadSummary(query)).resolves.toEqual({ count: 100 })
+    await expect(store.searchSource({ text: 'Row 10' }, query, 'cursor')).resolves.toMatchObject({ total: 1 })
+    await expect(store.resolveSourceRowIndex('row-10', query)).resolves.toBe(10)
+    const dispose = store.subscribe(query, () => undefined)
+    dispose?.()
+
+    expect(loadSummary).toHaveBeenCalledWith(query)
+    expect(search).toHaveBeenCalledWith({ text: 'Row 10' }, query, 'cursor')
+    expect(resolveRowIndex).toHaveBeenCalledWith('row-10', query)
+    expect(subscribe).toHaveBeenCalledWith(query, expect.any(Function))
+    expect(unsubscribe).toHaveBeenCalled()
   })
 
   it('keeps plain lazy views sparse for huge row counts', () => {
@@ -231,10 +309,12 @@ describe('DataTableStore', () => {
         sorting: false,
         filtering: false,
         search: false,
+        serverRowModel: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
         grouping: false,
+        groupingPinnedRows: false,
       },
     })
 
@@ -274,10 +354,12 @@ describe('DataTableStore', () => {
           activeHighlightColor: '#be123c',
           controlled: false,
         },
+        serverRowModel: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
         grouping: false,
+        groupingPinnedRows: false,
       },
     })
 
@@ -356,6 +438,96 @@ describe('DataTableStore', () => {
     expect(store.getRowIdAt(2)).toBe('row-r')
     expect(store.getRowIndex('row-r')).toBe(2)
     expect(store.getDirtyState().structural).toBe(true)
+  })
+})
+
+describe('DataTableServerRowModel', () => {
+  it('passes the current query into range summary search and subscribe adapters', async () => {
+    const query: DataTableQueryState = {
+      sort: [{ columnId: 'amount', direction: 'asc' }],
+      filters: [{ columnId: 'status', operator: 'equals', value: 'active' }],
+      search: { text: 'Row 2', scope: 'cells', columns: ['name'] },
+      rowOrder: [],
+      columnOrder: ['name', 'amount'],
+    }
+    const loadRange = vi.fn((range: { start: number; end: number }) => rows(range.end - range.start, range.start))
+    const loadSummary = vi.fn(() => ({ count: 10_000_000, amount: 42 }))
+    const search = vi.fn(() => ({
+      matches: [{ rowId: 'row-2', rowIndex: 2, columnId: 'name', value: 'Row 2', ranges: [{ start: 0, end: 5 }] }],
+      total: 1,
+    }))
+    const unsubscribe = vi.fn()
+    const subscribe = vi.fn((_query: DataTableQueryState, emitDelta: unknown) => {
+      expect(emitDelta).toEqual(expect.any(Function))
+      return unsubscribe
+    })
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        loadRange,
+        loadSummary,
+        search,
+        subscribe,
+      },
+    })
+    const model = new DataTableServerRowModel(store, vi.fn())
+
+    expect(model.sync(query, { subscribe: true })).toBe(true)
+    expect(model.sync(query, { subscribe: true })).toBe(false)
+    expect(model.sync(query, { subscribe: false })).toBe(false)
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(model.sync(query, { subscribe: true })).toBe(false)
+    await expect(model.ensureRange({ start: 2, end: 4 })).resolves.toBe(true)
+    await expect(model.loadSummary()).resolves.toMatchObject({
+      values: { count: 10_000_000, amount: 42 },
+      loading: false,
+      source: 'server',
+    })
+    await expect(model.search({ text: 'Row 2' })).resolves.toMatchObject({ total: 1 })
+
+    expect(loadRange).toHaveBeenCalledWith(
+      { start: 2, end: 4 },
+      query,
+      expect.objectContaining({ revision: 1, requestId: 1, signal: expect.objectContaining({ aborted: false }) }),
+    )
+    expect(loadSummary).toHaveBeenCalledWith(query)
+    expect(search).toHaveBeenCalledWith({ text: 'Row 2' }, query, undefined)
+    expect(subscribe).toHaveBeenCalledTimes(2)
+    expect(subscribe).toHaveBeenLastCalledWith(query, expect.any(Function))
+    expect(model.snapshot()).toMatchObject({
+      revision: 1,
+      subscribed: true,
+      summary: {
+        values: { count: 10_000_000, amount: 42 },
+        loading: false,
+      },
+    })
+
+    model.dispose()
+    expect(unsubscribe).toHaveBeenCalled()
+    expect(model.snapshot().query).toBeNull()
+  })
+
+  it('keeps only the latest server summary response', async () => {
+    const query: DataTableQueryState = { sort: [], filters: [], rowOrder: [], columnOrder: [] }
+    const resolvers: Array<(value: Record<string, unknown>) => void> = []
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        loadSummary: () => new Promise<Record<string, unknown>>(resolve => resolvers.push(resolve)),
+      },
+    })
+    const model = new DataTableServerRowModel(store, vi.fn())
+    model.sync(query, { subscribe: false })
+
+    const first = model.loadSummary()
+    const second = model.loadSummary()
+    resolvers[1]?.({ count: 2 })
+    await expect(second).resolves.toMatchObject({ values: { count: 2 } })
+    resolvers[0]?.({ count: 1 })
+    await expect(first).resolves.toMatchObject({ values: { count: 2 } })
   })
 })
 
@@ -724,10 +896,12 @@ describe('DataTableViewPipeline', () => {
           activeHighlightColor: '#be123c',
           controlled: false,
         },
+        serverRowModel: false,
         rowOrdering: { enabled: true, mode: 'view', manualLayer: true },
         columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
         filterUi: { headerMenu: false, filterRow: false },
         grouping: false,
+        groupingPinnedRows: false,
       },
     })
   }
@@ -737,6 +911,7 @@ describe('DataTableViewPipeline', () => {
       sorting: { mode: 'client' as const, multi: true, headerClick: 'append' as const, controlled: false, initial: [] },
       filtering: { mode: 'client' as const, controlled: false, initial: [] },
       search: false,
+      serverRowModel: false,
       rowOrdering: { enabled: true, mode: 'view' as const, manualLayer: true },
       columnOrdering: { enabled: true, allowCrossPinned: false, order: [] },
       filterUi: { headerMenu: false, filterRow: false },
@@ -751,6 +926,7 @@ describe('DataTableViewPipeline', () => {
         footerPlacement: 'scroll' as const,
         controlled: false,
       },
+      groupingPinnedRows: false,
     }
   }
 
@@ -868,10 +1044,12 @@ describe('DataTableViewPipeline', () => {
           activeHighlightColor: '#be123c',
           controlled: false,
         },
+        serverRowModel: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
         grouping: false,
+        groupingPinnedRows: false,
       },
     })
     lazyPipeline.setSearch('Row')
@@ -895,10 +1073,12 @@ describe('DataTableViewPipeline', () => {
         sorting: { mode: 'server', multi: true, headerClick: 'append', controlled: true, initial: [] },
         filtering: { mode: 'server', controlled: true, initial: [] },
         search: false,
+        serverRowModel: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
         grouping: false,
+        groupingPinnedRows: false,
       },
     })
     pipeline.setSort({ columnId: 'amount', direction: 'desc' })
@@ -906,6 +1086,67 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
     expect(pipeline.getQuery().sort).toEqual([{ columnId: 'amount', direction: 'desc', priority: 0 }])
     expect(pipeline.isServerControlled()).toBe(true)
+  })
+
+  it('keeps authoritative server row model sparse even when client modes are configured', () => {
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        getRow,
+      },
+    })
+    const pipeline = new DataTableViewPipeline<Row>(store)
+
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([
+        { id: 'amount', field: 'amount', sortable: true },
+        { id: 'status', field: 'status', filter: 'set' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: { mode: 'client', multi: true, headerClick: 'append', controlled: false, initial: [] },
+        filtering: { mode: 'client', controlled: false, initial: [] },
+        search: {
+          mode: 'client',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: ['name'],
+          highlight: 'cell-text',
+          filter: true,
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
+        serverRowModel: { enabled: true, authoritative: true, subscribe: false, loadSummary: false },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+        groupingPinnedRows: false,
+      },
+    })
+    pipeline.setSort({ columnId: 'amount', direction: 'desc' })
+    pipeline.setFilter('status', { operator: 'equals', value: 'active' })
+    pipeline.setSearch('Row')
+    pipeline.setServerSearchResult({
+      matches: [{ rowId: 'row-5000', rowIndex: 5_000, columnId: 'name', value: 'Row 5000', ranges: [{ start: 0, end: 3 }] }],
+      total: 1_000,
+    })
+
+    expect(pipeline.rowCount).toBe(10_000_000)
+    expect(getRow).not.toHaveBeenCalled()
+    expect(pipeline.getSearchState()).toMatchObject({
+      total: 1_000,
+      activeMatch: { rowId: 'row-5000', rowIndex: 5_000 },
+      local: false,
+    })
+    expect(pipeline.getQuery()).toMatchObject({
+      sort: [{ columnId: 'amount', direction: 'desc', priority: 0 }],
+      search: { text: 'Row' },
+    })
   })
 
   it('groups rows after filter and sort and exposes aggregate view rows', () => {
@@ -950,6 +1191,7 @@ describe('DataTableViewPipeline', () => {
         sorting: false,
         filtering: false,
         search: false,
+        serverRowModel: { enabled: true, authoritative: true, subscribe: false, loadSummary: false },
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -964,6 +1206,7 @@ describe('DataTableViewPipeline', () => {
           footerPlacement: 'scroll',
           controlled: true,
         },
+        groupingPinnedRows: false,
       },
     })
 
@@ -993,6 +1236,7 @@ describe('DataTableViewPipeline', () => {
         sorting: { mode: 'client', multi: true, headerClick: 'append', controlled: false, initial: [{ columnId: 'amount', direction: 'desc' }] },
         filtering: { mode: 'client', controlled: false, initial: [{ columnId: 'status', operator: 'equals', value: 'active' }] },
         search: false,
+        serverRowModel: false,
         rowOrdering: false,
         columnOrdering: false,
         filterUi: false,
@@ -1007,6 +1251,7 @@ describe('DataTableViewPipeline', () => {
           footerPlacement: 'scroll',
           controlled: false,
         },
+        groupingPinnedRows: false,
       },
     })
 
@@ -1328,6 +1573,89 @@ describe('DataTable Root runtime', () => {
 
     expect(store.rowCount).toBe(1_000_000)
     expect(root.getApi().getViewState().rowCount).toBe(1_000_000)
+    app.destroy()
+  })
+
+  it('roundtrips persisted column state through the public API', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const onColumnStateChange = vi.fn()
+    root.setProps({
+      columnState: {
+        widths: { status: 144 },
+        order: ['status', 'name', 'amount'],
+        hidden: ['amount'],
+        pinned: { left: ['status'], right: [] },
+      },
+      onColumnStateChange,
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().getColumnState()).toMatchObject({
+      widths: { status: 144 },
+      order: ['status', 'name', 'amount'],
+      hidden: ['amount'],
+      pinned: { left: ['status'], right: [] },
+    })
+
+    root.getApi().showColumn('amount')
+    root.getApi().pinColumn('amount', 'right')
+    root.getApi().hideColumn('name')
+
+    expect(onColumnStateChange).toHaveBeenCalled()
+    expect(root.getApi().getColumnState()).toMatchObject({
+      hidden: ['name'],
+      pinned: { left: ['status'], right: ['amount'] },
+    })
+
+    root.getApi().resetColumnState()
+    expect(root.getApi().getColumnState()).toMatchObject({
+      widths: { status: 144 },
+      order: ['status', 'name', 'amount'],
+      hidden: ['amount'],
+      pinned: { left: ['status'], right: [] },
+    })
+    app.destroy()
+  })
+
+  it('moves active cells through the keyboard navigation API', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const onActiveCellChange = vi.fn()
+    const onKeyboardAction = vi.fn()
+    root.setProps({
+      keyboardNavigation: { enabled: true },
+      selection: {
+        enabled: true,
+        mode: 'cell',
+        cardinality: 'multiple',
+        gestures: { shiftRange: true },
+      },
+      onActiveCellChange,
+      onKeyboardAction,
+    } as never)
+    app.raph.run()
+
+    expect(root.getApi().focusCell('row-0', 'name')).toBe(true)
+    expect(root.getApi().moveActiveCell('right')).toBe(true)
+    expect(root.getApi().getSelection()?.activeCell).toMatchObject({
+      rowId: 'row-0',
+      columnId: 'status',
+      columnIndex: 1,
+    })
+    expect(root.getApi().moveActiveCell('down', { extend: true })).toBe(true)
+    expect(root.getApi().getSelection()?.ranges[0]).toMatchObject({
+      unit: 'cell',
+      startRowIndex: 0,
+      endRowIndex: 1,
+      startColumnId: 'status',
+      endColumnId: 'status',
+    })
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 210, clientY: 52 }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    expect(onKeyboardAction).toHaveBeenCalledWith(expect.objectContaining({ type: 'move', direction: 'right' }))
+    expect(onActiveCellChange).toHaveBeenCalled()
     app.destroy()
   })
 
@@ -1932,18 +2260,18 @@ describe('DataTable Root runtime', () => {
 
     root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 150, clientY: 12 }))
     root.eventHandlers.dragmove?.(
-      new MouseEvent('mousemove', { clientX: 350, clientY: 12 }),
-      200,
+      new MouseEvent('mousemove', { clientX: 800, clientY: 12 }),
+      650,
       0,
       {
         pointerId: 1,
         startX: 150,
         startY: 12,
-        x: 350,
+        x: 800,
         y: 12,
-        dx: 200,
+        dx: 650,
         dy: 0,
-        totalDx: 200,
+        totalDx: 650,
         totalDy: 0,
       },
     )
@@ -1951,16 +2279,16 @@ describe('DataTable Root runtime', () => {
     expect(root.getApi().getViewState().columnOrder).toEqual([])
 
     root.eventHandlers.dragend?.(
-      new MouseEvent('mouseup', { clientX: 350, clientY: 12 }),
+      new MouseEvent('mouseup', { clientX: 800, clientY: 12 }),
       {
         pointerId: 1,
         startX: 150,
         startY: 12,
-        x: 350,
+        x: 800,
         y: 12,
         dx: 0,
         dy: 0,
-        totalDx: 200,
+        totalDx: 650,
         totalDy: 0,
       },
     )

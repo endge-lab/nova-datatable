@@ -48,6 +48,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private search: DataTableSearchQuery = { text: '' }
   private searchMatches: Array<DataTableSearchMatch> = []
   private searchActiveIndex = -1
+  private searchTotalOverride: number | undefined
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
   private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
@@ -72,10 +73,12 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       sorting: false,
       filtering: false,
       search: false,
+      serverRowModel: false,
       rowOrdering: false,
       columnOrdering: false,
       filterUi: false,
       grouping: false,
+      groupingPinnedRows: false,
     }
   }
 
@@ -317,6 +320,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   setSearch(query: string | DataTableSearchQuery): void {
     this.search = this.createSearchQuery(query)
+    this.searchTotalOverride = undefined
     this.rebuild()
   }
 
@@ -327,6 +331,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.search = this.createSearchQuery('')
     this.searchMatches = []
     this.searchActiveIndex = -1
+    this.searchTotalOverride = undefined
     this.rebuild()
   }
 
@@ -373,10 +378,21 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       matches: [...this.searchMatches],
       activeIndex: this.searchActiveIndex,
       activeMatch,
-      total: this.searchMatches.length,
+      total: this.searchTotalOverride ?? this.searchMatches.length,
       mode: this.view.search ? this.view.search.mode : 'off',
       local: this.localSearch,
     }
+  }
+
+  /**
+   * Подставляет результаты server-side поиска без локального скана строк.
+   */
+  setServerSearchResult(result: { matches: Array<DataTableSearchMatch>; total?: number }, activeIndex = 0): void {
+    this.searchMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
+    this.searchTotalOverride = result.total
+    this.searchActiveIndex = this.searchMatches.length === 0
+      ? -1
+      : clampInteger(activeIndex, 0, this.searchMatches.length - 1)
   }
 
   /**
@@ -628,6 +644,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг shouldApplyLocal для DataTableViewPipeline.
    */
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
+    if (this.view.serverRowModel && this.view.serverRowModel.enabled && this.view.serverRowModel.authoritative) return false
     if (this.store.rowCount > this.maxClientRows) return false
     if (mode === 'client') return true
     if (mode === 'server') return false
@@ -736,6 +753,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     if (!this.localSearch || !this.isSearchActive()) {
       this.searchMatches = []
       this.searchActiveIndex = -1
+      this.searchTotalOverride = undefined
       return
     }
 
@@ -748,6 +766,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       matches.push(...this.matchSearchRow(viewRow))
     }
     this.searchMatches = matches
+    this.searchTotalOverride = undefined
     if (matches.length === 0) this.searchActiveIndex = -1
     else if (this.searchActiveIndex < 0) this.searchActiveIndex = 0
     else this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1)
@@ -1188,6 +1207,10 @@ function createViewSignature(view: DataTableResolvedViewOptions, expanded: 'all'
       controlled: view.sorting.controlled,
     },
     filtering: view.filtering && { mode: view.filtering.mode, controlled: view.filtering.controlled },
+    serverRowModel: view.serverRowModel && {
+      enabled: view.serverRowModel.enabled,
+      authoritative: view.serverRowModel.authoritative,
+    },
     search: view.search && {
       mode: view.search.mode,
       scope: view.search.scope,
@@ -1210,6 +1233,11 @@ function createViewSignature(view: DataTableResolvedViewOptions, expanded: 'all'
       showGrandFooter: view.grouping.showGrandFooter,
       footerPlacement: view.grouping.footerPlacement,
       expanded,
+    },
+    groupingPinnedRows: view.groupingPinnedRows && {
+      global: view.groupingPinnedRows.global,
+      insideGroup: view.groupingPinnedRows.insideGroup,
+      placement: view.groupingPinnedRows.placement,
     },
   })
 }

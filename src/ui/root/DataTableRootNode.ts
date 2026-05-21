@@ -29,6 +29,7 @@ import {
 } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidationScope'
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
 import {
@@ -37,8 +38,11 @@ import {
   type DataTableRootDescriptor,
 } from '@/ui/root/datatable-root.config'
 import type {
+  DataTableActiveCellDirection,
   DataTableCellContext,
   DataTableCellRect,
+  DataTableColumnInput,
+  DataTableColumnState,
   DataTableDelta,
   DataTableDirtyState,
   DataTableEditContext,
@@ -50,10 +54,12 @@ import type {
   DataTableInteractionState,
   DataTableInteractionTarget,
   DataTableClipboardFormat,
+  DataTableKeyboardAction,
   DataTablePinnedRowPosition,
   DataTableQueryState,
   DataTableResolvedColumn,
   DataTableResolvedClipboardOptions,
+  DataTableResolvedColumnState,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedZoomWheelOptions,
   DataTableRootApi,
@@ -75,6 +81,7 @@ import type {
   DataTableSelectionState,
   DataTablePasteResult,
   DataTableStoreApi,
+  DataTableSummaryState,
   DataTableTooltipContext,
   DataTableViewport,
   DataTableViewRow,
@@ -185,8 +192,10 @@ export class DataTableRootNode<
 
   private readonly api: DataTableRootApi<Row>
   private viewPipeline: DataTableViewPipeline<Row>
+  private serverRowModel: DataTableServerRowModel<Row>
   private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
   private readonly widthOverrides = new Map<string, number>()
+  private columnStateOverride: DataTableColumnState | null = null
   private readonly columnIndexById = new Map<string, number>()
   private readonly pendingDeltas: Array<DataTableDelta<Row>> = []
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
@@ -222,10 +231,22 @@ export class DataTableRootNode<
   private tooltipOpenTimer: ReturnType<typeof setTimeout> | null = null
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
   private editingState: DataTableEditingState<Row> | null = null
+  private keyboardFocusActive = false
+  private summaryState: DataTableSummaryState = {
+    values: {},
+    rowCount: 0,
+    revision: 0,
+    source: 'client',
+    loading: false,
+  }
+  private serverSummaryRequestId = 0
+  private serverSearchRequestId = 0
+  private serverSearchCursor: string | undefined
   private gestureStartZoomValue = 1
   private gestureActive = false
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
+  private readonly handleKeyboardNavigationKeydown = (event: KeyboardEvent) => this.handleKeyboardNavigationKeydownEvent(event)
   private readonly handleTextSelectionKeydown = (event: KeyboardEvent) => this.handleTextSelectionKeydownEvent(event)
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
@@ -259,6 +280,7 @@ export class DataTableRootNode<
       performance: props.performance,
     })
     this.viewPipeline = new DataTableViewPipeline(this.store)
+    this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
     this.textSelection.configure(resolveCoreTextSelectionOptions(props.textSelection))
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
@@ -269,12 +291,15 @@ export class DataTableRootNode<
     })
     this.setupEvents()
     this.setupTextSelectionKeyboardEvents()
+    this.setupKeyboardNavigationEvents()
     this.setupTooltipKeyboardEvents()
     this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
+      this.serverRowModel.dispose()
       this.teardownTrackpadGestureEvents()
       this.teardownTextSelectionKeyboardEvents()
+      this.teardownKeyboardNavigationEvents()
       this.clearScrollbarHideTimer()
       this.clearTooltipTimers()
       this.teardownEditingKeyboardEvents()
@@ -294,8 +319,17 @@ export class DataTableRootNode<
       autosizeColumn: columnId => this.autosizeColumn(columnId),
       autosizeColumns: columnIds => this.autosizeColumns(columnIds),
       resetColumnWidth: columnId => this.resetColumnWidth(columnId),
+      getColumnState: () => this.getColumnState(),
+      setColumnState: state => this.setColumnState(state),
+      resetColumnState: () => this.resetColumnState(),
+      hideColumn: columnId => this.hideColumn(columnId),
+      showColumn: columnId => this.showColumn(columnId),
+      pinColumn: (columnId, side) => this.pinColumn(columnId, side),
+      unpinColumn: columnId => this.unpinColumn(columnId),
       scrollTo: (x, y) => this.setScroll(x, y),
       scrollToRow: rowIndex => this.setScroll(this.scrollX, rowIndex * this.rowHeight),
+      focusCell: (rowId, columnId) => this.focusCell(rowId, columnId),
+      moveActiveCell: (direction, options) => this.moveActiveCell(direction, options),
       getZoom: () => this.getZoomState(),
       setZoom: value => this.setZoom(value),
       resetZoom: () => this.resetZoom(),
@@ -508,9 +542,13 @@ export class DataTableRootNode<
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
     this.viewport = this.createViewport()
+    this.syncServerRowModel()
     const revisionBeforeRangeLoad = this.store.takeRevision()
-    void this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => {
-      if (this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
+    const rangeLoader = this.isServerRowModelActive()
+      ? this.serverRowModel.ensureRange(this.viewport.rowRange)
+      : this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => true)
+    void rangeLoader.then(fresh => {
+      if (fresh && this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
       return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
@@ -538,6 +576,8 @@ export class DataTableRootNode<
     if (changedKeys.includes('store') && this.props.store && this.props.store !== this.store) {
       this.store = this.props.store
       this.viewPipeline = new DataTableViewPipeline(this.store)
+      this.serverRowModel.dispose()
+      this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
       this.scrollX = 0
       this.scrollY = 0
       this.hoverTarget = null
@@ -545,6 +585,13 @@ export class DataTableRootNode<
       this.selectionActive = false
       this.selectionDragState = null
       this.cancelEdit()
+    }
+    if (changedKeys.includes('columnState')) {
+      this.columnStateOverride = null
+      this.widthOverrides.clear()
+      if (this.props.columnState.order.length > 0) {
+        this.viewPipeline.setColumnOrder(this.props.columnState.order, this.getColumnStateInputColumns())
+      }
     }
     if (
       changedKeys.includes('selection')
@@ -609,6 +656,7 @@ export class DataTableRootNode<
       width: nextWidth,
       previousWidth,
     })
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
     return true
   }
@@ -621,6 +669,7 @@ export class DataTableRootNode<
     if (!column) return false
 
     this.widthOverrides.set(columnId, autosizeDataTableColumn(column, this.store))
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
     return true
   }
@@ -635,6 +684,7 @@ export class DataTableRootNode<
         this.widthOverrides.set(column.id, autosizeDataTableColumn(column, this.store))
       }
     }
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
   }
 
@@ -643,8 +693,101 @@ export class DataTableRootNode<
    */
   resetColumnWidth(columnId: string): boolean {
     const changed = this.widthOverrides.delete(columnId)
-    if (changed) this.refresh(['layout', 'columns'])
+    if (changed) {
+      this.emitColumnStateChange()
+      this.refresh(['layout', 'columns'])
+    }
     return changed
+  }
+
+  /**
+   * Возвращает сохраненное состояние колонок с учетом runtime override.
+   */
+  private getColumnState(): DataTableResolvedColumnState {
+    const merged = this.resolveMergedColumnState()
+    const widths: Record<string, number> = { ...merged.widths }
+    for (const [columnId, width] of this.widthOverrides) widths[columnId] = width
+    const runtimeOrder = this.viewPipeline.getState().columnOrder
+    return {
+      widths,
+      order: runtimeOrder.length > 0 ? [...runtimeOrder] : [...merged.order],
+      hidden: [...merged.hidden],
+      pinned: {
+        left: [...merged.pinned.left],
+        right: [...merged.pinned.right],
+      },
+    }
+  }
+
+  /**
+   * Программно заменяет состояние ширин, порядка, скрытия и pinning колонок.
+   */
+  private setColumnState(state: DataTableColumnState): void {
+    this.columnStateOverride = cloneColumnStateInput(state)
+    this.widthOverrides.clear()
+    this.viewPipeline.setColumnOrder(state.order ?? [], this.getColumnStateInputColumns(state))
+    this.resolvedColumns = this.resolveColumns()
+    this.emitColumnStateChange()
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  /**
+   * Сбрасывает runtime-состояние колонок к props/default.
+   */
+  private resetColumnState(): void {
+    this.columnStateOverride = null
+    this.widthOverrides.clear()
+    this.viewPipeline.resetColumnOrder()
+    this.resolvedColumns = this.resolveColumns()
+    this.emitColumnStateChange()
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  /**
+   * Скрывает колонку без удаления ее definition.
+   */
+  private hideColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.hidden = [...new Set([...(state.hidden ?? []), columnId])]
+    this.setColumnState(state)
+  }
+
+  /**
+   * Показывает ранее скрытую колонку.
+   */
+  private showColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.hidden = (state.hidden ?? []).filter(id => id !== columnId)
+    this.setColumnState(state)
+  }
+
+  /**
+   * Закрепляет колонку слева или справа.
+   */
+  private pinColumn(columnId: string, side: DataTableResolvedColumn<Row>['pinned']): void {
+    if (!side) return
+    const state = this.toColumnStateInput(this.getColumnState())
+    const pinned = {
+      left: (state.pinned?.left ?? []).filter(id => id !== columnId),
+      right: (state.pinned?.right ?? []).filter(id => id !== columnId),
+    }
+    pinned[side] = [...pinned[side], columnId]
+    state.pinned = pinned
+    this.setColumnState(state)
+  }
+
+  /**
+   * Снимает закрепление с колонки.
+   */
+  private unpinColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.pinned = {
+      left: (state.pinned?.left ?? []).filter(id => id !== columnId),
+      right: (state.pinned?.right ?? []).filter(id => id !== columnId),
+    }
+    this.setColumnState(state)
   }
 
   /**
@@ -676,11 +819,16 @@ export class DataTableRootNode<
         overscanRows: this.props.overscanRows,
         overscanColumns: this.props.overscanColumns,
         interaction: this.props.interaction,
+        selection: this.props.selection,
+        clipboard: this.props.clipboard,
         view: this.props.view,
         scrollbars: this.props.scrollbars,
         tooltip: this.props.tooltip,
+        textSelection: this.props.textSelection,
         zoom: this.props.zoom,
         editing: this.props.editing,
+        keyboardNavigation: this.props.keyboardNavigation,
+        columnState: this.getColumnState(),
         performance: this.props.performance,
       }
     }
@@ -831,7 +979,7 @@ export class DataTableRootNode<
     if (this.deltaFlushQueued) return
 
     this.deltaFlushQueued = true
-    queueMicrotask(() => this.flushDeltasWithinBudget())
+    this.scheduleDeltaFlush()
   }
 
   /**
@@ -875,8 +1023,19 @@ export class DataTableRootNode<
 
     if (this.pendingDeltas.length > 0 && useBudget) {
       this.deltaFlushQueued = true
-      setTimeout(() => this.flushDeltasWithinBudget(), 0)
+      this.scheduleDeltaFlush()
     }
+  }
+
+  /**
+   * Планирует применение server/SSE deltas не чаще одного раза за frame.
+   */
+  private scheduleDeltaFlush(): void {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => this.flushDeltasWithinBudget())
+      return
+    }
+    setTimeout(() => this.flushDeltasWithinBudget(), 0)
   }
 
   /**
@@ -972,6 +1131,7 @@ export class DataTableRootNode<
   private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
     this.viewPipeline.setSearch(query)
     this.emitViewQuery('search')
+    this.requestServerSearchIfNeeded(0)
     this.refresh(['data', 'layout'])
   }
 
@@ -980,6 +1140,8 @@ export class DataTableRootNode<
    */
   private clearSearch(): void {
     this.viewPipeline.clearSearch()
+    this.serverSearchRequestId += 1
+    this.serverSearchCursor = undefined
     this.emitViewQuery('search')
     this.refresh(['data', 'layout'])
   }
@@ -988,6 +1150,7 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
+    this.requestServerSearchIfNeeded()
     const match = this.viewPipeline.findNext()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -999,6 +1162,7 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
+    this.requestServerSearchIfNeeded()
     const match = this.viewPipeline.findPrevious()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -1062,8 +1226,13 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг reorderColumns для DataTableRootNode.
    */
   private reorderColumns(payload: Parameters<DataTableRootApi<Row>['reorderColumns']>[0]): void {
-    const next = this.viewPipeline.reorderColumns(payload, this.props.columns)
+    const next = this.viewPipeline.reorderColumns(payload, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: next.order,
+    }
     this.props.onColumnOrderChange?.(next)
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1072,7 +1241,11 @@ export class DataTableRootNode<
    * Обновляет значение состояния DataTableRootNode.
    */
   private setColumnOrder(order: Array<string>, reason: 'drag' | 'api' = 'api'): void {
-    const nextOrder = this.viewPipeline.setColumnOrder(order, this.props.columns)
+    const nextOrder = this.viewPipeline.setColumnOrder(order, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: nextOrder,
+    }
     this.props.onColumnOrderChange?.({
       columnId: '',
       fromIndex: -1,
@@ -1080,6 +1253,7 @@ export class DataTableRootNode<
       order: nextOrder,
       reason,
     })
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1089,6 +1263,9 @@ export class DataTableRootNode<
    */
   private resetColumnOrder(): void {
     this.viewPipeline.resetColumnOrder()
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.order = []
+    this.columnStateOverride = state
     this.props.onColumnOrderChange?.({
       columnId: '',
       fromIndex: -1,
@@ -1096,6 +1273,7 @@ export class DataTableRootNode<
       order: [],
       reason: 'reset',
     })
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1196,6 +1374,86 @@ export class DataTableRootNode<
   }
 
   /**
+   * Возвращает query для авторитетной server-side модели.
+   */
+  private resolveServerSourceQuery(): DataTableQueryState {
+    return this.viewPipeline.getQuery()
+  }
+
+  /**
+   * Возвращает true, когда lazy/server source должен быть авторитетным view.
+   */
+  private isServerRowModelActive(): boolean {
+    const options = this.props.view.serverRowModel
+    if (!options || !options.enabled) return false
+    if (options.authoritative) return true
+    const state = this.viewPipeline.getState()
+    return this.store.rowCount > this.props.performance.maxClientRows
+      || state.mode.sorting === 'server'
+      || state.mode.filtering === 'server'
+      || state.mode.search === 'server'
+      || state.mode.grouping === 'server'
+  }
+
+  /**
+   * Синхронизирует server-side query, summary и SSE subscription.
+   */
+  private syncServerRowModel(): void {
+    const options = this.props.view.serverRowModel
+    if (!options || !options.enabled || !this.isServerRowModelActive()) {
+      this.serverRowModel.dispose()
+      return
+    }
+
+    const query = this.resolveServerSourceQuery()
+    const changed = this.serverRowModel.sync(query, { subscribe: options.subscribe })
+    if (changed) this.props.onServerQueryChange?.(query)
+    if (options.loadSummary && (changed || this.summaryState.source !== 'server')) this.requestServerSummary()
+  }
+
+  /**
+   * Запрашивает summary у server-side source с защитой от устаревших ответов.
+   */
+  private requestServerSummary(): void {
+    const requestId = ++this.serverSummaryRequestId
+    this.summaryState = {
+      values: { ...this.summaryState.values },
+      rowCount: this.store.rowCount,
+      revision: requestId,
+      source: 'server',
+      loading: true,
+    }
+    this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+
+    void this.serverRowModel.loadSummary().then(summary => {
+      if (!summary || requestId !== this.serverSummaryRequestId) return
+      this.summaryState = summary
+      this.props.onSummaryChange?.({ ...summary, values: { ...summary.values } })
+      this.refresh(['summary'])
+    })
+  }
+
+  /**
+   * Делегирует поиск server-side source, когда локальный pipeline не должен сканировать строки.
+   */
+  private requestServerSearchIfNeeded(activeIndex = this.viewPipeline.getSearchState().activeIndex): void {
+    const search = this.viewPipeline.getSearchState().query
+    if (!search.text || !this.isServerRowModelActive()) return
+
+    this.syncServerRowModel()
+    const requestId = ++this.serverSearchRequestId
+    void this.serverRowModel.search(search, this.serverSearchCursor).then(result => {
+      if (!result || requestId !== this.serverSearchRequestId) return
+      this.serverSearchCursor = result.cursor
+      this.viewPipeline.setServerSearchResult(result, Math.max(0, activeIndex))
+      const match = this.viewPipeline.getSearchState().activeMatch
+      if (match) this.scrollToSearchMatch(match)
+      this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+      this.refresh(['data', 'interaction'])
+    })
+  }
+
+  /**
    * Синхронизирует актуальное состояние DataTableRootNode.
    */
   private refresh(kinds: Array<string> = ['data', 'layout', 'viewport']): void {
@@ -1247,7 +1505,12 @@ export class DataTableRootNode<
    * Нормализует и возвращает итоговое значение DataTableRootNode.
    */
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
-    const columns = resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
+    const columns = resolveDataTableColumns(
+      this.viewPipeline.orderColumns(this.getColumnStateInputColumns()),
+      this.resolveEffectivePinnedColumns(),
+      this.createEffectiveWidthOverrides(),
+      this.store,
+    )
     const scale = this.zoomColumnScale
     const resolved = scale === 1
       ? columns
@@ -1261,6 +1524,127 @@ export class DataTableRootNode<
     this.columnIndexById.clear()
     resolved.forEach((column, index) => this.columnIndexById.set(column.id, index))
     return resolved
+  }
+
+  /**
+   * Возвращает columns input с примененными hidden/pinned state override.
+   */
+  private getColumnStateInputColumns(state: DataTableColumnState = this.resolveMergedColumnState()): Array<DataTableColumnInput<Row>> {
+    const hidden = new Set(state.hidden ?? [])
+    const pinned = this.resolvePinnedSideByColumn(state)
+    const columns = this.props.columns
+      .filter(column => !hidden.has(column.id))
+      .map(column => {
+        const side = pinned.get(column.id)
+        return side ? { ...column, pinned: side } : column
+      })
+    return this.orderColumnInputsByState(columns, state.order ?? [])
+  }
+
+  /**
+   * Возвращает pinnedColumns с учетом columnState.
+   */
+  private resolveEffectivePinnedColumns(): DataTableRootResolvedProps<Row>['pinnedColumns'] {
+    const state = this.resolveMergedColumnState()
+    if (state.pinned.left.length > 0 || state.pinned.right.length > 0) {
+      return {
+        left: [...state.pinned.left],
+        right: [...state.pinned.right],
+      }
+    }
+    return this.props.pinnedColumns
+  }
+
+  /**
+   * Возвращает pinnedRows с учетом группировочной политики.
+   */
+  private resolveEffectivePinnedRows(): DataTableRootResolvedProps<Row>['pinnedRows'] {
+    const grouping = this.props.view.grouping
+    const pinnedPolicy = this.props.view.groupingPinnedRows
+    if (grouping && grouping.enabled && pinnedPolicy && pinnedPolicy.global === 'hide') {
+      return { top: [], bottom: [] }
+    }
+    return this.props.pinnedRows
+  }
+
+  /**
+   * Собирает width overrides из props columnState и runtime resize map.
+   */
+  private createEffectiveWidthOverrides(): Map<string, number> {
+    const widths = new Map<string, number>()
+    const state = this.resolveMergedColumnState()
+    for (const [columnId, width] of Object.entries(state.widths)) widths.set(columnId, width)
+    for (const [columnId, width] of this.widthOverrides) widths.set(columnId, width)
+    return widths
+  }
+
+  /**
+   * Объединяет controlled props и локальное runtime состояние колонок.
+   */
+  private resolveMergedColumnState(): DataTableResolvedColumnState {
+    const base = this.props.columnState
+    const override = this.columnStateOverride
+    return {
+      widths: {
+        ...base.widths,
+        ...(override?.widths ?? {}),
+      },
+      order: override?.order ? [...override.order] : [...base.order],
+      hidden: override?.hidden ? [...override.hidden] : [...base.hidden],
+      pinned: {
+        left: override?.pinned?.left ? [...override.pinned.left] : [...base.pinned.left],
+        right: override?.pinned?.right ? [...override.pinned.right] : [...base.pinned.right],
+      },
+    }
+  }
+
+  /**
+   * Приводит resolved column state к публичному input state.
+   */
+  private toColumnStateInput(state: DataTableResolvedColumnState): DataTableColumnState {
+    return {
+      widths: { ...state.widths },
+      order: [...state.order],
+      hidden: [...state.hidden],
+      pinned: {
+        left: [...state.pinned.left],
+        right: [...state.pinned.right],
+      },
+    }
+  }
+
+  /**
+   * Публикует изменение columnState.
+   */
+  private emitColumnStateChange(): void {
+    this.props.onColumnStateChange?.(this.getColumnState())
+  }
+
+  /**
+   * Собирает быстрый lookup side для pinned columns.
+   */
+  private resolvePinnedSideByColumn(state: DataTableColumnState): Map<string, DataTableResolvedColumn<Row>['pinned']> {
+    const result = new Map<string, DataTableResolvedColumn<Row>['pinned']>()
+    for (const id of state.pinned?.left ?? []) result.set(id, 'left')
+    for (const id of state.pinned?.right ?? []) result.set(id, 'right')
+    return result
+  }
+
+  /**
+   * Стабильно сортирует column inputs по сохраненному order.
+   */
+  private orderColumnInputsByState(
+    columns: Array<DataTableColumnInput<Row>>,
+    order: Array<string>,
+  ): Array<DataTableColumnInput<Row>> {
+    if (order.length === 0) return columns
+    const rank = new Map(order.map((id, index) => [id, index]))
+    return [...columns].sort((left, right) => {
+      const leftRank = rank.get(left.id) ?? Number.MAX_SAFE_INTEGER
+      const rightRank = rank.get(right.id) ?? Number.MAX_SAFE_INTEGER
+      if (leftRank !== rightRank) return leftRank - rightRank
+      return columns.indexOf(left) - columns.indexOf(right)
+    })
   }
 
   /**
@@ -1278,6 +1662,7 @@ export class DataTableRootNode<
    * Создает runtime-сущность DataTableRootNode.
    */
   private createViewport(): DataTableViewport {
+    const pinnedRows = this.resolveEffectivePinnedRows()
     return createDataTableViewport({
       width: this.width || this.props.width,
       height: this.height || this.props.height,
@@ -1287,8 +1672,8 @@ export class DataTableRootNode<
       overscanColumns: this.props.overscanColumns,
       rowCount: this.viewPipeline.rowCount,
       columns: this.resolvedColumns,
-      pinnedTopCount: this.props.pinnedRows.top?.length ?? 0,
-      pinnedBottomCount: this.props.pinnedRows.bottom?.length ?? 0,
+      pinnedTopCount: pinnedRows.top?.length ?? 0,
+      pinnedBottomCount: pinnedRows.bottom?.length ?? 0,
       scrollX: this.scrollX,
       scrollY: this.scrollY,
     })
@@ -1335,6 +1720,7 @@ export class DataTableRootNode<
 
     this.on('mousedown', event => {
       this.trackTooltipModifiers(event)
+      this.keyboardFocusActive = true
       const [x, y] = this.trackPointerPosition(event)
       const scrollbarAxis = this.hitScrollbar(x, y)
       if (scrollbarAxis) {
@@ -1493,6 +1879,117 @@ export class DataTableRootNode<
       this.releasePointerCapture(event)
       event.cancelBubble = true
     })
+  }
+
+  /**
+   * Подключает keyboard navigation, пока таблица имеет runtime focus.
+   */
+  private setupKeyboardNavigationEvents(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('keydown', this.handleKeyboardNavigationKeydown)
+  }
+
+  /**
+   * Отключает keyboard navigation.
+   */
+  private teardownKeyboardNavigationEvents(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('keydown', this.handleKeyboardNavigationKeydown)
+  }
+
+  /**
+   * Обрабатывает клавиатурную навигацию active cell.
+   */
+  private handleKeyboardNavigationKeydownEvent(event: KeyboardEvent): void {
+    const options = this.props.keyboardNavigation
+    if (!options || !options.enabled || !this.keyboardFocusActive) return
+    if (isEditableKeyboardTarget(event.target)) return
+
+    if (this.editingState) {
+      if (event.key === 'Escape' && this.props.editing !== false && this.props.editing.cancelOnEscape) {
+        this.cancelEdit()
+        this.emitKeyboardAction({ type: 'cancel', key: event.key })
+        event.preventDefault()
+      } else if (event.key === 'Enter' && this.props.editing !== false && this.props.editing.commitOnEnter) {
+        void this.commitEdit()
+        this.emitKeyboardAction({ type: 'commit', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (options.ctrlMetaShortcuts && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+      if (this.selectAllByKeyboard()) {
+        this.emitKeyboardAction({ type: 'select-all', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    const extend = !!event.shiftKey && options.shiftSelection
+    const direction = this.resolveKeyboardDirection(event, options)
+    if (direction) {
+      if (this.moveActiveCell(direction, { extend })) {
+        this.emitKeyboardAction({ type: 'move', key: event.key, direction })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'F2' || (event.key === 'Enter' && options.enter === 'edit')) {
+      const active = this.selection?.activeCell
+      if (active && this.startEdit(active.rowId, active.columnId)) {
+        this.emitKeyboardAction({ type: 'edit', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'Enter' && options.enter === 'move') {
+      if (this.moveActiveCell('down', { extend: false })) {
+        this.emitKeyboardAction({ type: 'move', key: event.key, direction: 'down' })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'Escape' && this.selection?.previewRange) {
+      this.commitSelectionState({ ...this.selection, previewRange: null }, { emitActive: false })
+      this.emitKeyboardAction({ type: 'cancel', key: event.key })
+      event.preventDefault()
+    }
+  }
+
+  /**
+   * Возвращает направление keyboard navigation для события.
+   */
+  private resolveKeyboardDirection(
+    event: KeyboardEvent,
+    options: Exclude<DataTableRootResolvedProps<Row>['keyboardNavigation'], false>,
+  ): DataTableActiveCellDirection | null {
+    if (options.arrows) {
+      if (event.key === 'ArrowUp') return 'up'
+      if (event.key === 'ArrowDown') return 'down'
+      if (event.key === 'ArrowLeft') return 'left'
+      if (event.key === 'ArrowRight') return 'right'
+    }
+    if (options.tab && event.key === 'Tab') return event.shiftKey ? 'left' : 'right'
+    if (options.pageKeys) {
+      if (event.key === 'PageUp') return 'page-up'
+      if (event.key === 'PageDown') return 'page-down'
+    }
+    if (options.homeEnd) {
+      if (event.key === 'Home') return 'home'
+      if (event.key === 'End') return 'end'
+    }
+    return null
+  }
+
+  /**
+   * Публикует keyboard action callback.
+   */
+  private emitKeyboardAction(action: DataTableKeyboardAction): void {
+    this.props.onKeyboardAction?.(action)
   }
 
   /**
@@ -1792,8 +2289,13 @@ export class DataTableRootNode<
       toIndex,
       order,
       reason: 'drag',
-    }, this.props.columns)
+    }, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: next.order,
+    }
     this.props.onColumnOrderChange?.(next)
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1871,8 +2373,9 @@ export class DataTableRootNode<
    */
   private renderGrid(): void {
     const headerY = 0
-    const topRows = this.props.pinnedRows.top ?? []
-    const bottomRows = this.props.pinnedRows.bottom ?? []
+    const pinnedRows = this.resolveEffectivePinnedRows()
+    const topRows = pinnedRows.top ?? []
+    const bottomRows = pinnedRows.bottom ?? []
     this.nextVisibleCellKeys = new Set()
     this.cellEnterRenderCount = 0
     this.renderPartitionedRowZone('header', [{} as Row], headerY, this.headerHeight, false)
@@ -2995,9 +3498,10 @@ export class DataTableRootNode<
     if (grouping.footerPlacement !== 'pinned-bottom' && grouping.footerPlacement !== 'both') return
 
     const rows = this.store.getRows()
+    const pinnedRows = this.resolveEffectivePinnedRows()
     const rect = {
       x: this.viewport.bodyX,
-      y: Math.max(this.viewport.bodyY, this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight - 124),
+      y: Math.max(this.viewport.bodyY, this.height - (pinnedRows.bottom?.length ?? 0) * this.rowHeight - 124),
       width: this.viewport.bodyWidth,
       height: 112,
     }
@@ -3491,7 +3995,7 @@ export class DataTableRootNode<
     if (zone === 'header') return { top: 0, bottom: this.headerHeight }
     if (zone === 'pinned-top') return { top: this.headerHeight, bottom: this.viewport.bodyY }
     if (zone === 'pinned-bottom') {
-      const bottomRows = this.props.pinnedRows.bottom?.length ?? 0
+      const bottomRows = this.resolveEffectivePinnedRows().bottom?.length ?? 0
       return { top: this.height - bottomRows * this.rowHeight, bottom: this.height }
     }
     return {
@@ -3806,6 +4310,148 @@ export class DataTableRootNode<
    */
   private selectRange(range: DataTableSelectionRange, options: DataTableSelectionUpdateOptions = {}): void {
     this.applySelectionRange(this.normalizeSelectionRange(range), options)
+  }
+
+  /**
+   * Фокусирует конкретную ячейку по rowId + columnId.
+   */
+  private focusCell(rowId: DataTableRowId, columnId: string): boolean {
+    this.selectCell(rowId, columnId, { focus: true, scrollIntoView: true })
+    const active = this.selection?.activeCell
+    return !!active
+      && active.rowId === rowId
+      && active.columnId === columnId
+  }
+
+  /**
+   * Перемещает active cell и при необходимости расширяет selection.
+   */
+  private moveActiveCell(direction: DataTableActiveCellDirection, options: { extend?: boolean } = {}): boolean {
+    const current = this.resolveActiveCellForNavigation()
+    if (!current) return false
+    const target = this.resolveNavigationTarget(current, direction)
+    if (!target) return false
+
+    if (options.extend && this.selection?.anchor) {
+      this.selectRange(this.createSelectionRange(this.selection.anchor, target, 'cell'), {
+        append: false,
+        focus: true,
+        scrollIntoView: true,
+      })
+    } else {
+      this.applySelectionRange(this.createSelectionRange(target, target, 'cell'), {
+        append: false,
+        focus: true,
+      }, target)
+    }
+
+    const column = this.resolvedColumns[target.columnIndex]
+    if (column) this.scrollCellIntoView(target.rowIndex, column)
+    return true
+  }
+
+  /**
+   * Выбирает допустимый полный диапазон через Ctrl/Cmd+A.
+   */
+  private selectAllByKeyboard(): boolean {
+    if (this.props.selection === false || !this.props.selection.enabled || this.resolvedColumns.length === 0 || this.viewPipeline.rowCount === 0) {
+      return false
+    }
+
+    const firstRow = this.resolveNavigableRowIndex(0, 1)
+    const lastRow = this.resolveNavigableRowIndex(this.viewPipeline.rowCount - 1, -1)
+    if (firstRow === undefined || lastRow === undefined) return false
+
+    const firstColumn = this.resolvedColumns[0]
+    const lastColumn = this.resolvedColumns[this.resolvedColumns.length - 1]
+    if (!firstColumn || !lastColumn) return false
+
+    const start: DataTableSelectionAnchor = {
+      rowId: this.viewPipeline.getRowIdAt(firstRow) ?? firstRow,
+      rowIndex: firstRow,
+      columnId: firstColumn.id,
+      columnIndex: 0,
+    }
+    const end: DataTableSelectionAnchor = {
+      rowId: this.viewPipeline.getRowIdAt(lastRow) ?? lastRow,
+      rowIndex: lastRow,
+      columnId: lastColumn.id,
+      columnIndex: this.resolvedColumns.length - 1,
+    }
+    const mode = this.props.selection.mode
+    const unit: DataTableSelectionUnit = mode === 'row'
+      ? 'row'
+      : mode === 'column'
+        ? 'column'
+        : 'cell'
+    this.applySelectionRange(this.createSelectionRange(start, end, unit), { focus: true }, start)
+    return true
+  }
+
+  /**
+   * Возвращает active cell или первый видимый data cell.
+   */
+  private resolveActiveCellForNavigation(): DataTableSelectionAnchor | null {
+    if (this.selection?.activeCell) return this.selection.activeCell
+
+    const rowIndex = this.resolveNavigableRowIndex(this.viewport.rowRange.start, 1)
+    const column = this.resolvedColumns[0]
+    if (rowIndex === undefined || !column) return null
+    return {
+      rowId: this.viewPipeline.getRowIdAt(rowIndex) ?? rowIndex,
+      rowIndex,
+      columnId: column.id,
+      columnIndex: 0,
+    }
+  }
+
+  /**
+   * Считает следующий target для keyboard navigation.
+   */
+  private resolveNavigationTarget(
+    current: DataTableSelectionAnchor,
+    direction: DataTableActiveCellDirection,
+  ): DataTableSelectionAnchor | null {
+    let rowIndex = current.rowIndex
+    let columnIndex = current.columnIndex
+    const pageRows = Math.max(1, Math.floor(this.viewport.bodyHeight / this.rowHeight) - 1)
+
+    if (direction === 'up') rowIndex -= 1
+    else if (direction === 'down') rowIndex += 1
+    else if (direction === 'page-up') rowIndex -= pageRows
+    else if (direction === 'page-down') rowIndex += pageRows
+    else if (direction === 'left') columnIndex -= 1
+    else if (direction === 'right') columnIndex += 1
+    else if (direction === 'home') columnIndex = 0
+    else if (direction === 'end') columnIndex = this.resolvedColumns.length - 1
+
+    rowIndex = clampInteger(rowIndex, 0, Math.max(0, this.viewPipeline.rowCount - 1))
+    columnIndex = clampInteger(columnIndex, 0, Math.max(0, this.resolvedColumns.length - 1))
+    const rowDirection = rowIndex >= current.rowIndex ? 1 : -1
+    const nextRowIndex = this.resolveNavigableRowIndex(rowIndex, rowDirection)
+    const column = this.resolvedColumns[columnIndex]
+    if (nextRowIndex === undefined || !column) return null
+
+    return {
+      rowId: this.viewPipeline.getRowIdAt(nextRowIndex) ?? nextRowIndex,
+      rowIndex: nextRowIndex,
+      columnId: column.id,
+      columnIndex,
+    }
+  }
+
+  /**
+   * Пропускает group/footer rows при keyboard navigation.
+   */
+  private resolveNavigableRowIndex(start: number, step: 1 | -1): number | undefined {
+    if (this.viewPipeline.rowCount <= 0) return undefined
+    let index = clampInteger(start, 0, this.viewPipeline.rowCount - 1)
+    while (index >= 0 && index < this.viewPipeline.rowCount) {
+      const viewRow = this.viewPipeline.getViewRowAt(index)
+      if (!viewRow || viewRow.kind === 'data') return index
+      index += step
+    }
+    return undefined
   }
 
   /**
@@ -4693,16 +5339,17 @@ export class DataTableRootNode<
    * Нормализует и возвращает итоговое значение DataTableRootNode.
    */
   private resolvePinnedEditTarget(rowId: DataTableRowId, column: DataTableResolvedColumn<Row>): DataTableInteractionTarget<Row> | null {
+    const pinnedRows = this.resolveEffectivePinnedRows()
     const zones: Array<{ zone: 'pinned-top' | 'pinned-bottom'; rows: Array<Row>; y: (index: number) => number }> = [
       {
         zone: 'pinned-top',
-        rows: this.props.pinnedRows.top ?? [],
+        rows: pinnedRows.top ?? [],
         y: index => this.headerHeight + index * this.rowHeight,
       },
       {
         zone: 'pinned-bottom',
-        rows: this.props.pinnedRows.bottom ?? [],
-        y: index => this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight + index * this.rowHeight,
+        rows: pinnedRows.bottom ?? [],
+        y: index => this.height - (pinnedRows.bottom?.length ?? 0) * this.rowHeight + index * this.rowHeight,
       },
     ]
 
@@ -5096,7 +5743,8 @@ export class DataTableRootNode<
       }
     }
 
-    const topRows = this.props.pinnedRows.top ?? []
+    const pinnedRows = this.resolveEffectivePinnedRows()
+    const topRows = pinnedRows.top ?? []
     if (y >= this.headerHeight && y < this.viewport.bodyY) {
       const localIndex = Math.floor((y - this.headerHeight) / this.rowHeight)
       const row = topRows[localIndex]
@@ -5115,7 +5763,7 @@ export class DataTableRootNode<
       }
     }
 
-    const bottomRows = this.props.pinnedRows.bottom ?? []
+    const bottomRows = pinnedRows.bottom ?? []
     const bottomStart = this.height - bottomRows.length * this.rowHeight
     if (bottomRows.length > 0 && y >= bottomStart && y <= this.height) {
       const localIndex = Math.floor((y - bottomStart) / this.rowHeight)
@@ -5510,6 +6158,31 @@ export class DataTableRootNode<
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(Number.isFinite(value) ? value : min)))
+}
+
+function cloneColumnStateInput(state: DataTableColumnState): DataTableColumnState {
+  return {
+    widths: state.widths ? { ...state.widths } : undefined,
+    order: state.order ? [...state.order] : undefined,
+    hidden: state.hidden ? [...state.hidden] : undefined,
+    pinned: state.pinned
+      ? {
+          left: state.pinned.left ? [...state.pinned.left] : undefined,
+          right: state.pinned.right ? [...state.pinned.right] : undefined,
+        }
+      : undefined,
+  }
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select'
 }
 
 function resolveCoreTextSelectionOptions(

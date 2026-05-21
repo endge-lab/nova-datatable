@@ -2,9 +2,10 @@ import { bench, describe } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
+import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
-import type { DataTableSelectionRange } from '@/model/types/datatable.types'
+import type { DataTableQueryState, DataTableSelectionRange } from '@/model/types/datatable.types'
 import { normalizeDataTablePerformance, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 
 interface BenchRow {
@@ -157,6 +158,37 @@ describe('NovaDataTable benchmarks', () => {
     pipeline.setFilter('status', { operator: 'equals', value: 'active' })
     pipeline.getQuery()
   })
+
+  bench('10M server row model range summary and search contract', async () => {
+    const store = createDataTableStore<BenchRow>({
+      rowKey: 'id',
+      source: {
+        rowCount: 10_000_000,
+        loadRange: range => rows(range.end - range.start, range.start),
+        loadSummary: () => ({ count: 10_000_000, amount: 500_000 }),
+        search: () => ({
+          matches: [{ rowId: 'row-500000', rowIndex: 500_000, columnId: 'name', value: 'Customer 500000', ranges: [{ start: 0, end: 8 }] }],
+          total: 1,
+        }),
+        resolveRowIndex: rowId => Number(String(rowId).replace('row-', '')),
+      },
+    })
+    const query: DataTableQueryState = {
+      sort: [{ columnId: 'amount', direction: 'desc' }],
+      filters: [{ columnId: 'status', operator: 'equals', value: 'active' }],
+      search: { text: 'Customer 500000', scope: 'cells', columns: ['name'] },
+      rowOrder: [],
+      columnOrder: [],
+    }
+    const model = new DataTableServerRowModel(store, delta => store.applyDeltaBatch(delta))
+
+    model.sync(query, { subscribe: false })
+    await model.ensureRange({ start: 500_000, end: 500_120 })
+    await model.loadSummary()
+    await model.search({ text: 'Customer 500000', scope: 'cells', columns: ['name'] })
+    await model.resolveRowIndex('row-500000')
+    model.snapshot()
+  }, { iterations: 20 })
 
   bench('100k client multi-sort', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(100_000) })

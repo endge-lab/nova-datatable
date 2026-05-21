@@ -7,11 +7,15 @@ import type {
   DataTableResolvedTextPerformanceOptions,
   DataTableEditingOptions,
   DataTableEditTrigger,
+  DataTableColumnState,
+  DataTableKeyboardNavigationOptions,
   DataTableScrollbarAxisOptions,
+  DataTableResolvedColumnState,
   DataTableResolvedInteractionOptions,
   DataTableResolvedClipboardOptions,
   DataTableResolvedPerformanceOptions,
   DataTableResolvedEditingOptions,
+  DataTableResolvedKeyboardNavigationOptions,
   DataTableResolvedSelectionOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
@@ -59,6 +63,8 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   textSelection: { type: 'any' },
   zoom: { type: 'any' },
   editing: { type: 'any' },
+  keyboardNavigation: { type: 'any' },
+  columnState: { type: 'object' },
   performance: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
@@ -73,10 +79,13 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   pinnedBottomTemplate: { type: 'function' },
   onViewportChange: { type: 'function' },
   onColumnResize: { type: 'function' },
+  onColumnStateChange: { type: 'function' },
   onSortChange: { type: 'function' },
   onFilterChange: { type: 'function' },
   onSearchChange: { type: 'function' },
   onQueryChange: { type: 'function' },
+  onServerQueryChange: { type: 'function' },
+  onSummaryChange: { type: 'function' },
   onRowOrderChange: { type: 'function' },
   onColumnOrderChange: { type: 'function' },
   onGroupingChange: { type: 'function' },
@@ -94,6 +103,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   onPasteError: { type: 'function' },
   onZoomChange: { type: 'function' },
   onEditingChange: { type: 'function' },
+  onKeyboardAction: { type: 'function' },
 } as const
 
 /**
@@ -140,6 +150,8 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     textSelection: normalizeDataTableTextSelection(props.textSelection),
     zoom: normalizeDataTableZoom(props.zoom),
     editing: normalizeDataTableEditing(props.editing),
+    keyboardNavigation: normalizeDataTableKeyboardNavigation(props.keyboardNavigation),
+    columnState: normalizeDataTableColumnState(props.columnState),
     performance: normalizeDataTablePerformance(props.performance),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
@@ -154,10 +166,13 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     pinnedBottomTemplate: props.pinnedBottomTemplate,
     onViewportChange: props.onViewportChange,
     onColumnResize: props.onColumnResize,
+    onColumnStateChange: props.onColumnStateChange,
     onSortChange: props.onSortChange,
     onFilterChange: props.onFilterChange,
     onSearchChange: props.onSearchChange,
     onQueryChange: props.onQueryChange,
+    onServerQueryChange: props.onServerQueryChange,
+    onSummaryChange: props.onSummaryChange,
     onRowOrderChange: props.onRowOrderChange,
     onColumnOrderChange: props.onColumnOrderChange,
     onGroupingChange: props.onGroupingChange,
@@ -175,6 +190,38 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onPasteError: props.onPasteError,
     onZoomChange: props.onZoomChange,
     onEditingChange: props.onEditingChange,
+    onKeyboardAction: props.onKeyboardAction,
+  }
+}
+
+export function normalizeDataTableKeyboardNavigation(
+  keyboardNavigation: false | DataTableKeyboardNavigationOptions | undefined,
+): false | DataTableResolvedKeyboardNavigationOptions {
+  if (keyboardNavigation === false || keyboardNavigation === undefined) return false
+
+  return {
+    enabled: keyboardNavigation.enabled ?? true,
+    arrows: keyboardNavigation.arrows ?? true,
+    tab: keyboardNavigation.tab ?? 'move',
+    enter: keyboardNavigation.enter ?? 'edit',
+    pageKeys: keyboardNavigation.pageKeys ?? true,
+    homeEnd: keyboardNavigation.homeEnd ?? true,
+    shiftSelection: keyboardNavigation.shiftSelection ?? true,
+    ctrlMetaShortcuts: keyboardNavigation.ctrlMetaShortcuts ?? true,
+  }
+}
+
+export function normalizeDataTableColumnState(
+  columnState: DataTableColumnState | undefined,
+): DataTableResolvedColumnState {
+  return {
+    widths: normalizeColumnWidths(columnState?.widths),
+    order: normalizeStringList(columnState?.order),
+    hidden: normalizeStringList(columnState?.hidden),
+    pinned: {
+      left: normalizeStringList(columnState?.pinned?.left),
+      right: normalizeStringList(columnState?.pinned?.right),
+    },
   }
 }
 
@@ -271,6 +318,14 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           activeHighlightColor: view?.search?.activeHighlightColor ?? '#be123c',
           controlled: view?.search?.controlled ?? false,
         },
+    serverRowModel: view?.serverRowModel === false || view?.serverRowModel === undefined
+      ? false
+      : {
+          enabled: view.serverRowModel.enabled ?? true,
+          authoritative: view.serverRowModel.authoritative ?? true,
+          subscribe: view.serverRowModel.subscribe ?? true,
+          loadSummary: view.serverRowModel.loadSummary ?? true,
+        },
     rowOrdering: view?.rowOrdering === false
       ? false
       : {
@@ -303,6 +358,13 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           showGrandFooter: view?.grouping?.showGrandFooter ?? false,
           footerPlacement: view?.grouping?.footerPlacement ?? 'scroll',
           controlled: view?.grouping?.controlled ?? false,
+        },
+    groupingPinnedRows: view?.groupingPinnedRows === false
+      ? false
+      : {
+          global: view?.groupingPinnedRows?.global ?? 'show',
+          insideGroup: view?.groupingPinnedRows?.insideGroup ?? false,
+          placement: view?.groupingPinnedRows?.placement ?? 'group-end',
         },
   }
 }
@@ -621,6 +683,8 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'textSelection',
         'zoom',
         'editing',
+        'keyboardNavigation',
+        'columnState',
         'performance',
       ],
       render: [
@@ -681,4 +745,20 @@ function finiteNumber(value: unknown, fallback: number): number {
 function finiteClamp(value: unknown, min: number, max: number, fallback: number): number {
   const next = finiteNumber(value, fallback)
   return Math.max(min, Math.min(max, next))
+}
+
+function normalizeStringList(value: unknown): Array<string> {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))]
+}
+
+function normalizeColumnWidths(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, number> = {}
+  for (const [columnId, width] of Object.entries(value)) {
+    if (typeof width === 'number' && Number.isFinite(width)) {
+      result[columnId] = Math.max(24, Math.round(width))
+    }
+  }
+  return result
 }
