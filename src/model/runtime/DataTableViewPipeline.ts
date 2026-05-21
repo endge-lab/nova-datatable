@@ -596,6 +596,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   /**
+   * Восстанавливает сохраненное состояние expand/collapse для grouping.
+   */
+  setGroupingExpanded(expanded: 'all' | 'none' | Array<string>): void {
+    this.groupingExpanded = cloneExpanded(expanded)
+    this.rebuild()
+  }
+
+  /**
    * Выполняет действие reorderRows в рамках ответственности DataTableViewPipeline.
    */
   reorderRows(payload: DataTableRowReorderPayload): DataTableRowReorderPayload {

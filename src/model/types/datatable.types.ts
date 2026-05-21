@@ -495,6 +495,42 @@ export interface DataTableResolvedColumnState {
   }
 }
 
+export type DataTableStateSlice =
+  | 'columnState'
+  | 'sort'
+  | 'filters'
+  | 'search'
+  | 'grouping'
+
+export interface DataTableStatePersistenceOptions {
+  key: string
+  storage?: 'localStorage' | 'sessionStorage'
+  include?: Array<DataTableStateSlice>
+  debounceMs?: number
+}
+
+export interface DataTableResolvedStatePersistenceOptions {
+  key: string
+  storage: 'localStorage' | 'sessionStorage'
+  include: Array<DataTableStateSlice>
+  debounceMs: number
+}
+
+export interface DataTablePersistedState<Row extends Record<string, any> = Record<string, any>> {
+  version: 1
+  savedAt: number
+  columnState?: DataTableColumnState
+  sort?: DataTableSortState
+  filters?: DataTableFilterState | DataTableFilterExpression
+  search?: DataTableSearchQuery
+  grouping?: {
+    enabled: boolean
+    groups: Array<DataTableGroupRule<Row>>
+    expanded: 'all' | 'none' | Array<string>
+    footerPlacement?: DataTableGroupFooterPlacement
+  }
+}
+
 export interface DataTableKeyboardAction {
   type: 'move' | 'select-all' | 'copy' | 'paste' | 'edit' | 'cancel' | 'commit'
   key: string
@@ -1306,6 +1342,7 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   editing?: false | DataTableEditingOptions<Row>
   keyboardNavigation?: false | DataTableKeyboardNavigationOptions
   columnState?: DataTableColumnState
+  statePersistence?: false | DataTableStatePersistenceOptions
   performance?: DataTablePerformanceOptions
 }
 
@@ -1370,6 +1407,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   editing: false | DataTableResolvedEditingOptions<Row>
   keyboardNavigation: false | DataTableResolvedKeyboardNavigationOptions
   columnState: DataTableResolvedColumnState
+  statePersistence: false | DataTableResolvedStatePersistenceOptions
   performance: DataTableResolvedPerformanceOptions
   hoverAlpha: number
   selectionAlpha: number
@@ -1438,6 +1476,10 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   showColumn: (columnId: string) => void
   pinColumn: (columnId: string, side: DataTablePinnedColumnSide) => void
   unpinColumn: (columnId: string) => void
+  getPersistedState: () => DataTablePersistedState<Row> | null
+  saveState: () => DataTablePersistedState<Row> | null
+  restoreState: () => boolean
+  resetPersistedState: () => void
   scrollTo: (x: number, y: number) => void
   scrollToRow: (rowIndex: number) => void
   focusCell: (rowId: DataTableRowId, columnId: string) => boolean

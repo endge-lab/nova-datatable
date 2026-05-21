@@ -38,6 +38,7 @@ import {
   type DataTableRowKey,
   type DataTableKeyboardAction,
   type DataTableKeyboardNavigationOptions,
+  type DataTablePersistedState,
   type DataTableResolvedColumnState,
   type DataTableRootOptions,
   type DataTableScrollbarLayerTemplate,
@@ -50,6 +51,7 @@ import {
   type DataTableSortState,
   type DataTableSummaryState,
   type DataTableStoreApi,
+  type DataTableStatePersistenceOptions,
   type DataTableTemplate,
   type DataTableTextSelectionOptions,
   type DataTableTooltipOptions,
@@ -89,6 +91,7 @@ interface DataTableVueProps {
   editing?: false | DataTableEditingOptions<BaseRow>
   keyboardNavigation?: false | DataTableKeyboardNavigationOptions
   columnState?: DataTableColumnState
+  statePersistence?: false | DataTableStatePersistenceOptions
   performance?: DataTablePerformanceOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
@@ -157,6 +160,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   editing: undefined,
   keyboardNavigation: undefined,
   columnState: undefined,
+  statePersistence: undefined,
   performance: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
@@ -700,6 +704,10 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   showColumn: columnId => getRootApi().showColumn(columnId),
   pinColumn: (columnId, side) => getRootApi().pinColumn(columnId, side),
   unpinColumn: columnId => getRootApi().unpinColumn(columnId),
+  getPersistedState: (): DataTablePersistedState<BaseRow> | null => getRootApi().getPersistedState(),
+  saveState: (): DataTablePersistedState<BaseRow> | null => getRootApi().saveState(),
+  restoreState: () => getRootApi().restoreState(),
+  resetPersistedState: () => getRootApi().resetPersistedState(),
   scrollTo: (x, y) => getRootApi().scrollTo(x, y),
   scrollToRow: rowIndex => getRootApi().scrollToRow(rowIndex),
   focusCell: (rowId, columnId) => getRootApi().focusCell(rowId, columnId),
@@ -804,6 +812,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :editing="rootEditing"
         :keyboard-navigation="keyboardNavigation"
         :column-state="columnState"
+        :state-persistence="statePersistence"
         :performance="performance"
         :cell-template="rootCellTemplate"
         :header-template="rootHeaderTemplate"

@@ -103,6 +103,29 @@ function installCanvasMocks(): void {
   })
 }
 
+function installStorageMock(): Storage {
+  const state = new Map<string, string>()
+  const storage = {
+    get length() {
+      return state.size
+    },
+    clear: vi.fn(() => state.clear()),
+    getItem: vi.fn((key: string) => state.get(key) ?? null),
+    key: vi.fn((index: number) => [...state.keys()][index] ?? null),
+    removeItem: vi.fn((key: string) => {
+      state.delete(key)
+    }),
+    setItem: vi.fn((key: string, value: string) => {
+      state.set(key, String(value))
+    }),
+  } as Storage
+  Object.defineProperty(window, 'localStorage', {
+    value: storage,
+    configurable: true,
+  })
+  return storage
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
   document.body.innerHTML = ''
@@ -1806,6 +1829,118 @@ describe('DataTable Root runtime', () => {
       hidden: ['amount'],
       pinned: { left: ['status'], right: [] },
     })
+    app.destroy()
+  })
+
+  it('saves and restores configured persisted state slices', () => {
+    installStorageMock()
+    const key = 'datatable:persistence:test'
+    window.localStorage.removeItem(key)
+
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      statePersistence: {
+        key,
+        include: ['columnState', 'sort', 'filters', 'search'],
+        debounceMs: 0,
+      },
+      view: {
+        sorting: { mode: 'client', multi: true },
+        filtering: { mode: 'client' },
+        search: { mode: 'client' },
+      },
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, sortable: true, filter: 'text' },
+        { id: 'status', title: 'Status', field: 'status', width: 120, sortable: true, filter: { type: 'set', options: ['active', 'draft'] } },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, sortable: true, filter: 'number' },
+      ],
+    } as never)
+    app.raph.run()
+
+    root.getApi().setColumnState({
+      widths: { status: 166 },
+      order: ['status', 'name', 'amount'],
+      hidden: ['amount'],
+      pinned: { left: ['status'], right: [] },
+    })
+    root.getApi().setSort([{ columnId: 'status', direction: 'desc' }])
+    root.getApi().setFilter('status', { operator: 'equals', value: 'active' })
+    root.getApi().setSearch({ text: 'Row 2', scope: 'cells', highlight: 'row-cell-text' })
+    const saved = root.getApi().saveState()
+
+    expect(saved).toMatchObject({
+      columnState: {
+        widths: { status: 166 },
+        order: ['status', 'name', 'amount'],
+        hidden: ['amount'],
+      },
+      sort: [{ columnId: 'status', direction: 'desc', priority: 0 }],
+      search: { text: 'Row 2', highlight: 'row-cell-text' },
+    })
+    app.destroy()
+
+    const nextApp = createApp()
+    const nextRoot = mountRoot(nextApp)
+    nextRoot.setProps({
+      statePersistence: {
+        key,
+        include: ['columnState', 'sort', 'filters', 'search'],
+        debounceMs: 0,
+      },
+      view: {
+        sorting: { mode: 'client', multi: true },
+        filtering: { mode: 'client' },
+        search: { mode: 'client' },
+      },
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, sortable: true, filter: 'text' },
+        { id: 'status', title: 'Status', field: 'status', width: 120, sortable: true, filter: { type: 'set', options: ['active', 'draft'] } },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, sortable: true, filter: 'number' },
+      ],
+    } as never)
+    nextApp.raph.run()
+
+    expect(nextRoot.getApi().restoreState()).toBe(true)
+    expect(nextRoot.getApi().getColumnState()).toMatchObject({
+      widths: { status: 166 },
+      order: ['status', 'name', 'amount'],
+      hidden: ['amount'],
+    })
+    expect(nextRoot.getApi().getViewState().sort).toEqual([{ columnId: 'status', direction: 'desc', priority: 0 }])
+    expect(nextRoot.getApi().getSearchState().query.text).toBe('Row 2')
+
+    nextRoot.getApi().resetPersistedState()
+    expect(window.localStorage.getItem(key)).toBeNull()
+    nextApp.destroy()
+  })
+
+  it('uses header menu actions before sort and column drag', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const onSortChange = vi.fn()
+    root.setProps({
+      view: {
+        sorting: { mode: 'client', multi: true },
+        filtering: { mode: 'client' },
+        columnOrdering: { enabled: true },
+      },
+      columns: [
+        { id: 'name', title: 'Name', field: 'name', width: 180, sortable: true, filter: 'text', reorderable: true },
+        { id: 'status', title: 'Status', field: 'status', width: 120, sortable: true, filter: 'text', reorderable: true },
+        { id: 'amount', title: 'Amount', field: 'amount', width: 120, sortable: true, filter: 'number', reorderable: true },
+      ],
+      onSortChange,
+    } as never)
+    app.raph.run()
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 170, clientY: 12 }))
+    expect(root.getApi().getViewState().sort).toEqual([])
+
+    root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 20, clientY: 50 }))
+    expect(onSortChange).toHaveBeenCalledWith([{ columnId: 'name', direction: 'asc', priority: 0 }])
+    expect(root.getApi().getViewState().sort).toEqual([{ columnId: 'name', direction: 'asc', priority: 0 }])
+
     app.destroy()
   })
 

@@ -8,9 +8,11 @@ import type {
   DataTableEditingOptions,
   DataTableEditTrigger,
   DataTableColumnState,
+  DataTableStatePersistenceOptions,
   DataTableKeyboardNavigationOptions,
   DataTableScrollbarAxisOptions,
   DataTableResolvedColumnState,
+  DataTableResolvedStatePersistenceOptions,
   DataTableResolvedInteractionOptions,
   DataTableResolvedClipboardOptions,
   DataTableResolvedPerformanceOptions,
@@ -65,6 +67,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   editing: { type: 'any' },
   keyboardNavigation: { type: 'any' },
   columnState: { type: 'object' },
+  statePersistence: { type: 'any' },
   performance: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
@@ -152,6 +155,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     editing: normalizeDataTableEditing(props.editing),
     keyboardNavigation: normalizeDataTableKeyboardNavigation(props.keyboardNavigation),
     columnState: normalizeDataTableColumnState(props.columnState),
+    statePersistence: normalizeDataTableStatePersistence(props.statePersistence),
     performance: normalizeDataTablePerformance(props.performance),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
@@ -192,6 +196,34 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onEditingChange: props.onEditingChange,
     onKeyboardAction: props.onKeyboardAction,
   }
+}
+
+const DEFAULT_STATE_PERSISTENCE_SLICES = ['columnState', 'sort', 'filters', 'search', 'grouping'] as const
+
+export function normalizeDataTableStatePersistence(
+  persistence: false | DataTableStatePersistenceOptions | undefined,
+): false | DataTableResolvedStatePersistenceOptions {
+  if (persistence === false || !persistence || !persistence.key) return false
+
+  return {
+    key: persistence.key,
+    storage: persistence.storage ?? 'localStorage',
+    include: normalizeStatePersistenceSlices(persistence.include),
+    debounceMs: Math.max(0, persistence.debounceMs ?? 250),
+  }
+}
+
+function normalizeStatePersistenceSlices(
+  include: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> | undefined,
+): Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> {
+  if (!include || include.length === 0) return [...DEFAULT_STATE_PERSISTENCE_SLICES]
+  const allowed = new Set(DEFAULT_STATE_PERSISTENCE_SLICES)
+  const result: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> = []
+  for (const slice of include) {
+    if (!allowed.has(slice) || result.includes(slice)) continue
+    result.push(slice)
+  }
+  return result.length > 0 ? result : [...DEFAULT_STATE_PERSISTENCE_SLICES]
 }
 
 export function normalizeDataTableKeyboardNavigation(
@@ -685,6 +717,7 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'editing',
         'keyboardNavigation',
         'columnState',
+        'statePersistence',
         'performance',
       ],
       render: [
