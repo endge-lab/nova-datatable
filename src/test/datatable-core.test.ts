@@ -1990,6 +1990,35 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('reserves Tab movement when keyboard tab action is commit-edit', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const tabEvent = new KeyboardEvent('keydown', { key: 'Tab' })
+
+    expect((root as any).resolveKeyboardDirection(tabEvent, {
+      enabled: true,
+      arrows: true,
+      tab: 'commit-edit',
+      enter: 'edit',
+      pageKeys: true,
+      homeEnd: true,
+      shiftSelection: true,
+      ctrlMetaShortcuts: true,
+    })).toBeNull()
+    expect((root as any).resolveKeyboardDirection(tabEvent, {
+      enabled: true,
+      arrows: true,
+      tab: 'move',
+      enter: 'edit',
+      pageKeys: true,
+      homeEnd: true,
+      shiftSelection: true,
+      ctrlMetaShortcuts: true,
+    })).toBe('right')
+
+    app.destroy()
+  })
+
   it('uses column templates before table templates', () => {
     const app = createApp()
     const tableCellTemplate = vi.fn(() => [])

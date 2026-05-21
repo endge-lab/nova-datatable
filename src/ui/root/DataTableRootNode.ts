@@ -2411,6 +2411,10 @@ export class DataTableRootNode<
         void this.commitEdit()
         this.emitKeyboardAction({ type: 'commit', key: event.key })
         event.preventDefault()
+      } else if (event.key === 'Tab' && options.tab === 'commit-edit') {
+        void this.commitEdit()
+        this.emitKeyboardAction({ type: 'commit', key: event.key })
+        event.preventDefault()
       }
       return
     }
@@ -2470,7 +2474,7 @@ export class DataTableRootNode<
       if (event.key === 'ArrowLeft') return 'left'
       if (event.key === 'ArrowRight') return 'right'
     }
-    if (options.tab && event.key === 'Tab') return event.shiftKey ? 'left' : 'right'
+    if (options.tab === 'move' && event.key === 'Tab') return event.shiftKey ? 'left' : 'right'
     if (options.pageKeys) {
       if (event.key === 'PageUp') return 'page-up'
       if (event.key === 'PageDown') return 'page-down'
