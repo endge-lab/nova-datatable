@@ -242,11 +242,13 @@ export class DataTableRootNode<
   private serverSummaryRequestId = 0
   private serverSearchRequestId = 0
   private serverSearchCursor: string | undefined
+  private serverSearchInFlight = false
   private gestureStartZoomValue = 1
   private gestureActive = false
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
   private readonly handleKeyboardNavigationKeydown = (event: KeyboardEvent) => this.handleKeyboardNavigationKeydownEvent(event)
+  private readonly handleKeyboardNavigationPointerDown = (event: PointerEvent) => this.handleKeyboardNavigationPointerDownEvent(event)
   private readonly handleTextSelectionKeydown = (event: KeyboardEvent) => this.handleTextSelectionKeydownEvent(event)
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
@@ -457,6 +459,16 @@ export class DataTableRootNode<
    */
   get headerHeight(): number {
     return Math.max(24, Math.round(this.props.headerHeight * this.zoomHeaderScale))
+  }
+
+  /**
+   * Возвращает высоту встроенной filter row внутри header зоны.
+   */
+  private get filterRowHeight(): number {
+    if (!this.props.view.filterUi || !this.props.view.filterUi.filterRow) return 0
+    const available = this.headerHeight - 24
+    if (available < 14) return 0
+    return Math.max(14, Math.min(24, available))
   }
 
   /**
@@ -1130,6 +1142,7 @@ export class DataTableRootNode<
    */
   private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
     this.viewPipeline.setSearch(query)
+    this.serverSearchCursor = undefined
     this.emitViewQuery('search')
     this.requestServerSearchIfNeeded(0)
     this.refresh(['data', 'layout'])
@@ -1150,7 +1163,16 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
-    this.requestServerSearchIfNeeded()
+    if (this.isServerRowModelActive() && this.serverSearchCursor) {
+      const state = this.viewPipeline.getSearchState()
+      if (state.matches.length === 0 || state.activeIndex >= state.matches.length - 1) {
+        this.requestServerSearchPage({ append: true, activeIndex: state.matches.length })
+        this.emitViewQuery('search')
+        this.refresh(['data', 'layout'])
+        return state.activeMatch
+      }
+    }
+
     const match = this.viewPipeline.findNext()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -1162,7 +1184,6 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
-    this.requestServerSearchIfNeeded()
     const match = this.viewPipeline.findPrevious()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -1437,19 +1458,34 @@ export class DataTableRootNode<
    * Делегирует поиск server-side source, когда локальный pipeline не должен сканировать строки.
    */
   private requestServerSearchIfNeeded(activeIndex = this.viewPipeline.getSearchState().activeIndex): void {
+    this.requestServerSearchPage({ append: false, activeIndex })
+  }
+
+  /**
+   * Запрашивает страницу server-side поиска и обновляет navigation state.
+   */
+  private requestServerSearchPage(options: { append: boolean; activeIndex?: number }): void {
     const search = this.viewPipeline.getSearchState().query
     if (!search.text || !this.isServerRowModelActive()) return
+    if (this.serverSearchInFlight) return
 
     this.syncServerRowModel()
     const requestId = ++this.serverSearchRequestId
+    this.serverSearchInFlight = true
     void this.serverRowModel.search(search, this.serverSearchCursor).then(result => {
       if (!result || requestId !== this.serverSearchRequestId) return
       this.serverSearchCursor = result.cursor
-      this.viewPipeline.setServerSearchResult(result, Math.max(0, activeIndex))
+      if (options.append) {
+        this.viewPipeline.appendServerSearchResult(result, options.activeIndex)
+      } else {
+        this.viewPipeline.setServerSearchResult(result, Math.max(0, options.activeIndex ?? 0))
+      }
       const match = this.viewPipeline.getSearchState().activeMatch
       if (match) this.scrollToSearchMatch(match)
       this.props.onSearchChange?.(this.viewPipeline.getSearchState())
       this.refresh(['data', 'interaction'])
+    }).finally(() => {
+      if (requestId === this.serverSearchRequestId) this.serverSearchInFlight = false
     })
   }
 
@@ -1887,6 +1923,7 @@ export class DataTableRootNode<
   private setupKeyboardNavigationEvents(): void {
     if (typeof window === 'undefined') return
     window.addEventListener('keydown', this.handleKeyboardNavigationKeydown)
+    window.addEventListener('pointerdown', this.handleKeyboardNavigationPointerDown, true)
   }
 
   /**
@@ -1895,6 +1932,16 @@ export class DataTableRootNode<
   private teardownKeyboardNavigationEvents(): void {
     if (typeof window === 'undefined') return
     window.removeEventListener('keydown', this.handleKeyboardNavigationKeydown)
+    window.removeEventListener('pointerdown', this.handleKeyboardNavigationPointerDown, true)
+  }
+
+  /**
+   * Сбрасывает keyboard focus, когда пользователь уходит за пределы canvas.
+   */
+  private handleKeyboardNavigationPointerDownEvent(event: PointerEvent): void {
+    const target = event.target
+    if (target instanceof Node && this.canvas.element.contains(target)) return
+    this.keyboardFocusActive = false
   }
 
   /**
@@ -2376,9 +2423,15 @@ export class DataTableRootNode<
     const pinnedRows = this.resolveEffectivePinnedRows()
     const topRows = pinnedRows.top ?? []
     const bottomRows = pinnedRows.bottom ?? []
+    const filterRowHeight = this.filterRowHeight
+    const headerMainHeight = this.headerHeight - filterRowHeight
     this.nextVisibleCellKeys = new Set()
     this.cellEnterRenderCount = 0
-    this.renderPartitionedRowZone('header', [{} as Row], headerY, this.headerHeight, false)
+    this.renderPartitionedRowZone('header', [{} as Row], headerY, headerMainHeight, false)
+
+    if (filterRowHeight > 0) {
+      this.renderFilterRow(headerY + headerMainHeight, filterRowHeight)
+    }
 
     if (topRows.length > 0) {
       this.renderPartitionedRowZone('pinned-top', topRows, this.headerHeight, this.rowHeight, false)
@@ -2484,6 +2537,116 @@ export class DataTableRootNode<
     if (rows.length === 0) return
 
     this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.rowHeight, true)
+  }
+
+  /**
+   * Рисует встроенную canvas filter row под header captions.
+   */
+  private renderFilterRow(y: number, height: number): void {
+    this.renderFilterRowRegion('center', y, height, this.viewport.bodyX, this.viewport.bodyWidth)
+    if (this.viewport.pinnedLeftWidth > 0) {
+      this.renderFilterRowRegion('left', y, height, 0, this.viewport.pinnedLeftWidth)
+    }
+    if (this.viewport.pinnedRightWidth > 0) {
+      this.renderFilterRowRegion('right', y, height, this.width - this.viewport.pinnedRightWidth, this.viewport.pinnedRightWidth)
+    }
+  }
+
+  /**
+   * Рисует filter row для отдельного pinned/center региона.
+   */
+  private renderFilterRowRegion(
+    region: VisibleColumnRegion,
+    y: number,
+    height: number,
+    clipX: number,
+    clipWidth: number,
+  ): void {
+    if (clipWidth <= 0 || height <= 0) return
+
+    const schema: NovaSchema = []
+    const viewState = this.viewPipeline.getState()
+    for (const columnRect of this.visibleColumnRects(region)) {
+      const rect = {
+        x: columnRect.x,
+        y,
+        width: columnRect.width,
+        height,
+      }
+      const active = filterStateHasColumn(viewState.filters, columnRect.column.id)
+      schema.push({
+        type: 'rect',
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        styles: {
+          background: active ? '#eaf3ff' : '#f8fafc',
+          border: { color: '#d8e0ea', width: 1 },
+        },
+      })
+
+      const context = this.createFilterRowContext(columnRect, rect)
+      const template = columnRect.column.filterTemplate
+      if (template) {
+        schema.push(...template(context))
+        continue
+      }
+
+      const label = active
+        ? summarizeColumnFilters(viewState.filters, columnRect.column.id)
+        : resolveFilterPlaceholder(columnRect.column.filter)
+      if (!label) continue
+
+      schema.push({
+        type: 'text',
+        text: label,
+        x: rect.x + 8,
+        y: rect.y,
+        width: Math.max(0, rect.width - 16),
+        height: rect.height,
+        styles: {
+          color: active ? '#1d4ed8' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: Math.max(10, this.fontSize - 2),
+            weight: active ? '700' : '500',
+          },
+          lineHeight: Math.max(10, this.lineHeight - 2),
+          align: { horizontal: 'left', vertical: 'middle' },
+          ellipsis: true,
+        },
+      })
+    }
+
+    this.renderer.clip(clipX, y, clipWidth, height)
+    this.renderer.schema(schema)
+    this.renderer.clearClip()
+  }
+
+  /**
+   * Собирает context для пользовательского #filter slot.
+   */
+  private createFilterRowContext(
+    columnRect: VisibleColumnRect<Row>,
+    rect: DataTableCellRect,
+  ): DataTableCellContext<Row> {
+    const row = {} as Row
+    const rowId = `__filter__:${columnRect.column.id}`
+    return {
+      row,
+      rowId,
+      rowIndex: -1,
+      viewRowIndex: -1,
+      column: columnRect.column,
+      columnIndex: columnRect.columnIndex,
+      value: summarizeColumnFilters(this.viewPipeline.getState().filters, columnRect.column.id),
+      rect,
+      state: this.createCellState(rect, rowId, -1, undefined, columnRect, 'header'),
+      zone: 'header',
+      store: this.store,
+      api: this.api,
+    }
   }
 
   /**
@@ -6207,6 +6370,42 @@ function escapeTooltipMarkdown(value: string): string {
 function filterStateHasColumn(filters: DataTableViewState['filters'], columnId: string): boolean {
   if (Array.isArray(filters)) return filters.some(rule => rule.columnId === columnId)
   return filters.rules.some(rule => 'logic' in rule ? filterStateHasColumn(rule, columnId) : rule.columnId === columnId)
+}
+
+function summarizeColumnFilters(filters: DataTableViewState['filters'], columnId: string): string {
+  const rules = collectColumnFilterRules(filters, columnId)
+  if (rules.length === 0) return ''
+  return rules
+    .slice(0, 2)
+    .map(rule => `${rule.operator} ${formatFilterValue(rule.value)}`)
+    .join(' · ')
+}
+
+function collectColumnFilterRules(
+  filters: DataTableViewState['filters'],
+  columnId: string,
+): Array<{ operator: string; value: unknown }> {
+  if (Array.isArray(filters)) return filters.filter(rule => rule.columnId === columnId)
+  return filters.rules.flatMap(rule => (
+    'logic' in rule
+      ? collectColumnFilterRules(rule, columnId)
+      : rule.columnId === columnId
+        ? [rule]
+        : []
+  ))
+}
+
+function formatFilterValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(item => String(item)).join(', ')
+  if (value === undefined || value === null || value === '') return 'empty'
+  return String(value)
+}
+
+function resolveFilterPlaceholder(filter: unknown): string {
+  if (!filter) return ''
+  if (typeof filter === 'string') return filter
+  if (typeof filter === 'object' && filter && 'type' in filter) return String((filter as { type?: unknown }).type ?? 'filter')
+  return 'filter'
 }
 
 function estimateSearchTextWidth(value: string, fontSize: number): number {

@@ -1149,6 +1149,58 @@ describe('DataTableViewPipeline', () => {
     })
   })
 
+  it('appends paged server search matches without rebuilding local rows', () => {
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: { rowCount: 10_000_000 },
+    })
+    const pipeline = new DataTableViewPipeline<Row>(store)
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([{ id: 'name', field: 'name' }], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: false,
+        filtering: false,
+        search: {
+          mode: 'server',
+          scope: 'cells',
+          match: 'contains',
+          caseSensitive: false,
+          columns: ['name'],
+          highlight: 'cell-text',
+          filter: true,
+          highlightColor: '#b45309',
+          activeHighlightColor: '#be123c',
+          controlled: false,
+        },
+        serverRowModel: { enabled: true, authoritative: true, subscribe: false, loadSummary: false },
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+        groupingPinnedRows: false,
+      },
+    })
+    pipeline.setSearch('Row')
+    pipeline.setServerSearchResult({
+      matches: [{ rowId: 'row-1', rowIndex: 1, columnId: 'name', value: 'Row 1', ranges: [{ start: 0, end: 3 }] }],
+      total: 2,
+    })
+    pipeline.appendServerSearchResult({
+      matches: [{ rowId: 'row-2', rowIndex: 2, columnId: 'name', value: 'Row 2', ranges: [{ start: 0, end: 3 }] }],
+      total: 2,
+    }, 1)
+
+    expect(pipeline.getSearchState()).toMatchObject({
+      total: 2,
+      activeIndex: 1,
+      activeMatch: { rowId: 'row-2', rowIndex: 2 },
+      local: false,
+    })
+    expect(pipeline.rowCount).toBe(10_000_000)
+    expect(pipeline.getViewRowAt(2)?.storeIndex).toBe(2)
+  })
+
   it('groups rows after filter and sort and exposes aggregate view rows', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
@@ -1656,6 +1708,11 @@ describe('DataTable Root runtime', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
     expect(onKeyboardAction).toHaveBeenCalledWith(expect.objectContaining({ type: 'move', direction: 'right' }))
     expect(onActiveCellChange).toHaveBeenCalled()
+
+    const keyboardActions = onKeyboardAction.mock.calls.length
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    expect(onKeyboardAction).toHaveBeenCalledTimes(keyboardActions)
     app.destroy()
   })
 

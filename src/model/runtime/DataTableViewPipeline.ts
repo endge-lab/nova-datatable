@@ -396,6 +396,24 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   /**
+   * Добавляет следующую server-side страницу поиска без локального скана строк.
+   */
+  appendServerSearchResult(result: { matches: Array<DataTableSearchMatch>; total?: number }, activeIndex?: number): void {
+    const nextMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
+    this.searchMatches = [...this.searchMatches, ...nextMatches]
+    this.searchTotalOverride = result.total ?? this.searchTotalOverride
+    if (this.searchMatches.length === 0) {
+      this.searchActiveIndex = -1
+      return
+    }
+    if (typeof activeIndex === 'number') {
+      this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
+    } else if (this.searchActiveIndex < 0) {
+      this.searchActiveIndex = 0
+    }
+  }
+
+  /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch; index: number } | null {
