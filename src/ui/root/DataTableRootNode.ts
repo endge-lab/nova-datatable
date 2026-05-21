@@ -34,6 +34,12 @@ import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidatio
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
 import { DataTableSummaryEngine, type DataTableSummaryRule } from '@/model/runtime/DataTableSummaryEngine'
 import {
+  createDataTableClipboardFeedbackHidden,
+  createDataTableClipboardPasteErrorFeedback,
+  createDataTableClipboardPasteFeedback,
+  type DataTableClipboardFeedbackState,
+} from '@/model/runtime/DataTableClipboardFeedback'
+import {
   DATATABLE_ROOT_NODE_DESCRIPTOR,
   normalizeDataTableRootProps,
   type DataTableRootDescriptor,
@@ -94,6 +100,7 @@ import type {
   DataTableViewState,
   DataTableZoomOptions,
   DataTableZoomState,
+  DataTablePasteInvalidCell,
 } from '@/model/types/datatable.types'
 
 interface ResizeState<Row extends Record<string, any>> {
@@ -255,6 +262,8 @@ export class DataTableRootNode<
   private selectionActive = false
   private selectionDragState: SelectionDragState | null = null
   private selectionIdCounter = 0
+  private clipboardFeedback: DataTableClipboardFeedbackState<Row> = createDataTableClipboardFeedbackHidden() as DataTableClipboardFeedbackState<Row>
+  private clipboardFeedbackHideTimer: ReturnType<typeof setTimeout> | null = null
   private visibleCellKeys = new Set<string>()
   private nextVisibleCellKeys = new Set<string>()
   private cellEnterStartedAt = new Map<string, number>()
@@ -354,6 +363,7 @@ export class DataTableRootNode<
       this.teardownKeyboardNavigationEvents()
       this.clearScrollbarHideTimer()
       this.clearStatePersistenceTimer()
+      this.clearClipboardFeedbackTimer()
       this.clearTooltipTimers()
       this.teardownEditingKeyboardEvents()
     })
@@ -3097,6 +3107,7 @@ export class DataTableRootNode<
 
     this.renderPinnedBottomGroupPanel()
     this.renderSearchOverlay()
+    this.renderClipboardFeedbackOverlay()
     this.renderTextSelectionOverlay()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
@@ -4377,6 +4388,113 @@ export class DataTableRootNode<
     }
 
     if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
+  private renderClipboardFeedbackOverlay(): void {
+    const feedback = this.clipboardFeedback
+    if (!feedback.visible && feedback.invalid.length === 0) return
+
+    const schema: NovaSchema = []
+    if (feedback.invalid.length > 0) {
+      schema.push(...this.createClipboardInvalidCellMarkers(feedback.invalid))
+    }
+
+    if (feedback.visible) {
+      const palette = resolveClipboardFeedbackPalette(feedback.tone)
+      const label = `${feedback.message} · ${feedback.committed}/${feedback.skipped}/${feedback.invalid.length}`
+      const width = Math.min(Math.max(240, label.length * 7 + 28), Math.max(240, this.width - 24))
+      const x = Math.min(Math.max(8, this.viewport.bodyX + 8), Math.max(8, this.width - width - 8))
+      const y = Math.min(Math.max(this.headerHeight + 8, this.height - 46), Math.max(8, this.height - 46))
+
+      schema.push(
+        {
+          type: 'rect',
+          x,
+          y,
+          width,
+          height: 34,
+          styles: {
+            background: palette.background,
+            border: { color: palette.border, width: 1 },
+            radius: 7,
+            opacity: 0.96,
+          },
+        },
+        {
+          type: 'rect',
+          x: x + 8,
+          y: y + 10,
+          width: 4,
+          height: 14,
+          styles: {
+            background: palette.accent,
+            radius: 4,
+          },
+        },
+        {
+          type: 'text',
+          text: label,
+          x: x + 18,
+          y,
+          width: Math.max(0, width - 28),
+          height: 34,
+          styles: {
+            color: palette.color,
+            font: {
+              family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+              size: Math.max(10, this.fontSize - 1),
+              weight: '700',
+            },
+            lineHeight: this.lineHeight,
+            align: { horizontal: 'left', vertical: 'middle' },
+            ellipsis: true,
+          },
+        },
+      )
+    }
+
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
+  private createClipboardInvalidCellMarkers(invalid: Array<DataTablePasteInvalidCell>): NovaSchema {
+    const schema: NovaSchema = []
+    const columnRects = this.visibleColumnRects('all')
+
+    for (const cell of invalid) {
+      if (!cell.columnId || cell.rowIndex < this.viewport.rowRange.start || cell.rowIndex >= this.viewport.rowRange.end) continue
+      const columnRect = columnRects.find(candidate => candidate.column.id === cell.columnId)
+      if (!columnRect) continue
+      const rect = this.clipRectToColumnRegion({
+        x: columnRect.x,
+        y: this.viewport.bodyY + cell.rowIndex * this.rowHeight - this.scrollY,
+        width: columnRect.width,
+        height: this.rowHeight,
+      }, columnRect.column, 'body')
+      if (!rect) continue
+
+      schema.push(
+        this.createOverlayRect(rect, 'rgba(248, 113, 113, 0.16)', 1, '#dc2626'),
+        {
+          type: 'rect',
+          x: rect.x + 2,
+          y: rect.y + 2,
+          width: Math.min(18, Math.max(0, rect.width - 4)),
+          height: 3,
+          styles: {
+            background: '#dc2626',
+            radius: 3,
+          },
+        },
+      )
+    }
+
+    return schema
   }
 
   /**
@@ -5861,34 +5979,69 @@ export class DataTableRootNode<
         this.store.applyDeltaBatch(override)
         this.refresh(['data', 'interaction'])
         const result = { committed: override.length, skipped: 0, invalid: [], deltas: override } satisfies DataTablePasteResult<Row>
+        this.setClipboardPasteResultFeedback(result)
         this.props.onPasteCommit?.(result)
         this.props.clipboard.onPasteCommit?.(result)
         return result
       }
       const result = await this.createPasteResult(matrix)
       if (result.invalid.length > 0 && this.props.clipboard.paste.invalid === 'reject') {
-        this.props.onPasteError?.({ message: 'Paste validation failed', result })
-        this.props.clipboard.onPasteError?.({ message: 'Paste validation failed', result })
+        const pasteError = { message: 'Paste validation failed', result }
+        this.setClipboardFeedback(createDataTableClipboardPasteErrorFeedback(pasteError))
+        this.props.onPasteError?.(pasteError)
+        this.props.clipboard.onPasteError?.(pasteError)
         return result
       }
       if (result.deltas.length > 0) {
         this.store.applyDeltaBatch(result.deltas)
         this.refresh(['data', 'interaction'])
       }
+      this.setClipboardPasteResultFeedback(result)
       this.props.onPasteCommit?.(result)
       this.props.clipboard.onPasteCommit?.(result)
       return result
     } catch (error) {
-      this.props.onPasteError?.({
+      const pasteError = {
         message: error instanceof Error ? error.message : 'Paste failed',
         error,
-      })
-      this.props.clipboard.onPasteError?.({
-        message: error instanceof Error ? error.message : 'Paste failed',
-        error,
-      })
+      }
+      this.setClipboardFeedback(createDataTableClipboardPasteErrorFeedback(pasteError))
+      this.props.onPasteError?.(pasteError)
+      this.props.clipboard.onPasteError?.(pasteError)
       return emptyResult
     }
+  }
+
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
+  private setClipboardFeedback(feedback: DataTableClipboardFeedbackState<Row>): void {
+    this.clearClipboardFeedbackTimer()
+    this.clipboardFeedback = feedback
+    if (feedback.visible && feedback.ttlMs > 0) {
+      this.clipboardFeedbackHideTimer = setTimeout(() => {
+        this.clipboardFeedback = createDataTableClipboardFeedbackHidden() as DataTableClipboardFeedbackState<Row>
+        this.refresh(['interaction'])
+      }, feedback.ttlMs)
+    }
+    this.refresh(['interaction'])
+  }
+
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
+  private setClipboardPasteResultFeedback(result: DataTablePasteResult<Row>): void {
+    if (result.committed === 0 && result.skipped === 0 && result.invalid.length === 0) return
+    this.setClipboardFeedback(createDataTableClipboardPasteFeedback(result))
+  }
+
+  /**
+   * Очищает таймер DataTableRootNode.
+   */
+  private clearClipboardFeedbackTimer(): void {
+    if (!this.clipboardFeedbackHideTimer) return
+    clearTimeout(this.clipboardFeedbackHideTimer)
+    this.clipboardFeedbackHideTimer = null
   }
 
   /**
@@ -7373,6 +7526,41 @@ function parseCsvLine(line: string): Array<string> {
   }
   cells.push(value)
   return cells
+}
+
+function resolveClipboardFeedbackPalette(
+  tone: DataTableClipboardFeedbackState['tone'],
+): { background: string; border: string; accent: string; color: string } {
+  if (tone === 'success') {
+    return {
+      background: '#ecfdf5',
+      border: '#a7f3d0',
+      accent: '#059669',
+      color: '#064e3b',
+    }
+  }
+  if (tone === 'warning') {
+    return {
+      background: '#fff7ed',
+      border: '#fed7aa',
+      accent: '#ea580c',
+      color: '#7c2d12',
+    }
+  }
+  if (tone === 'error') {
+    return {
+      background: '#fef2f2',
+      border: '#fecaca',
+      accent: '#dc2626',
+      color: '#7f1d1d',
+    }
+  }
+  return {
+    background: '#f8fafc',
+    border: '#cbd5e1',
+    accent: '#64748b',
+    color: '#0f172a',
+  }
 }
 
 function stringifyClipboardValue(value: unknown): string {
