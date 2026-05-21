@@ -51,7 +51,7 @@ export type DataTableSelectionCardinality = 'single' | 'multiple'
 export type DataTableSelectionMode = 'none' | DataTableSelectionUnit | 'mixed'
 export type DataTableSelectionGroupRowsMode = 'none' | 'group-row-only' | 'children-visible'
 export type DataTableClipboardFormat = 'plain' | 'tsv' | 'html'
-export type DataTablePasteParseFormat = 'auto' | 'plain' | 'tsv' | 'csv'
+export type DataTablePasteParseFormat = 'auto' | 'plain' | 'tsv' | 'csv' | 'html'
 export type DataTablePasteOverflowPolicy = 'clip' | 'expand-rows' | 'reject'
 export type DataTablePasteInvalidPolicy = 'reject' | 'skip-cell' | 'commit-valid'
 export type DataTablePasteReadonlyPolicy = 'skip' | 'reject'
@@ -64,10 +64,16 @@ export type DataTableZoomMode = 'density' | 'layout' | 'text' | 'custom'
 export type DataTableZoomAffect = 'rows' | 'headers' | 'columns' | 'text' | 'icons'
 export type DataTableEditTrigger = 'doubleClick' | 'enter' | 'programmatic'
 export type DataTableEditorType = 'text' | 'number' | 'select' | 'checkbox' | 'date'
+export type DataTableEditCommitStrategy = 'optimistic' | 'pessimistic' | 'controlled'
 export type DataTableKeyboardTabAction = 'move' | 'commit-edit'
 export type DataTableKeyboardEnterAction = 'edit' | 'move'
 export type DataTableActiveCellDirection = 'up' | 'down' | 'left' | 'right' | 'page-up' | 'page-down' | 'home' | 'end'
 export type DataTableGroupingPinnedPlacement = 'group-start' | 'group-end'
+export type DataTableCommitSource = 'api' | 'edit' | 'paste' | 'fill' | 'clear' | 'rowOrder' | 'columnState' | 'server'
+export type DataTableFillHandleMode = 'copy' | 'series' | 'auto'
+export type DataTableFillDirection = 'down' | 'right' | 'up' | 'left'
+export type DataTableAccessibilityMode = 'grid' | 'application'
+export type DataTableColumnAutosizeMode = 'visible' | 'sampled' | 'all-loaded' | 'server-estimated'
 export type NovaDataTableDevtoolsOption = boolean | {
   id?: string
   label?: string
@@ -410,6 +416,50 @@ export type DataTableDelta<Row extends Record<string, any> = Record<string, any>
   | { type: 'move'; rowId: DataTableRowId; toIndex: number }
   | { type: 'replaceRange'; start: number; rows: Array<Row> }
 
+export interface DataTableTransaction<Row extends Record<string, any> = Record<string, any>> {
+  id: string
+  label?: string
+  source: DataTableCommitSource
+  deltas: Array<DataTableDelta<Row>>
+  inverseDeltas: Array<DataTableDelta<Row>>
+  timestamp: number
+  status: 'pending' | 'committed' | 'failed' | 'reverted'
+}
+
+export interface DataTableHistoryOptions {
+  enabled?: boolean
+  maxEntries?: number
+  mergeWindowMs?: number
+  include?: Array<DataTableCommitSource>
+}
+
+export interface DataTableResolvedHistoryOptions {
+  enabled: boolean
+  maxEntries: number
+  mergeWindowMs: number
+  include: Array<DataTableCommitSource>
+}
+
+export interface DataTableHistoryState<Row extends Record<string, any> = Record<string, any>> {
+  canUndo: boolean
+  canRedo: boolean
+  undoDepth: number
+  redoDepth: number
+  current?: DataTableTransaction<Row>
+}
+
+export interface DataTableFillHandleOptions {
+  enabled?: boolean
+  mode?: DataTableFillHandleMode
+  directions?: Array<DataTableFillDirection>
+}
+
+export interface DataTableResolvedFillHandleOptions {
+  enabled: boolean
+  mode: DataTableFillHandleMode
+  directions: Array<DataTableFillDirection>
+}
+
 export interface DataTableDirtyCell {
   rowId: DataTableRowId
   columnId: string
@@ -431,6 +481,10 @@ export interface DataTablePerformanceOptions {
   maxClientRows?: number
   deltaFrameBudgetMs?: number
   workerPipeline?: boolean
+  workerThresholdRows?: number
+  indexSearch?: boolean
+  indexFilters?: boolean
+  memoryBudgetMb?: number
   text?: false | DataTableTextPerformanceOptions
 }
 
@@ -439,6 +493,10 @@ export interface DataTableResolvedPerformanceOptions {
   maxClientRows: number
   deltaFrameBudgetMs: number
   workerPipeline: boolean
+  workerThresholdRows: number
+  indexSearch: boolean
+  indexFilters: boolean
+  memoryBudgetMb: number
   text: false | DataTableResolvedTextPerformanceOptions
 }
 
@@ -447,6 +505,11 @@ export interface DataTableServerRowModelOptions {
   authoritative?: boolean
   subscribe?: boolean
   loadSummary?: boolean
+  conflictPolicy?: 'server-wins' | 'client-wins' | 'merge'
+  retry?: false | {
+    attempts?: number
+    backoffMs?: number
+  }
 }
 
 export interface DataTableResolvedServerRowModelOptions {
@@ -454,6 +517,11 @@ export interface DataTableResolvedServerRowModelOptions {
   authoritative: boolean
   subscribe: boolean
   loadSummary: boolean
+  conflictPolicy: 'server-wins' | 'client-wins' | 'merge'
+  retry: false | {
+    attempts: number
+    backoffMs: number
+  }
 }
 
 export interface DataTableKeyboardNavigationOptions {
@@ -483,6 +551,9 @@ export interface DataTableColumnState {
   order?: Array<string>
   hidden?: Array<string>
   pinned?: DataTablePinnedColumns
+  groups?: Array<DataTableColumnGroupInput>
+  autosizeMode?: DataTableColumnAutosizeMode
+  version?: number
 }
 
 export interface DataTableResolvedColumnState {
@@ -493,6 +564,16 @@ export interface DataTableResolvedColumnState {
     left: Array<string>
     right: Array<string>
   }
+  groups: Array<DataTableColumnGroupInput>
+  autosizeMode: DataTableColumnAutosizeMode
+  version: number
+}
+
+export interface DataTableColumnGroupInput {
+  id: string
+  title: string
+  children: Array<string>
+  pinned?: DataTablePinnedColumnSide
 }
 
 export type DataTableStateSlice =
@@ -507,6 +588,8 @@ export interface DataTableStatePersistenceOptions {
   storage?: 'localStorage' | 'sessionStorage'
   include?: Array<DataTableStateSlice>
   debounceMs?: number
+  version?: number
+  migrate?: (state: DataTablePersistedState, fromVersion: number) => DataTablePersistedState
 }
 
 export interface DataTableResolvedStatePersistenceOptions {
@@ -514,10 +597,12 @@ export interface DataTableResolvedStatePersistenceOptions {
   storage: 'localStorage' | 'sessionStorage'
   include: Array<DataTableStateSlice>
   debounceMs: number
+  version: number
+  migrate?: (state: DataTablePersistedState, fromVersion: number) => DataTablePersistedState
 }
 
 export interface DataTablePersistedState<Row extends Record<string, any> = Record<string, any>> {
-  version: 1
+  version: number
   savedAt: number
   columnState?: DataTableColumnState
   sort?: DataTableSortState
@@ -585,6 +670,11 @@ export interface DataTableLazySource<Row extends Record<string, any>> {
     context?: DataTableSourceRequestContext,
   ) => Promise<Array<Row> | void> | Array<Row> | void
   loadSummary?: (query?: DataTableQueryState) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
+  loadFilterValues?: (
+    columnId: string,
+    query?: DataTableQueryState,
+    cursor?: string,
+  ) => Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | void> | { values: Array<unknown>; cursor?: string; hasMore?: boolean } | void
   search?: (
     search: DataTableSearchQuery,
     query?: DataTableQueryState,
@@ -654,6 +744,10 @@ export interface DataTableCellState {
   editingInvalid: boolean
   editingDirty: boolean
   editingMessage?: string
+  editPending?: boolean
+  editError?: unknown
+  editRollback?: boolean
+  editTransactionId?: string
   dragging?: boolean
 }
 
@@ -718,12 +812,23 @@ export interface DataTableEditingState<Row extends Record<string, any> = Record<
   dirty: boolean
   invalid: boolean
   message?: string
+  pending?: boolean
+  error?: unknown
+  rollback?: boolean
+  transactionId?: string
 }
 
 export interface DataTableEditCommitPayload<Row extends Record<string, any> = Record<string, any>> {
   state: DataTableEditingState<Row>
   value: unknown
   previousValue: unknown
+  rowId: DataTableRowId
+  columnId: string
+  row: Row
+  draft: unknown
+  parsedValue: unknown
+  transactionId: string
+  source: DataTableCommitSource
 }
 
 export interface DataTableEditError<Row extends Record<string, any> = Record<string, any>> {
@@ -752,10 +857,15 @@ export interface DataTableEditingOptions<Row extends Record<string, any> = Recor
   cancelOnEscape?: boolean
   selectTextOnStart?: boolean
   optimistic?: boolean
+  commitStrategy?: DataTableEditCommitStrategy
   className?: string
   onBeforeEditStart?: (context: DataTableCellContext<Row>) => boolean | void
   onEditStart?: (state: DataTableEditingState<Row>) => void
+  onBeforeEditCommit?: (payload: DataTableEditCommitPayload<Row>) => true | string | Promise<true | string>
+  onEditPending?: (payload: DataTableEditCommitPayload<Row>) => void
   onEditCommit?: (payload: DataTableEditCommitPayload<Row>) => void | Promise<void>
+  onEditSuccess?: (payload: DataTableEditCommitPayload<Row>) => void
+  onEditRollback?: (payload: DataTableEditCommitPayload<Row>) => void
   onEditCancel?: (state: DataTableEditingState<Row>) => void
   onEditError?: (error: DataTableEditError<Row>) => void
 }
@@ -769,12 +879,40 @@ export interface DataTableResolvedEditingOptions<Row extends Record<string, any>
   cancelOnEscape: boolean
   selectTextOnStart: boolean
   optimistic: boolean
+  commitStrategy: DataTableEditCommitStrategy
   className: string
   onBeforeEditStart?: (context: DataTableCellContext<Row>) => boolean | void
   onEditStart?: (state: DataTableEditingState<Row>) => void
+  onBeforeEditCommit?: (payload: DataTableEditCommitPayload<Row>) => true | string | Promise<true | string>
+  onEditPending?: (payload: DataTableEditCommitPayload<Row>) => void
   onEditCommit?: (payload: DataTableEditCommitPayload<Row>) => void | Promise<void>
+  onEditSuccess?: (payload: DataTableEditCommitPayload<Row>) => void
+  onEditRollback?: (payload: DataTableEditCommitPayload<Row>) => void
   onEditCancel?: (state: DataTableEditingState<Row>) => void
   onEditError?: (error: DataTableEditError<Row>) => void
+}
+
+export interface DataTableAccessibilityOptions {
+  enabled?: boolean
+  mode?: DataTableAccessibilityMode
+  announceSelection?: boolean
+  announceEdits?: boolean
+  highContrast?: boolean
+}
+
+export interface DataTableResolvedAccessibilityOptions {
+  enabled: boolean
+  mode: DataTableAccessibilityMode
+  announceSelection: boolean
+  announceEdits: boolean
+  highContrast: boolean
+}
+
+export interface DataTableAccessibilityState {
+  role: 'grid' | 'application'
+  activeDescription: string
+  liveMessage: string
+  highContrast: boolean
 }
 
 export interface DataTableInteractionHoverOptions {
@@ -1120,6 +1258,8 @@ export interface DataTableColumnOrderingOptions {
 export interface DataTableFilterUiOptions {
   headerMenu?: boolean
   filterRow?: boolean
+  advancedPanel?: boolean
+  chips?: boolean
 }
 
 export interface DataTableViewGroupingOptions<Row extends Record<string, any> = Record<string, any>> {
@@ -1134,6 +1274,40 @@ export interface DataTableViewGroupingOptions<Row extends Record<string, any> = 
   controlled?: boolean
 }
 
+export interface DataTableTreeDataOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled?: boolean
+  getParentId?: (row: Row) => DataTableRowId | null
+  getChildren?: (row: Row) => Array<Row> | Promise<Array<Row>>
+  expanded?: 'all' | 'none' | Array<DataTableRowId>
+  mode?: DataTableViewMode
+}
+
+export interface DataTableResolvedTreeDataOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled: boolean
+  getParentId?: (row: Row) => DataTableRowId | null
+  getChildren?: (row: Row) => Array<Row> | Promise<Array<Row>>
+  expanded: 'all' | 'none' | Array<DataTableRowId>
+  mode: DataTableViewMode
+}
+
+export interface DataTableDetailRowsOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled?: boolean
+  height?: number | ((context: DataTableCellContext<Row>) => number)
+  template?: DataTableDetailTemplate<Row>
+  expanded?: Array<DataTableRowId>
+}
+
+export interface DataTableResolvedDetailRowsOptions<Row extends Record<string, any> = Record<string, any>> {
+  enabled: boolean
+  height: number | ((context: DataTableCellContext<Row>) => number)
+  template?: DataTableDetailTemplate<Row>
+  expanded: Array<DataTableRowId>
+}
+
+export type DataTableDetailTemplate<Row extends Record<string, any> = Record<string, any>> = (
+  context: DataTableCellContext<Row> & { expanded: boolean },
+) => NovaSchema | Array<NovaSchema> | null | undefined
+
 export interface DataTableViewOptions {
   sorting?: false | DataTableViewSortingOptions
   filtering?: false | DataTableViewFilteringOptions
@@ -1144,6 +1318,7 @@ export interface DataTableViewOptions {
   filterUi?: false | DataTableFilterUiOptions
   grouping?: false | DataTableViewGroupingOptions
   groupingPinnedRows?: false | DataTableGroupingPinnedRowsOptions
+  treeData?: false | DataTableTreeDataOptions
 }
 
 export interface DataTableResolvedViewOptions {
@@ -1159,6 +1334,7 @@ export interface DataTableResolvedViewOptions {
     expanded: 'all' | 'none' | Array<string>
   }
   groupingPinnedRows: false | DataTableResolvedGroupingPinnedRowsOptions
+  treeData: false | DataTableResolvedTreeDataOptions
 }
 
 export interface DataTableViewState {
@@ -1215,11 +1391,45 @@ export interface DataTableGrandFooterViewRow<Row extends Record<string, any> = R
   rows: Array<Row>
 }
 
+export interface DataTableTreeViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'tree'
+  row?: Row
+  rowId?: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+  level: number
+  expanded: boolean
+}
+
+export interface DataTableMasterViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'master'
+  row?: Row
+  rowId?: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+  detailExpanded: boolean
+}
+
+export interface DataTableDetailViewRow<Row extends Record<string, any> = Record<string, any>> {
+  kind: 'detail'
+  rowId: DataTableRowId
+  storeIndex: number
+  viewIndex: number
+  depth: number
+  sourceRow?: Row
+  height: number
+}
+
 export type DataTableViewRow<Row extends Record<string, any> = Record<string, any>> =
   | DataTableDataViewRow<Row>
   | DataTableGroupViewRow<Row>
   | DataTableGroupFooterViewRow<Row>
   | DataTableGrandFooterViewRow<Row>
+  | DataTableTreeViewRow<Row>
+  | DataTableMasterViewRow<Row>
+  | DataTableDetailViewRow<Row>
 
 export interface DataTableRowReorderPayload {
   rowId: DataTableRowId
@@ -1325,6 +1535,7 @@ export interface DataTableViewport {
 
 export interface DataTableRootOptions<Row extends Record<string, any> = Record<string, any>> {
   columns?: Array<DataTableColumnInput<Row>>
+  columnGroups?: Array<DataTableColumnGroupInput>
   pinnedColumns?: DataTablePinnedColumns
   pinnedRows?: DataTablePinnedRows<Row>
   rowHeight?: number
@@ -1341,6 +1552,10 @@ export interface DataTableRootOptions<Row extends Record<string, any> = Record<s
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<Row>
   keyboardNavigation?: false | DataTableKeyboardNavigationOptions
+  history?: false | DataTableHistoryOptions
+  fillHandle?: false | DataTableFillHandleOptions
+  accessibility?: false | DataTableAccessibilityOptions
+  detailRows?: false | DataTableDetailRowsOptions<Row>
   columnState?: DataTableColumnState
   statePersistence?: false | DataTableStatePersistenceOptions
   performance?: DataTablePerformanceOptions
@@ -1394,6 +1609,7 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   rows?: Array<Row>
   rowKey?: DataTableRowKey<Row>
   columns: Array<DataTableColumnInput<Row>>
+  columnGroups: Array<DataTableColumnGroupInput>
   pinnedColumns: DataTablePinnedColumns
   pinnedRows: DataTablePinnedRows<Row>
   interaction: DataTableResolvedInteractionOptions
@@ -1406,6 +1622,10 @@ export interface DataTableRootResolvedProps<Row extends Record<string, any> = Re
   zoom: false | DataTableResolvedZoomOptions
   editing: false | DataTableResolvedEditingOptions<Row>
   keyboardNavigation: false | DataTableResolvedKeyboardNavigationOptions
+  history: false | DataTableResolvedHistoryOptions
+  fillHandle: false | DataTableResolvedFillHandleOptions
+  accessibility: false | DataTableResolvedAccessibilityOptions
+  detailRows: false | DataTableResolvedDetailRowsOptions<Row>
   columnState: DataTableResolvedColumnState
   statePersistence: false | DataTableResolvedStatePersistenceOptions
   performance: DataTableResolvedPerformanceOptions
@@ -1491,6 +1711,15 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   commitEdit: (value?: unknown) => Promise<void>
   cancelEdit: () => void
   getEditingState: () => DataTableEditingState<Row> | null
+  undo: () => boolean
+  redo: () => boolean
+  canUndo: () => boolean
+  canRedo: () => boolean
+  clearHistory: () => void
+  getHistoryState: () => DataTableHistoryState<Row>
+  clearSelectionValues: () => DataTableTransaction<Row> | null
+  fillSelection: (direction: DataTableFillDirection, options?: Partial<DataTableFillHandleOptions>) => DataTableTransaction<Row> | null
+  getAccessibilityState: () => DataTableAccessibilityState
   refresh: () => void
   batch: (callback: (api: DataTableRootApi<Row>) => void) => void
   getViewport: () => DataTableViewport
@@ -1563,6 +1792,11 @@ export interface DataTableStoreApi<Row extends Record<string, any> = Record<stri
   clearDirtyState: () => void
   ensureRange: (range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext) => Promise<void>
   loadSummary: (query?: DataTableQueryState) => Promise<Record<string, unknown> | undefined>
+  loadFilterValues: (
+    columnId: string,
+    query?: DataTableQueryState,
+    cursor?: string,
+  ) => Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined>
   searchSource: (
     search: DataTableSearchQuery,
     query?: DataTableQueryState,

@@ -12,9 +12,13 @@ import { NovaCanvas, type NovaCanvasReadyPayload } from '@endge/nova-vue'
 import { registerNovaUIKit } from '@endge/nova-ui-kit'
 import {
   type DataTableCellContext,
+  type DataTableAccessibilityOptions,
+  type DataTableAccessibilityState,
   type DataTableColumnResizePayload,
   type DataTableColumnInput,
+  type DataTableColumnGroupInput,
   type DataTableColumnState,
+  type DataTableDetailRowsOptions,
   type DataTableDomEditorContext,
   type DataTableEditingOptions,
   type DataTableEditingState,
@@ -38,6 +42,10 @@ import {
   type DataTableRowKey,
   type DataTableKeyboardAction,
   type DataTableKeyboardNavigationOptions,
+  type DataTableFillDirection,
+  type DataTableFillHandleOptions,
+  type DataTableHistoryOptions,
+  type DataTableHistoryState,
   type DataTablePersistedState,
   type DataTableResolvedColumnState,
   type DataTableRootOptions,
@@ -55,6 +63,7 @@ import {
   type DataTableTemplate,
   type DataTableTextSelectionOptions,
   type DataTableTooltipOptions,
+  type DataTableTransaction,
   type DataTableViewOptions,
   type DataTableViewState,
   type DataTableViewport,
@@ -74,6 +83,7 @@ interface DataTableVueProps {
   data?: Array<BaseRow>
   rowKey?: DataTableRowKey<BaseRow>
   columns?: Array<DataTableColumnInput<BaseRow>>
+  columnGroups?: Array<DataTableColumnGroupInput>
   pinnedColumns?: DataTablePinnedColumns
   pinnedRows?: DataTablePinnedRows<BaseRow>
   rowHeight?: number
@@ -90,6 +100,10 @@ interface DataTableVueProps {
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<BaseRow>
   keyboardNavigation?: false | DataTableKeyboardNavigationOptions
+  history?: false | DataTableHistoryOptions
+  fillHandle?: false | DataTableFillHandleOptions
+  accessibility?: false | DataTableAccessibilityOptions
+  detailRows?: false | DataTableDetailRowsOptions<BaseRow>
   columnState?: DataTableColumnState
   statePersistence?: false | DataTableStatePersistenceOptions
   performance?: DataTablePerformanceOptions
@@ -159,6 +173,10 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   zoom: undefined,
   editing: undefined,
   keyboardNavigation: undefined,
+  history: undefined,
+  fillHandle: undefined,
+  accessibility: undefined,
+  detailRows: undefined,
   columnState: undefined,
   statePersistence: undefined,
   performance: undefined,
@@ -198,6 +216,7 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onKeyboardAction: undefined,
   devtools: undefined,
   columns: () => [],
+  columnGroups: () => [],
   pinnedColumns: () => ({}),
   pinnedRows: () => ({}),
 })
@@ -719,6 +738,15 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   commitEdit: value => getRootApi().commitEdit(value),
   cancelEdit: () => getRootApi().cancelEdit(),
   getEditingState: () => getRootApi().getEditingState(),
+  undo: () => getRootApi().undo(),
+  redo: () => getRootApi().redo(),
+  canUndo: () => getRootApi().canUndo(),
+  canRedo: () => getRootApi().canRedo(),
+  clearHistory: () => getRootApi().clearHistory(),
+  getHistoryState: (): DataTableHistoryState<BaseRow> => getRootApi().getHistoryState(),
+  clearSelectionValues: (): DataTableTransaction<BaseRow> | null => getRootApi().clearSelectionValues(),
+  fillSelection: (direction: DataTableFillDirection, options?: Partial<DataTableFillHandleOptions>): DataTableTransaction<BaseRow> | null => getRootApi().fillSelection(direction, options),
+  getAccessibilityState: (): DataTableAccessibilityState => getRootApi().getAccessibilityState(),
   refresh: () => getRootApi().refresh(),
   batch: callback => getRootApi().batch(callback),
   getViewport: () => getRootApi().getViewport(),
@@ -795,6 +823,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :rows="rootRows"
         :row-key="rowKey"
         :columns="rootColumns"
+        :column-groups="columnGroups"
         :pinned-columns="pinnedColumns"
         :pinned-rows="rootPinnedRows"
         :row-height="rowHeight"
@@ -811,6 +840,10 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :zoom="zoom"
         :editing="rootEditing"
         :keyboard-navigation="keyboardNavigation"
+        :history="history"
+        :fill-handle="fillHandle"
+        :accessibility="accessibility"
+        :detail-rows="detailRows"
         :column-state="columnState"
         :state-persistence="statePersistence"
         :performance="performance"

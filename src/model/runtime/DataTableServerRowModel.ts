@@ -16,6 +16,10 @@ export interface DataTableServerRowModelSnapshot {
   requestId: number
   summary: DataTableSummaryState | null
   subscribed: boolean
+  loading: boolean
+  error: string | null
+  staleResponsesIgnored: number
+  cacheHitRate: number
 }
 
 /**
@@ -30,6 +34,11 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
   private summary: DataTableSummaryState | null = null
   private unsubscribe: (() => void) | void
   private abortController: AbortController | null = null
+  private loading = false
+  private error: string | null = null
+  private staleResponsesIgnored = 0
+  private cacheHits = 0
+  private cacheMisses = 0
 
   constructor(
     private readonly store: DataTableStoreApi<Row>,
@@ -70,15 +79,24 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
     const requestId = ++this.requestId
     const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null
     this.abortController = abortController
+    this.loading = true
+    this.error = null
     try {
       await this.store.ensureRange(range, query, {
         revision,
         requestId,
         signal: abortController?.signal,
       })
-      return revision === this.revision && !abortController?.signal.aborted
+      const fresh = revision === this.revision && !abortController?.signal.aborted
+      if (!fresh) this.staleResponsesIgnored += 1
+      else this.cacheMisses += 1
+      return fresh
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : 'Range request failed'
+      throw error
     } finally {
       if (this.abortController === abortController) this.abortController = null
+      if (revision === this.revision) this.loading = false
     }
   }
 
@@ -111,6 +129,13 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
   }
 
   /**
+   * Загружает distinct filter values через server-side adapter.
+   */
+  async loadFilterValues(columnId: string, cursor?: string): Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined> {
+    return this.store.loadFilterValues(columnId, this.query ?? undefined, cursor)
+  }
+
+  /**
    * Делегирует поиск source adapter с текущим query.
    */
   search(
@@ -138,6 +163,10 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
       requestId: this.requestId,
       summary: this.summary ? { ...this.summary, values: { ...this.summary.values } } : null,
       subscribed: !!this.unsubscribe,
+      loading: this.loading,
+      error: this.error,
+      staleResponsesIgnored: this.staleResponsesIgnored,
+      cacheHitRate: this.cacheHits + this.cacheMisses === 0 ? 0 : this.cacheHits / (this.cacheHits + this.cacheMisses),
     }
   }
 

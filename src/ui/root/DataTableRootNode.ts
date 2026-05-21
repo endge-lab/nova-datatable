@@ -39,6 +39,10 @@ import {
   createDataTableClipboardPasteFeedback,
   type DataTableClipboardFeedbackState,
 } from '@/model/runtime/DataTableClipboardFeedback'
+import { createDataTableAccessibilityState } from '@/model/runtime/DataTableAccessibility'
+import { createDataTableFillDeltas } from '@/model/runtime/DataTableFillHandle'
+import { parseDataTableClipboardMatrix } from '@/model/runtime/DataTableFillMatrix'
+import { DataTableTransactionHistory } from '@/model/runtime/DataTableTransactionHistory'
 import {
   DATATABLE_ROOT_NODE_DESCRIPTOR,
   normalizeDataTableRootProps,
@@ -46,6 +50,7 @@ import {
 } from '@/ui/root/datatable-root.config'
 import type {
   DataTableActiveCellDirection,
+  DataTableAccessibilityState,
   DataTableCellContext,
   DataTableCellRect,
   DataTableColumnInput,
@@ -53,10 +58,13 @@ import type {
   DataTableDelta,
   DataTableDirtyState,
   DataTableEditContext,
+  DataTableEditCommitPayload,
   DataTableEditingState,
   DataTableEditorType,
   DataTableFilterOperator,
   DataTableFilterRule,
+  DataTableFillDirection,
+  DataTableFillHandleOptions,
   DataTableGroupNode,
   DataTableGroupTemplateContext,
   DataTableHoverMode,
@@ -95,6 +103,7 @@ import type {
   DataTableStateSlice,
   DataTableSummaryState,
   DataTableTooltipContext,
+  DataTableTransaction,
   DataTableViewport,
   DataTableViewRow,
   DataTableViewState,
@@ -243,6 +252,7 @@ export class DataTableRootNode<
   private serverRowModel: DataTableServerRowModel<Row>
   private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
   private readonly summaryEngine = new DataTableSummaryEngine<Row>()
+  private transactionHistory!: DataTableTransactionHistory<Row>
   private readonly widthOverrides = new Map<string, number>()
   private columnStateOverride: DataTableColumnState | null = null
   private readonly columnIndexById = new Map<string, number>()
@@ -339,6 +349,7 @@ export class DataTableRootNode<
     })
     this.viewPipeline = new DataTableViewPipeline(this.store)
     this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
+    this.transactionHistory = new DataTableTransactionHistory(this.store, props.history)
     this.textSelection.configure(resolveCoreTextSelectionOptions(props.textSelection))
     const persistedState = this.readPersistedState()
     this.applyPersistedColumnState(persistedState)
@@ -404,6 +415,15 @@ export class DataTableRootNode<
       commitEdit: value => this.commitEdit(value),
       cancelEdit: () => this.cancelEdit(),
       getEditingState: () => this.cloneEditingState(),
+      undo: () => this.undo(),
+      redo: () => this.redo(),
+      canUndo: () => this.transactionHistory.canUndo(),
+      canRedo: () => this.transactionHistory.canRedo(),
+      clearHistory: () => this.transactionHistory.clear(),
+      getHistoryState: () => this.transactionHistory.state(),
+      clearSelectionValues: () => this.clearSelectionValues(),
+      fillSelection: (direction, options) => this.fillSelection(direction, options),
+      getAccessibilityState: () => this.getAccessibilityState(),
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
@@ -656,6 +676,7 @@ export class DataTableRootNode<
       this.viewPipeline = new DataTableViewPipeline(this.store)
       this.serverRowModel.dispose()
       this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
+      this.transactionHistory = new DataTableTransactionHistory(this.store, this.props.history)
       this.scrollX = 0
       this.scrollY = 0
       this.hoverTarget = null
@@ -692,6 +713,7 @@ export class DataTableRootNode<
       this.clearStatePersistenceTimer()
       if (this.props.statePersistence) this.restoreState()
     }
+    if (changedKeys.includes('history')) this.transactionHistory.configure(this.props.history)
     if (changedKeys.includes('editing') && this.props.editing === false) this.cancelEdit()
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
@@ -845,7 +867,7 @@ export class DataTableRootNode<
   private createPersistedState(): DataTablePersistedState<Row> {
     const viewState = this.viewPipeline.getState()
     const state: DataTablePersistedState<Row> = {
-      version: 1,
+      version: this.props.statePersistence ? this.props.statePersistence.version : 1,
       savedAt: Date.now(),
     }
     if (this.isStateSliceIncluded('columnState')) {
@@ -912,7 +934,12 @@ export class DataTableRootNode<
       const raw = storage.getItem(persistence.key)
       if (!raw) return null
       const parsed = JSON.parse(raw) as Partial<DataTablePersistedState<Row>>
-      if (parsed.version !== 1) return null
+      if (typeof parsed.version !== 'number') return null
+      if (parsed.version !== persistence.version) {
+        return persistence.migrate
+          ? persistence.migrate(parsed as DataTablePersistedState<Row>, parsed.version) as DataTablePersistedState<Row>
+          : null
+      }
       return parsed as DataTablePersistedState<Row>
     } catch {
       return null
@@ -977,6 +1004,9 @@ export class DataTableRootNode<
         left: [...merged.pinned.left],
         right: [...merged.pinned.right],
       },
+      groups: [...merged.groups],
+      autosizeMode: merged.autosizeMode,
+      version: merged.version,
     }
   }
 
@@ -1288,6 +1318,36 @@ export class DataTableRootNode<
       this.deltaFlushQueued = true
       this.scheduleDeltaFlush()
     }
+  }
+
+  /**
+   * Применяет пользовательскую transaction и записывает ее в history.
+   */
+  private commitDeltas(
+    deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>,
+    options: { source: DataTableTransaction<Row>['source']; label?: string; record?: boolean },
+  ): DataTableTransaction<Row> | null {
+    const transaction = this.transactionHistory.commit(deltas, options)
+    this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return transaction
+  }
+
+  /**
+   * Откатывает последнюю пользовательскую transaction.
+   */
+  private undo(): boolean {
+    const changed = this.transactionHistory.undo()
+    if (changed) this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return changed
+  }
+
+  /**
+   * Повторяет последнюю отмененную transaction.
+   */
+  private redo(): boolean {
+    const changed = this.transactionHistory.redo()
+    if (changed) this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return changed
   }
 
   /**
@@ -2026,6 +2086,9 @@ export class DataTableRootNode<
         left: override?.pinned?.left ? [...override.pinned.left] : [...base.pinned.left],
         right: override?.pinned?.right ? [...override.pinned.right] : [...base.pinned.right],
       },
+      groups: override?.groups ? [...override.groups] : [...base.groups],
+      autosizeMode: override?.autosizeMode ?? base.autosizeMode,
+      version: override?.version ?? base.version,
     }
   }
 
@@ -2041,6 +2104,9 @@ export class DataTableRootNode<
         left: [...state.pinned.left],
         right: [...state.pinned.right],
       },
+      groups: [...state.groups],
+      autosizeMode: state.autosizeMode,
+      version: state.version,
     }
   }
 
@@ -3705,6 +3771,10 @@ export class DataTableRootNode<
       editingInvalid: editingActive ? editing.invalid : false,
       editingDirty: editingActive ? editing.dirty : false,
       editingMessage: editingActive ? editing.message : undefined,
+      editPending: editingActive ? editing.pending : false,
+      editError: editingActive ? editing.error : undefined,
+      editRollback: editingActive ? editing.rollback : false,
+      editTransactionId: editingActive ? editing.transactionId : undefined,
       dragging: zone === 'header' && !!columnDrag?.active && columnDrag.column.id === columnRect.column.id,
     }
   }
@@ -5941,6 +6011,44 @@ export class DataTableRootNode<
   }
 
   /**
+   * Очищает значения выделенных data cells как единую undoable transaction.
+   */
+  private clearSelectionValues(): DataTableTransaction<Row> | null {
+    if (!this.selection || this.selection.ranges.length === 0) return null
+    const deltas: Array<DataTableDelta<Row>> = []
+    for (const range of this.selection.ranges) {
+      const rows = this.resolveRowsForSelectionRange(range)
+      const columns = this.resolveColumnsForSelectionRange(range, false)
+      for (const row of rows) {
+        if (row.rowId === undefined) continue
+        for (const column of columns) {
+          if (column.editable === false) continue
+          const key = typeof column.field === 'string' ? column.field : column.id
+          deltas.push({ type: 'patch', rowId: row.rowId, patch: { [key]: '' } as Partial<Row> })
+        }
+      }
+    }
+    if (deltas.length === 0) return null
+    return this.commitDeltas(deltas, { source: 'clear', label: 'Clear selection' })
+  }
+
+  /**
+   * Заполняет выделение по текущему fill handle mode.
+   */
+  private fillSelection(
+    direction: DataTableFillDirection,
+    options: Partial<DataTableFillHandleOptions> = {},
+  ): DataTableTransaction<Row> | null {
+    const fillHandle = this.props.fillHandle
+    if (fillHandle === false || !fillHandle.enabled || !this.selection?.ranges[0]) return null
+    if (!fillHandle.directions.includes(direction)) return null
+    const mode = options.mode ?? fillHandle.mode
+    const deltas = createDataTableFillDeltas(this.store, this.selection.ranges[0], direction, { mode })
+    if (deltas.length === 0) return null
+    return this.commitDeltas(deltas, { source: 'fill', label: `Fill ${direction}` })
+  }
+
+  /**
    * Выполняет внутренний шаг copySelection для DataTableRootNode.
    */
   private copySelection(): string {
@@ -5968,7 +6076,7 @@ export class DataTableRootNode<
     const sourceText = text ?? await this.readClipboardText()
     if (!sourceText) return emptyResult
 
-    const matrix = parseClipboardMatrix(sourceText, this.props.clipboard.paste.parseFormat)
+    const matrix = parseDataTableClipboardMatrix(sourceText, this.props.clipboard.paste.parseFormat)
     const payload = {
       text: sourceText,
       matrix,
@@ -5980,8 +6088,7 @@ export class DataTableRootNode<
       const override = await (this.props.onBeforePaste?.(payload) ?? this.props.clipboard.onBeforePaste?.(payload))
       if (override === false) return emptyResult
       if (Array.isArray(override)) {
-        this.store.applyDeltaBatch(override)
-        this.refresh(['data', 'interaction'])
+        this.commitDeltas(override, { source: 'paste', label: 'Paste override' })
         const result = { committed: override.length, skipped: 0, invalid: [], deltas: override } satisfies DataTablePasteResult<Row>
         this.setClipboardPasteResultFeedback(result)
         this.props.onPasteCommit?.(result)
@@ -5997,8 +6104,7 @@ export class DataTableRootNode<
         return result
       }
       if (result.deltas.length > 0) {
-        this.store.applyDeltaBatch(result.deltas)
-        this.refresh(['data', 'interaction'])
+        this.commitDeltas(result.deltas, { source: 'paste', label: 'Paste' })
       }
       this.setClipboardPasteResultFeedback(result)
       this.props.onPasteCommit?.(result)
@@ -6586,18 +6692,66 @@ export class DataTableRootNode<
       state.dirty = !Object.is(parsed, state.initialValue)
       state.invalid = false
       state.message = undefined
+      state.pending = true
+      state.transactionId = state.transactionId ?? `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-      await this.props.editing.onEditCommit?.({
+      const payload: DataTableEditCommitPayload<Row> = {
         state,
         value: parsed,
         previousValue: state.initialValue,
-      })
+        rowId: state.rowId,
+        columnId: state.column.id,
+        row: state.row,
+        draft,
+        parsedValue: parsed,
+        transactionId: state.transactionId,
+        source: 'edit',
+      }
 
-      if (this.props.editing.optimistic) this.applyCommittedEditValue(state, parsed)
+      const beforeResult = await this.props.editing.onBeforeEditCommit?.(payload)
+      if (beforeResult !== undefined && beforeResult !== true) {
+        this.setEditingInvalid(typeof beforeResult === 'string' ? beforeResult : 'Edit commit rejected')
+        return
+      }
+
+      this.props.editing.onEditPending?.(payload)
+      this.emitEditingChange()
+
+      const strategy = this.props.editing.commitStrategy
+      if (strategy === 'optimistic') this.applyCommittedEditValue(state, parsed)
+
+      await this.props.editing.onEditCommit?.(payload)
+
+      if (strategy === 'pessimistic') this.applyCommittedEditValue(state, parsed)
+
+      state.pending = false
+      state.error = undefined
+      state.rollback = false
       this.editingState = null
+      this.props.editing.onEditSuccess?.(payload)
       this.emitEditingChange()
       this.refresh(['data', 'interaction'])
     } catch (error) {
+      if (state.transactionId && this.props.editing.commitStrategy === 'optimistic') {
+        const rolledBack = this.undo()
+        if (rolledBack) {
+          state.rollback = true
+          this.props.editing.onEditRollback?.({
+            state,
+            value: parsed,
+            previousValue: state.initialValue,
+            rowId: state.rowId,
+            columnId: state.column.id,
+            row: state.row,
+            draft,
+            parsedValue: parsed,
+            transactionId: state.transactionId,
+            source: 'edit',
+          })
+        }
+      }
+      state.pending = false
+      state.error = error
       this.setEditingInvalid(error instanceof Error ? error.message : 'Edit commit failed')
       const nextState = this.editingState ?? state
       this.props.editing.onEditError?.({
@@ -6653,16 +6807,19 @@ export class DataTableRootNode<
   /**
    * Применяет подготовленное состояние DataTableRootNode.
    */
-  private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): void {
+  private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): DataTableTransaction<Row> | null {
     if (state.zone === 'body') {
-      this.store.setCell(state.rowId, state.column.id, value)
-      return
+      return this.commitDeltas(
+        { type: 'setCell', rowId: state.rowId, columnId: state.column.id, value },
+        { source: 'edit', label: `Edit ${state.column.id}` },
+      )
     }
 
     const key = typeof state.column.field === 'string'
       ? state.column.field
       : state.column.id
     state.row[key as keyof Row] = value as Row[keyof Row]
+    return null
   }
 
   /**
@@ -6748,6 +6905,10 @@ export class DataTableRootNode<
         editingInvalid: this.editingState.invalid,
         editingDirty: this.editingState.dirty,
         editingMessage: this.editingState.message,
+        editPending: this.editingState.pending,
+        editError: this.editingState.error,
+        editRollback: this.editingState.rollback,
+        editTransactionId: this.editingState.transactionId,
       },
       zone: context.zone,
       store: context.store,
@@ -6766,6 +6927,20 @@ export class DataTableRootNode<
       hoverAlpha: this.props.hoverAlpha,
       selectionAlpha: this.props.selectionAlpha,
     }
+  }
+
+  /**
+   * Возвращает compact accessibility state для DOM overlay wrapper.
+   */
+  private getAccessibilityState(): DataTableAccessibilityState {
+    return createDataTableAccessibilityState(this.props.accessibility, {
+      rowCount: this.viewPipeline.rowCount,
+      columnCount: this.resolvedColumns.length,
+      activeCell: this.selection?.activeCell ?? null,
+      selection: this.selection,
+      editing: !!this.editingState,
+      lastAction: this.keyboardFocusActive ? 'Table focused' : undefined,
+    })
   }
 
   /**
@@ -7286,6 +7461,9 @@ function cloneColumnStateInput(state: DataTableColumnState): DataTableColumnStat
           right: state.pinned.right ? [...state.pinned.right] : undefined,
         }
       : undefined,
+    groups: state.groups ? [...state.groups] : undefined,
+    autosizeMode: state.autosizeMode,
+    version: state.version,
   }
 }
 

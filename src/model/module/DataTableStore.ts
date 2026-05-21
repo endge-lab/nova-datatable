@@ -462,6 +462,19 @@ implements DataTableStoreApi<Row> {
   }
 
   /**
+   * Загружает distinct filter values из server-side adapter.
+   */
+  async loadFilterValues(
+    columnId: string,
+    query?: DataTableQueryState,
+    cursor?: string,
+  ): Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined> {
+    if (!this.source?.loadFilterValues) return undefined
+    const result = await this.source.loadFilterValues(columnId, query, cursor)
+    return result ?? undefined
+  }
+
+  /**
    * Делегирует поиск в lazy/source adapter.
    */
   async searchSource(
