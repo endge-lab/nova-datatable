@@ -12,8 +12,13 @@ import { NovaCanvas, type NovaCanvasReadyPayload } from '@endge/nova-vue'
 import { registerNovaUIKit } from '@endge/nova-ui-kit'
 import {
   type DataTableCellContext,
+  type DataTableAccessibilityOptions,
+  type DataTableAccessibilityState,
   type DataTableColumnResizePayload,
   type DataTableColumnInput,
+  type DataTableColumnGroupInput,
+  type DataTableColumnState,
+  type DataTableDetailRowsOptions,
   type DataTableDomEditorContext,
   type DataTableEditingOptions,
   type DataTableEditingState,
@@ -35,6 +40,14 @@ import {
   type DataTableQueryState,
   type DataTableRowReorderPayload,
   type DataTableRowKey,
+  type DataTableKeyboardAction,
+  type DataTableKeyboardNavigationOptions,
+  type DataTableFillDirection,
+  type DataTableFillHandleOptions,
+  type DataTableHistoryOptions,
+  type DataTableHistoryState,
+  type DataTablePersistedState,
+  type DataTableResolvedColumnState,
   type DataTableRootOptions,
   type DataTableScrollbarLayerTemplate,
   type DataTableScrollbarOptions,
@@ -44,10 +57,13 @@ import {
   type DataTableSelectionOptions,
   type DataTableSelectionState,
   type DataTableSortState,
+  type DataTableSummaryState,
   type DataTableStoreApi,
+  type DataTableStatePersistenceOptions,
   type DataTableTemplate,
   type DataTableTextSelectionOptions,
   type DataTableTooltipOptions,
+  type DataTableTransaction,
   type DataTableViewOptions,
   type DataTableViewState,
   type DataTableViewport,
@@ -59,7 +75,7 @@ import {
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
-type BaseRow = Record<string, any>
+type BaseRow = any
 
 interface DataTableVueProps {
   store?: DataTableStoreApi<BaseRow>
@@ -67,6 +83,7 @@ interface DataTableVueProps {
   data?: Array<BaseRow>
   rowKey?: DataTableRowKey<BaseRow>
   columns?: Array<DataTableColumnInput<BaseRow>>
+  columnGroups?: Array<DataTableColumnGroupInput>
   pinnedColumns?: DataTablePinnedColumns
   pinnedRows?: DataTablePinnedRows<BaseRow>
   rowHeight?: number
@@ -82,6 +99,13 @@ interface DataTableVueProps {
   textSelection?: false | DataTableTextSelectionOptions
   zoom?: false | DataTableZoomOptions
   editing?: false | DataTableEditingOptions<BaseRow>
+  keyboardNavigation?: false | DataTableKeyboardNavigationOptions
+  history?: false | DataTableHistoryOptions
+  fillHandle?: false | DataTableFillHandleOptions
+  accessibility?: false | DataTableAccessibilityOptions
+  detailRows?: false | DataTableDetailRowsOptions<BaseRow>
+  columnState?: DataTableColumnState
+  statePersistence?: false | DataTableStatePersistenceOptions
   performance?: DataTablePerformanceOptions
   cellTemplate?: DataTableTemplate<BaseRow>
   headerTemplate?: DataTableTemplate<BaseRow>
@@ -92,10 +116,13 @@ interface DataTableVueProps {
   pinnedBottomTemplate?: DataTableGroupTemplate<BaseRow>
   onViewportChange?: (viewport: DataTableViewport) => void
   onColumnResize?: (payload: DataTableColumnResizePayload<BaseRow>) => void
+  onColumnStateChange?: (state: DataTableResolvedColumnState) => void
   onSortChange?: (state: DataTableSortState) => void
   onFilterChange?: (state: DataTableFilterState | DataTableFilterExpression) => void
   onSearchChange?: (state: DataTableSearchState) => void
   onQueryChange?: (query: DataTableQueryState) => void
+  onServerQueryChange?: (query: DataTableQueryState) => void
+  onSummaryChange?: (summary: DataTableSummaryState) => void
   onRowOrderChange?: (payload: DataTableRowReorderPayload) => void
   onColumnOrderChange?: (payload: DataTableColumnReorderPayload) => void
   onGroupingChange?: (state: DataTableGroupingState<BaseRow>) => void
@@ -113,6 +140,7 @@ interface DataTableVueProps {
   onPasteError?: DataTableClipboardOptions<BaseRow>['onPasteError']
   onZoomChange?: (state: DataTableZoomState) => void
   onEditingChange?: (state: DataTableEditingState<BaseRow> | null) => void
+  onKeyboardAction?: (action: DataTableKeyboardAction) => void
   width?: number | string
   height?: number | string
   maxDpr?: number
@@ -144,6 +172,13 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   textSelection: undefined,
   zoom: undefined,
   editing: undefined,
+  keyboardNavigation: undefined,
+  history: undefined,
+  fillHandle: undefined,
+  accessibility: undefined,
+  detailRows: undefined,
+  columnState: undefined,
+  statePersistence: undefined,
   performance: undefined,
   cellTemplate: undefined,
   headerTemplate: undefined,
@@ -154,10 +189,13 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   pinnedBottomTemplate: undefined,
   onViewportChange: undefined,
   onColumnResize: undefined,
+  onColumnStateChange: undefined,
   onSortChange: undefined,
   onFilterChange: undefined,
   onSearchChange: undefined,
   onQueryChange: undefined,
+  onServerQueryChange: undefined,
+  onSummaryChange: undefined,
   onRowOrderChange: undefined,
   onColumnOrderChange: undefined,
   onGroupingChange: undefined,
@@ -175,8 +213,10 @@ const props = withDefaults(defineProps<DataTableVueProps>(), {
   onPasteError: undefined,
   onZoomChange: undefined,
   onEditingChange: undefined,
+  onKeyboardAction: undefined,
   devtools: undefined,
   columns: () => [],
+  columnGroups: () => [],
   pinnedColumns: () => ({}),
   pinnedRows: () => ({}),
 })
@@ -186,10 +226,13 @@ const emit = defineEmits<{
   (event: 'destroy'): void
   (event: 'viewport-change', viewport: DataTableViewport): void
   (event: 'column-resize', payload: DataTableColumnResizePayload<BaseRow>): void
+  (event: 'column-state-change', state: DataTableResolvedColumnState): void
   (event: 'sort-change', state: DataTableSortState): void
   (event: 'filter-change', state: DataTableFilterState | DataTableFilterExpression): void
   (event: 'search-change', state: DataTableSearchState): void
   (event: 'query-change', query: DataTableQueryState): void
+  (event: 'server-query-change', query: DataTableQueryState): void
+  (event: 'summary-change', summary: DataTableSummaryState): void
   (event: 'row-order-change', payload: DataTableRowReorderPayload): void
   (event: 'column-order-change', payload: DataTableColumnReorderPayload): void
   (event: 'grouping-change', state: DataTableGroupingState<BaseRow>): void
@@ -205,6 +248,7 @@ const emit = defineEmits<{
   (event: 'paste-error', error: Parameters<NonNullable<DataTableClipboardOptions<BaseRow>['onPasteError']>>[0]): void
   (event: 'zoom-change', state: DataTableZoomState): void
   (event: 'editing-change', state: DataTableEditingState<BaseRow> | null): void
+  (event: 'keyboard-action', action: DataTableKeyboardAction): void
   (event: 'edit-start', state: DataTableEditingState<BaseRow>): void
   (event: 'edit-commit', payload: DataTableEditCommitPayload<BaseRow>): void
   (event: 'edit-cancel', state: DataTableEditingState<BaseRow>): void
@@ -434,7 +478,9 @@ function resolveRendererType(renderer: DataTableVueProps['renderer']): RendererT
   return RendererType.WebGL
 }
 
-function ready(payload: NovaCanvasReadyPayload): void {
+async function ready(payload: NovaCanvasReadyPayload): Promise<void> {
+  await nextTick()
+  await dataTableRoot.$ready()
   emit('ready', payload)
 }
 
@@ -450,6 +496,11 @@ function handleViewportChange(viewport: DataTableViewport): void {
 function handleColumnResize(payload: DataTableColumnResizePayload<BaseRow>): void {
   props.onColumnResize?.(payload)
   emit('column-resize', payload)
+}
+
+function handleColumnStateChange(state: DataTableResolvedColumnState): void {
+  props.onColumnStateChange?.(state)
+  emit('column-state-change', state)
 }
 
 function handleSortChange(state: DataTableSortState): void {
@@ -470,6 +521,16 @@ function handleSearchChange(state: DataTableSearchState): void {
 function handleQueryChange(query: DataTableQueryState): void {
   props.onQueryChange?.(query)
   emit('query-change', query)
+}
+
+function handleServerQueryChange(query: DataTableQueryState): void {
+  props.onServerQueryChange?.(query)
+  emit('server-query-change', query)
+}
+
+function handleSummaryChange(summary: DataTableSummaryState): void {
+  props.onSummaryChange?.(summary)
+  emit('summary-change', summary)
 }
 
 function handleRowOrderChange(payload: DataTableRowReorderPayload): void {
@@ -549,6 +610,11 @@ function handleEditingChange(state: DataTableEditingState<BaseRow> | null): void
   emit('editing-change', state)
 }
 
+function handleKeyboardAction(action: DataTableKeyboardAction): void {
+  props.onKeyboardAction?.(action)
+  emit('keyboard-action', action)
+}
+
 function setEditorDraft(value: unknown): void {
   editorDraft.value = value
 }
@@ -565,6 +631,12 @@ function onEditorInput(event: Event): void {
   const target = event.target as HTMLInputElement | HTMLSelectElement
   if (activeEditorType.value === 'checkbox') {
     editorDraft.value = (target as HTMLInputElement).checked
+    return
+  }
+  if (activeEditorType.value === 'select') {
+    const options = normalizeSelectOptions(activeEditorOptions.value)
+    const selected = options.find(option => String(option.value) === target.value)
+    editorDraft.value = selected ? selected.value : target.value
     return
   }
   editorDraft.value = target.value
@@ -644,8 +716,21 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   autosizeColumn: columnId => getRootApi().autosizeColumn(columnId),
   autosizeColumns: columnIds => getRootApi().autosizeColumns(columnIds),
   resetColumnWidth: columnId => getRootApi().resetColumnWidth(columnId),
+  getColumnState: () => getRootApi().getColumnState(),
+  setColumnState: state => getRootApi().setColumnState(state),
+  resetColumnState: () => getRootApi().resetColumnState(),
+  hideColumn: columnId => getRootApi().hideColumn(columnId),
+  showColumn: columnId => getRootApi().showColumn(columnId),
+  pinColumn: (columnId, side) => getRootApi().pinColumn(columnId, side),
+  unpinColumn: columnId => getRootApi().unpinColumn(columnId),
+  getPersistedState: (): DataTablePersistedState<BaseRow> | null => getRootApi().getPersistedState(),
+  saveState: (): DataTablePersistedState<BaseRow> | null => getRootApi().saveState(),
+  restoreState: () => getRootApi().restoreState(),
+  resetPersistedState: () => getRootApi().resetPersistedState(),
   scrollTo: (x, y) => getRootApi().scrollTo(x, y),
   scrollToRow: rowIndex => getRootApi().scrollToRow(rowIndex),
+  focusCell: (rowId, columnId) => getRootApi().focusCell(rowId, columnId),
+  moveActiveCell: (direction, options) => getRootApi().moveActiveCell(direction, options),
   getZoom: () => getRootApi().getZoom(),
   setZoom: value => getRootApi().setZoom(value),
   resetZoom: () => getRootApi().resetZoom(),
@@ -653,6 +738,15 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   commitEdit: value => getRootApi().commitEdit(value),
   cancelEdit: () => getRootApi().cancelEdit(),
   getEditingState: () => getRootApi().getEditingState(),
+  undo: () => getRootApi().undo(),
+  redo: () => getRootApi().redo(),
+  canUndo: () => getRootApi().canUndo(),
+  canRedo: () => getRootApi().canRedo(),
+  clearHistory: () => getRootApi().clearHistory(),
+  getHistoryState: (): DataTableHistoryState<BaseRow> => getRootApi().getHistoryState(),
+  clearSelectionValues: (): DataTableTransaction<BaseRow> | null => getRootApi().clearSelectionValues(),
+  fillSelection: (direction: DataTableFillDirection, options?: Partial<DataTableFillHandleOptions>): DataTableTransaction<BaseRow> | null => getRootApi().fillSelection(direction, options),
+  getAccessibilityState: (): DataTableAccessibilityState => getRootApi().getAccessibilityState(),
   refresh: () => getRootApi().refresh(),
   batch: callback => getRootApi().batch(callback),
   getViewport: () => getRootApi().getViewport(),
@@ -729,6 +823,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :rows="rootRows"
         :row-key="rowKey"
         :columns="rootColumns"
+        :column-groups="columnGroups"
         :pinned-columns="pinnedColumns"
         :pinned-rows="rootPinnedRows"
         :row-height="rowHeight"
@@ -744,6 +839,13 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :text-selection="textSelection"
         :zoom="zoom"
         :editing="rootEditing"
+        :keyboard-navigation="keyboardNavigation"
+        :history="history"
+        :fill-handle="fillHandle"
+        :accessibility="accessibility"
+        :detail-rows="detailRows"
+        :column-state="columnState"
+        :state-persistence="statePersistence"
         :performance="performance"
         :cell-template="rootCellTemplate"
         :header-template="rootHeaderTemplate"
@@ -755,10 +857,13 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :pinned-bottom-template="rootPinnedBottomTemplate"
         :on-viewport-change="handleViewportChange"
         :on-column-resize="handleColumnResize"
+        :on-column-state-change="handleColumnStateChange"
         :on-sort-change="handleSortChange"
         :on-filter-change="handleFilterChange"
         :on-search-change="handleSearchChange"
         :on-query-change="handleQueryChange"
+        :on-server-query-change="handleServerQueryChange"
+        :on-summary-change="handleSummaryChange"
         :on-row-order-change="handleRowOrderChange"
         :on-column-order-change="handleColumnOrderChange"
         :on-grouping-change="handleGroupingChange"
@@ -776,6 +881,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         :on-paste-error="handlePasteError"
         :on-zoom-change="handleZoomChange"
         :on-editing-change="handleEditingChange"
+        :on-keyboard-action="handleKeyboardAction"
         :layout="{ width: '100%', height: '100%' }"
       />
     </NovaCanvas>
@@ -811,6 +917,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
           {{ option.label }}
         </option>
       </select>
+      <!-- eslint-disable vue/html-self-closing -->
       <input
         v-else
         ref="editorElement"
@@ -824,6 +931,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         @keydown="onEditorKeydown"
         @blur="onEditorBlur"
       />
+      <!-- eslint-enable vue/html-self-closing -->
     </div>
   </div>
 </template>

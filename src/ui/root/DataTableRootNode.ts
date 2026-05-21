@@ -29,31 +29,55 @@ import {
 } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableInvalidationScope } from '@/model/runtime/DataTableInvalidationScope'
 import { DataTableRuntimeActions } from '@/model/runtime/DataTableRuntimeActions'
+import { DataTableSummaryEngine, type DataTableSummaryRule } from '@/model/runtime/DataTableSummaryEngine'
+import {
+  createDataTableClipboardFeedbackHidden,
+  createDataTableClipboardPasteErrorFeedback,
+  createDataTableClipboardPasteFeedback,
+  type DataTableClipboardFeedbackState,
+} from '@/model/runtime/DataTableClipboardFeedback'
+import { createDataTableAccessibilityState } from '@/model/runtime/DataTableAccessibility'
+import { createDataTableFillDeltas } from '@/model/runtime/DataTableFillHandle'
+import { parseDataTableClipboardMatrix } from '@/model/runtime/DataTableFillMatrix'
+import { DataTableTransactionHistory } from '@/model/runtime/DataTableTransactionHistory'
 import {
   DATATABLE_ROOT_NODE_DESCRIPTOR,
   normalizeDataTableRootProps,
   type DataTableRootDescriptor,
 } from '@/ui/root/datatable-root.config'
 import type {
+  DataTableActiveCellDirection,
+  DataTableAccessibilityState,
   DataTableCellContext,
   DataTableCellRect,
+  DataTableColumnInput,
+  DataTableColumnState,
   DataTableDelta,
   DataTableDirtyState,
   DataTableEditContext,
+  DataTableEditCommitPayload,
   DataTableEditingState,
   DataTableEditorType,
+  DataTableFilterOperator,
+  DataTableFilterRule,
+  DataTableFillDirection,
+  DataTableFillHandleOptions,
   DataTableGroupNode,
   DataTableGroupTemplateContext,
   DataTableHoverMode,
   DataTableInteractionState,
   DataTableInteractionTarget,
   DataTableClipboardFormat,
+  DataTableKeyboardAction,
   DataTablePinnedRowPosition,
+  DataTablePersistedState,
   DataTableQueryState,
   DataTableResolvedColumn,
   DataTableResolvedClipboardOptions,
+  DataTableResolvedColumnState,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedZoomWheelOptions,
   DataTableRootApi,
@@ -61,6 +85,7 @@ import type {
   DataTableRootProps,
   DataTableRootResolvedProps,
   DataTableRowId,
+  DataTableSearchDirection,
   DataTableSearchHighlightMode,
   DataTablePasteParseFormat,
   DataTableSelectionAnchor,
@@ -75,12 +100,16 @@ import type {
   DataTableSelectionState,
   DataTablePasteResult,
   DataTableStoreApi,
+  DataTableStateSlice,
+  DataTableSummaryState,
   DataTableTooltipContext,
+  DataTableTransaction,
   DataTableViewport,
   DataTableViewRow,
   DataTableViewState,
   DataTableZoomOptions,
   DataTableZoomState,
+  DataTablePasteInvalidCell,
 } from '@/model/types/datatable.types'
 
 interface ResizeState<Row extends Record<string, any>> {
@@ -111,6 +140,41 @@ interface VisibleColumnRect<Row extends Record<string, any>> {
   columnIndex: number
   x: number
   width: number
+}
+
+interface FilterUiTarget<Row extends Record<string, any>> {
+  column: DataTableResolvedColumn<Row>
+  rect: DataTableCellRect
+  action: 'operator' | 'value' | 'clear'
+}
+
+type ColumnMenuActionId =
+  | 'sort-asc'
+  | 'sort-desc'
+  | 'clear-sort'
+  | 'filter'
+  | 'clear-filter'
+  | 'pin-left'
+  | 'pin-right'
+  | 'unpin'
+  | 'hide'
+  | 'autosize'
+  | 'reset-columns'
+
+interface ColumnMenuAction {
+  id: ColumnMenuActionId
+  label: string
+  disabled?: boolean
+}
+
+interface ColumnMenuState<Row extends Record<string, any>> {
+  column: DataTableResolvedColumn<Row>
+  rect: DataTableCellRect
+  x: number
+  y: number
+  width: number
+  itemHeight: number
+  actions: Array<ColumnMenuAction>
 }
 
 interface ScrollbarDragState {
@@ -185,14 +249,20 @@ export class DataTableRootNode<
 
   private readonly api: DataTableRootApi<Row>
   private viewPipeline: DataTableViewPipeline<Row>
+  private serverRowModel: DataTableServerRowModel<Row>
   private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
+  private readonly summaryEngine = new DataTableSummaryEngine<Row>()
+  private transactionHistory!: DataTableTransactionHistory<Row>
   private readonly widthOverrides = new Map<string, number>()
+  private columnStateOverride: DataTableColumnState | null = null
   private readonly columnIndexById = new Map<string, number>()
+  private statePersistenceTimer: ReturnType<typeof setTimeout> | null = null
   private readonly pendingDeltas: Array<DataTableDelta<Row>> = []
   private resolvedColumns: Array<DataTableResolvedColumn<Row>> = []
   private viewport: DataTableViewport
   private resizeState: ResizeState<Row> | null = null
   private columnDragState: ColumnDragState<Row> | null = null
+  private columnMenuState: ColumnMenuState<Row> | null = null
   private readonly columnDragLayoutMotion = new Map<string, ColumnDragLayoutMotion>()
   private textSelectionActive = false
   private suppressNextHeaderClick = false
@@ -202,6 +272,8 @@ export class DataTableRootNode<
   private selectionActive = false
   private selectionDragState: SelectionDragState | null = null
   private selectionIdCounter = 0
+  private clipboardFeedback: DataTableClipboardFeedbackState<Row> = createDataTableClipboardFeedbackHidden() as DataTableClipboardFeedbackState<Row>
+  private clipboardFeedbackHideTimer: ReturnType<typeof setTimeout> | null = null
   private visibleCellKeys = new Set<string>()
   private nextVisibleCellKeys = new Set<string>()
   private cellEnterStartedAt = new Map<string, number>()
@@ -222,10 +294,27 @@ export class DataTableRootNode<
   private tooltipOpenTimer: ReturnType<typeof setTimeout> | null = null
   private tooltipHideTimer: ReturnType<typeof setTimeout> | null = null
   private editingState: DataTableEditingState<Row> | null = null
+  private keyboardFocusActive = false
+  private summaryState: DataTableSummaryState = {
+    values: {},
+    rowCount: 0,
+    revision: 0,
+    source: 'client',
+    loading: false,
+  }
+  private serverSummaryRequestId = 0
+  private serverSearchRequestId = 0
+  private serverSearchCursor: string | undefined
+  private serverSearchPreviousCursor: string | undefined
+  private serverSearchHasMore = false
+  private serverSearchInFlight = false
+  private serverSearchResolveRequestId = 0
   private gestureStartZoomValue = 1
   private gestureActive = false
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
+  private readonly handleKeyboardNavigationKeydown = (event: KeyboardEvent) => this.handleKeyboardNavigationKeydownEvent(event)
+  private readonly handleKeyboardNavigationPointerDown = (event: PointerEvent) => this.handleKeyboardNavigationPointerDownEvent(event)
   private readonly handleTextSelectionKeydown = (event: KeyboardEvent) => this.handleTextSelectionKeydownEvent(event)
   private readonly handleTrackpadWheelCapture = (event: WheelEvent) => this.handleTrackpadWheelCaptureEvent(event)
   private readonly handleGestureStart = (event: Event) => this.handleTrackpadGestureStart(event as DataTableGestureEvent)
@@ -259,9 +348,14 @@ export class DataTableRootNode<
       performance: props.performance,
     })
     this.viewPipeline = new DataTableViewPipeline(this.store)
+    this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
+    this.transactionHistory = new DataTableTransactionHistory(this.store, props.history)
     this.textSelection.configure(resolveCoreTextSelectionOptions(props.textSelection))
+    const persistedState = this.readPersistedState()
+    this.applyPersistedColumnState(persistedState)
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
+    this.applyPersistedViewState(persistedState)
     this.viewport = this.createViewport()
     this.options({
       interactive: true,
@@ -269,13 +363,18 @@ export class DataTableRootNode<
     })
     this.setupEvents()
     this.setupTextSelectionKeyboardEvents()
+    this.setupKeyboardNavigationEvents()
     this.setupTooltipKeyboardEvents()
     this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
       this.releaseAnimationLoop()
+      this.serverRowModel.dispose()
       this.teardownTrackpadGestureEvents()
       this.teardownTextSelectionKeyboardEvents()
+      this.teardownKeyboardNavigationEvents()
       this.clearScrollbarHideTimer()
+      this.clearStatePersistenceTimer()
+      this.clearClipboardFeedbackTimer()
       this.clearTooltipTimers()
       this.teardownEditingKeyboardEvents()
     })
@@ -294,8 +393,21 @@ export class DataTableRootNode<
       autosizeColumn: columnId => this.autosizeColumn(columnId),
       autosizeColumns: columnIds => this.autosizeColumns(columnIds),
       resetColumnWidth: columnId => this.resetColumnWidth(columnId),
+      getColumnState: () => this.getColumnState(),
+      setColumnState: state => this.setColumnState(state),
+      resetColumnState: () => this.resetColumnState(),
+      hideColumn: columnId => this.hideColumn(columnId),
+      showColumn: columnId => this.showColumn(columnId),
+      pinColumn: (columnId, side) => this.pinColumn(columnId, side),
+      unpinColumn: columnId => this.unpinColumn(columnId),
+      getPersistedState: () => this.getPersistedState(),
+      saveState: () => this.saveState(),
+      restoreState: () => this.restoreState(),
+      resetPersistedState: () => this.resetPersistedState(),
       scrollTo: (x, y) => this.setScroll(x, y),
       scrollToRow: rowIndex => this.setScroll(this.scrollX, rowIndex * this.rowHeight),
+      focusCell: (rowId, columnId) => this.focusCell(rowId, columnId),
+      moveActiveCell: (direction, options) => this.moveActiveCell(direction, options),
       getZoom: () => this.getZoomState(),
       setZoom: value => this.setZoom(value),
       resetZoom: () => this.resetZoom(),
@@ -303,6 +415,15 @@ export class DataTableRootNode<
       commitEdit: value => this.commitEdit(value),
       cancelEdit: () => this.cancelEdit(),
       getEditingState: () => this.cloneEditingState(),
+      undo: () => this.undo(),
+      redo: () => this.redo(),
+      canUndo: () => this.transactionHistory.canUndo(),
+      canRedo: () => this.transactionHistory.canRedo(),
+      clearHistory: () => this.transactionHistory.clear(),
+      getHistoryState: () => this.transactionHistory.state(),
+      clearSelectionValues: () => this.clearSelectionValues(),
+      fillSelection: (direction, options) => this.fillSelection(direction, options),
+      getAccessibilityState: () => this.getAccessibilityState(),
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
@@ -426,6 +547,16 @@ export class DataTableRootNode<
   }
 
   /**
+   * Возвращает высоту встроенной filter row внутри header зоны.
+   */
+  private get filterRowHeight(): number {
+    if (!this.props.view.filterUi || !this.props.view.filterUi.filterRow) return 0
+    const available = this.headerHeight - 24
+    if (available < 14) return 0
+    return Math.max(14, Math.min(24, available))
+  }
+
+  /**
    * Возвращает zoom Value для DataTableRootNode.
    */
   private get zoomValue(): number {
@@ -508,12 +639,17 @@ export class DataTableRootNode<
     this.resolvedColumns = this.resolveColumns()
     this.syncViewPipeline()
     this.viewport = this.createViewport()
+    this.syncServerRowModel()
     const revisionBeforeRangeLoad = this.store.takeRevision()
-    void this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => {
-      if (this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
+    const rangeLoader = this.isServerRowModelActive()
+      ? this.serverRowModel.ensureRange(this.viewport.rowRange)
+      : this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => true)
+    void rangeLoader.then(fresh => {
+      if (fresh && this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
       return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
+    this.syncSummaryState()
   }
 
   /**
@@ -538,6 +674,9 @@ export class DataTableRootNode<
     if (changedKeys.includes('store') && this.props.store && this.props.store !== this.store) {
       this.store = this.props.store
       this.viewPipeline = new DataTableViewPipeline(this.store)
+      this.serverRowModel.dispose()
+      this.serverRowModel = new DataTableServerRowModel(this.store, delta => this.applyDeltas(delta))
+      this.transactionHistory = new DataTableTransactionHistory(this.store, this.props.history)
       this.scrollX = 0
       this.scrollY = 0
       this.hoverTarget = null
@@ -545,6 +684,13 @@ export class DataTableRootNode<
       this.selectionActive = false
       this.selectionDragState = null
       this.cancelEdit()
+    }
+    if (changedKeys.includes('columnState')) {
+      this.columnStateOverride = null
+      this.widthOverrides.clear()
+      if (this.props.columnState.order.length > 0) {
+        this.viewPipeline.setColumnOrder(this.props.columnState.order, this.getColumnStateInputColumns())
+      }
     }
     if (
       changedKeys.includes('selection')
@@ -563,6 +709,11 @@ export class DataTableRootNode<
       this.tooltipTarget = null
       this.tooltipAlpha = 0
     }
+    if (changedKeys.includes('statePersistence')) {
+      this.clearStatePersistenceTimer()
+      if (this.props.statePersistence) this.restoreState()
+    }
+    if (changedKeys.includes('history')) this.transactionHistory.configure(this.props.history)
     if (changedKeys.includes('editing') && this.props.editing === false) this.cancelEdit()
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
     this.refresh(['layout', 'data'])
@@ -582,6 +733,7 @@ export class DataTableRootNode<
     if (delta > 0) {
       this.suppressTextSelectionIndexFor('scroll')
       this.requestTextRefinement('scroll')
+      this.columnMenuState = null
     }
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
@@ -609,6 +761,7 @@ export class DataTableRootNode<
       width: nextWidth,
       previousWidth,
     })
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
     return true
   }
@@ -621,6 +774,7 @@ export class DataTableRootNode<
     if (!column) return false
 
     this.widthOverrides.set(columnId, autosizeDataTableColumn(column, this.store))
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
     return true
   }
@@ -635,6 +789,7 @@ export class DataTableRootNode<
         this.widthOverrides.set(column.id, autosizeDataTableColumn(column, this.store))
       }
     }
+    this.emitColumnStateChange()
     this.refresh(['layout', 'columns'])
   }
 
@@ -643,8 +798,287 @@ export class DataTableRootNode<
    */
   resetColumnWidth(columnId: string): boolean {
     const changed = this.widthOverrides.delete(columnId)
-    if (changed) this.refresh(['layout', 'columns'])
+    if (changed) {
+      this.emitColumnStateChange()
+      this.refresh(['layout', 'columns'])
+    }
     return changed
+  }
+
+  /**
+   * Возвращает состояние из configured storage.
+   */
+  private getPersistedState(): DataTablePersistedState<Row> | null {
+    return this.readPersistedState()
+  }
+
+  /**
+   * Сохраняет текущие runtime-срезы состояния.
+   */
+  private saveState(): DataTablePersistedState<Row> | null {
+    const persistence = this.props.statePersistence
+    const storage = this.resolveStatePersistenceStorage()
+    if (!persistence || !storage) return null
+
+    const state = this.createPersistedState()
+    try {
+      storage.setItem(persistence.key, JSON.stringify(state))
+      return state
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Восстанавливает состояние из configured storage.
+   */
+  private restoreState(): boolean {
+    const state = this.readPersistedState()
+    if (!state) return false
+
+    this.applyPersistedColumnState(state)
+    this.resolvedColumns = this.resolveColumns()
+    this.syncViewPipeline()
+    this.applyPersistedViewState(state)
+    this.emitColumnStateChange()
+    this.emitViewQuery('all')
+    this.refresh(['columns', 'layout', 'data'])
+    return true
+  }
+
+  /**
+   * Удаляет сохраненное состояние.
+   */
+  private resetPersistedState(): void {
+    const storage = this.resolveStatePersistenceStorage()
+    const persistence = this.props.statePersistence
+    this.clearStatePersistenceTimer()
+    if (!storage || !persistence) return
+    try {
+      storage.removeItem(persistence.key)
+    } catch {
+      // Storage can be unavailable in private mode; reset remains best effort.
+    }
+  }
+
+  /**
+   * Собирает serializable snapshot текущего runtime state.
+   */
+  private createPersistedState(): DataTablePersistedState<Row> {
+    const viewState = this.viewPipeline.getState()
+    const state: DataTablePersistedState<Row> = {
+      version: this.props.statePersistence ? this.props.statePersistence.version : 1,
+      savedAt: Date.now(),
+    }
+    if (this.isStateSliceIncluded('columnState')) {
+      state.columnState = this.toColumnStateInput(this.getColumnState())
+    }
+    if (this.isStateSliceIncluded('sort')) state.sort = [...viewState.sort]
+    if (this.isStateSliceIncluded('filters')) state.filters = cloneSerializable(viewState.filters)
+    if (this.isStateSliceIncluded('search')) {
+      state.search = cloneSerializable(viewState.search.query)
+    }
+    if (this.isStateSliceIncluded('grouping')) {
+      state.grouping = {
+        enabled: viewState.grouping.enabled,
+        groups: cloneSerializable(viewState.grouping.groups),
+        expanded: cloneSerializable(viewState.grouping.expanded),
+        footerPlacement: viewState.grouping.footerPlacement,
+      }
+    }
+    return state
+  }
+
+  /**
+   * Планирует debounced save для state persistence.
+   */
+  private scheduleStatePersistence(): void {
+    const persistence = this.props.statePersistence
+    if (!persistence) return
+    this.clearStatePersistenceTimer()
+    if (persistence.debounceMs <= 0) {
+      this.saveState()
+      return
+    }
+    this.statePersistenceTimer = setTimeout(() => {
+      this.statePersistenceTimer = null
+      this.saveState()
+    }, persistence.debounceMs)
+  }
+
+  /**
+   * Очищает отложенный persistence timer.
+   */
+  private clearStatePersistenceTimer(): void {
+    if (!this.statePersistenceTimer) return
+    clearTimeout(this.statePersistenceTimer)
+    this.statePersistenceTimer = null
+  }
+
+  /**
+   * Проверяет, входит ли срез в configured persistence include.
+   */
+  private isStateSliceIncluded(slice: DataTableStateSlice): boolean {
+    return !!this.props.statePersistence && this.props.statePersistence.include.includes(slice)
+  }
+
+  /**
+   * Читает persisted state без выброса исключений наружу.
+   */
+  private readPersistedState(): DataTablePersistedState<Row> | null {
+    const persistence = this.props.statePersistence
+    const storage = this.resolveStatePersistenceStorage()
+    if (!persistence || !storage) return null
+
+    try {
+      const raw = storage.getItem(persistence.key)
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as Partial<DataTablePersistedState<Row>>
+      if (typeof parsed.version !== 'number') return null
+      if (parsed.version !== persistence.version) {
+        return persistence.migrate
+          ? persistence.migrate(parsed as DataTablePersistedState<Row>, parsed.version) as DataTablePersistedState<Row>
+          : null
+      }
+      return parsed as DataTablePersistedState<Row>
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Возвращает configured browser storage.
+   */
+  private resolveStatePersistenceStorage(): Storage | null {
+    const persistence = this.props.statePersistence
+    if (!persistence || typeof window === 'undefined') return null
+    try {
+      return persistence.storage === 'sessionStorage' ? window.sessionStorage : window.localStorage
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Применяет persisted column state до resolution колонок.
+   */
+  private applyPersistedColumnState(state: DataTablePersistedState<Row> | null): void {
+    if (!state?.columnState || !this.isStateSliceIncluded('columnState')) return
+    this.columnStateOverride = cloneColumnStateInput(state.columnState)
+    this.widthOverrides.clear()
+  }
+
+  /**
+   * Применяет persisted view state после sync pipeline.
+   */
+  private applyPersistedViewState(state: DataTablePersistedState<Row> | null): void {
+    if (!state) return
+    if (state.sort && this.isStateSliceIncluded('sort') && this.props.view.sorting) {
+      this.viewPipeline.setSort(state.sort)
+    }
+    if (state.filters && this.isStateSliceIncluded('filters') && this.props.view.filtering) {
+      this.viewPipeline.setFilters(state.filters)
+    }
+    if (state.search && this.isStateSliceIncluded('search') && this.props.view.search) {
+      this.viewPipeline.setSearch(state.search)
+    }
+    if (state.grouping && this.isStateSliceIncluded('grouping') && this.props.view.grouping) {
+      this.viewPipeline.setGrouping(state.grouping.enabled ? state.grouping.groups : [])
+      this.viewPipeline.setGroupingExpanded(state.grouping.expanded)
+    }
+  }
+
+  /**
+   * Возвращает сохраненное состояние колонок с учетом runtime override.
+   */
+  private getColumnState(): DataTableResolvedColumnState {
+    const merged = this.resolveMergedColumnState()
+    const widths: Record<string, number> = { ...merged.widths }
+    for (const [columnId, width] of this.widthOverrides) widths[columnId] = width
+    const runtimeOrder = this.viewPipeline.getState().columnOrder
+    return {
+      widths,
+      order: this.resolveColumnStateOrder(runtimeOrder, merged),
+      hidden: [...merged.hidden],
+      pinned: {
+        left: [...merged.pinned.left],
+        right: [...merged.pinned.right],
+      },
+      groups: [...merged.groups],
+      autosizeMode: merged.autosizeMode,
+      version: merged.version,
+    }
+  }
+
+  /**
+   * Программно заменяет состояние ширин, порядка, скрытия и pinning колонок.
+   */
+  private setColumnState(state: DataTableColumnState): void {
+    this.columnStateOverride = cloneColumnStateInput(state)
+    this.widthOverrides.clear()
+    this.viewPipeline.setColumnOrder(state.order ?? [], this.getColumnStateInputColumns(state))
+    this.resolvedColumns = this.resolveColumns()
+    this.emitColumnStateChange()
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  /**
+   * Сбрасывает runtime-состояние колонок к props/default.
+   */
+  private resetColumnState(): void {
+    this.columnStateOverride = null
+    this.widthOverrides.clear()
+    this.viewPipeline.resetColumnOrder()
+    this.resolvedColumns = this.resolveColumns()
+    this.emitColumnStateChange()
+    this.emitViewQuery('column')
+    this.refresh(['columns', 'layout'])
+  }
+
+  /**
+   * Скрывает колонку без удаления ее definition.
+   */
+  private hideColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.hidden = [...new Set([...(state.hidden ?? []), columnId])]
+    this.setColumnState(state)
+  }
+
+  /**
+   * Показывает ранее скрытую колонку.
+   */
+  private showColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.hidden = (state.hidden ?? []).filter(id => id !== columnId)
+    this.setColumnState(state)
+  }
+
+  /**
+   * Закрепляет колонку слева или справа.
+   */
+  private pinColumn(columnId: string, side: DataTableResolvedColumn<Row>['pinned']): void {
+    if (!side) return
+    const state = this.toColumnStateInput(this.getColumnState())
+    const pinned = {
+      left: (state.pinned?.left ?? []).filter(id => id !== columnId),
+      right: (state.pinned?.right ?? []).filter(id => id !== columnId),
+    }
+    pinned[side] = [...pinned[side], columnId]
+    state.pinned = pinned
+    this.setColumnState(state)
+  }
+
+  /**
+   * Снимает закрепление с колонки.
+   */
+  private unpinColumn(columnId: string): void {
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.pinned = {
+      left: (state.pinned?.left ?? []).filter(id => id !== columnId),
+      right: (state.pinned?.right ?? []).filter(id => id !== columnId),
+    }
+    this.setColumnState(state)
   }
 
   /**
@@ -676,11 +1110,17 @@ export class DataTableRootNode<
         overscanRows: this.props.overscanRows,
         overscanColumns: this.props.overscanColumns,
         interaction: this.props.interaction,
+        selection: this.props.selection,
+        clipboard: this.props.clipboard,
         view: this.props.view,
         scrollbars: this.props.scrollbars,
         tooltip: this.props.tooltip,
+        textSelection: this.props.textSelection,
         zoom: this.props.zoom,
         editing: this.props.editing,
+        keyboardNavigation: this.props.keyboardNavigation,
+        columnState: this.getColumnState(),
+        statePersistence: this.props.statePersistence,
         performance: this.props.performance,
       }
     }
@@ -831,7 +1271,7 @@ export class DataTableRootNode<
     if (this.deltaFlushQueued) return
 
     this.deltaFlushQueued = true
-    queueMicrotask(() => this.flushDeltasWithinBudget())
+    this.scheduleDeltaFlush()
   }
 
   /**
@@ -871,12 +1311,58 @@ export class DataTableRootNode<
         this.refresh(['data', 'summary'])
       }
       this.store.clearDirtyState()
+      this.syncSummaryState()
     } while (this.pendingDeltas.length > 0 && (!useBudget || performance.now() - startedAt < budget))
 
     if (this.pendingDeltas.length > 0 && useBudget) {
       this.deltaFlushQueued = true
-      setTimeout(() => this.flushDeltasWithinBudget(), 0)
+      this.scheduleDeltaFlush()
     }
+  }
+
+  /**
+   * Применяет пользовательскую transaction и записывает ее в history.
+   */
+  private commitDeltas(
+    deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>,
+    options: { source: DataTableTransaction<Row>['source']; label?: string; record?: boolean },
+  ): DataTableTransaction<Row> | null {
+    const transaction = this.transactionHistory.commit(deltas, options)
+    this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return transaction
+  }
+
+  /**
+   * Откатывает последнюю пользовательскую transaction.
+   */
+  private undo(): boolean {
+    const changed = this.transactionHistory.undo()
+    if (changed) this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return changed
+  }
+
+  /**
+   * Повторяет последнюю отмененную transaction.
+   */
+  private redo(): boolean {
+    const changed = this.transactionHistory.redo()
+    if (changed) this.refresh(['data', 'layout', 'summary', 'interaction'])
+    return changed
+  }
+
+  /**
+   * Планирует применение server/SSE deltas не чаще одного раза за frame.
+   */
+  private scheduleDeltaFlush(): void {
+    if (!this.nova.raph.loopEnabled && typeof queueMicrotask === 'function') {
+      queueMicrotask(() => this.flushDeltasWithinBudget())
+      return
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => this.flushDeltasWithinBudget())
+      return
+    }
+    setTimeout(() => this.flushDeltasWithinBudget(), 0)
   }
 
   /**
@@ -971,7 +1457,11 @@ export class DataTableRootNode<
    */
   private setSearch(query: Parameters<DataTableRootApi<Row>['setSearch']>[0]): void {
     this.viewPipeline.setSearch(query)
+    this.serverSearchCursor = undefined
+    this.serverSearchPreviousCursor = undefined
+    this.serverSearchHasMore = false
     this.emitViewQuery('search')
+    this.requestServerSearchIfNeeded(0)
     this.refresh(['data', 'layout'])
   }
 
@@ -980,6 +1470,12 @@ export class DataTableRootNode<
    */
   private clearSearch(): void {
     this.viewPipeline.clearSearch()
+    this.serverSearchRequestId += 1
+    this.serverSearchResolveRequestId += 1
+    this.serverSearchCursor = undefined
+    this.serverSearchPreviousCursor = undefined
+    this.serverSearchHasMore = false
+    this.serverSearchInFlight = false
     this.emitViewQuery('search')
     this.refresh(['data', 'layout'])
   }
@@ -988,6 +1484,16 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findNextSearchMatch(): ReturnType<DataTableRootApi<Row>['findNext']> {
+    if (this.isServerRowModelActive() && (this.serverSearchCursor || this.serverSearchHasMore)) {
+      const state = this.viewPipeline.getSearchState()
+      if (state.matches.length === 0 || state.activeIndex >= state.matches.length - 1) {
+        this.requestServerSearchPage({ mode: 'append', activeIndex: state.matches.length })
+        this.emitViewQuery('search')
+        this.refresh(['data', 'layout'])
+        return state.activeMatch
+      }
+    }
+
     const match = this.viewPipeline.findNext()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -999,6 +1505,16 @@ export class DataTableRootNode<
    * Находит сущность по runtime-критериям DataTableRootNode.
    */
   private findPreviousSearchMatch(): ReturnType<DataTableRootApi<Row>['findPrevious']> {
+    if (this.isServerRowModelActive() && this.serverSearchPreviousCursor) {
+      const state = this.viewPipeline.getSearchState()
+      if (state.matches.length === 0 || state.activeIndex <= 0) {
+        this.requestServerSearchPage({ mode: 'prepend' })
+        this.emitViewQuery('search')
+        this.refresh(['data', 'layout'])
+        return state.activeMatch
+      }
+    }
+
     const match = this.viewPipeline.findPrevious()
     if (match) this.scrollToSearchMatch(match)
     this.emitViewQuery('search')
@@ -1021,6 +1537,47 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг scrollToSearchMatch для DataTableRootNode.
    */
   private scrollToSearchMatch(match: NonNullable<ReturnType<DataTableRootApi<Row>['findNext']>>): void {
+    if (this.isServerRowModelActive() && match.rowId !== undefined) {
+      this.resolveServerSearchRowAndScroll(match)
+      return
+    }
+
+    let nextScrollX = this.scrollX
+    if (match.columnId) {
+      const centerColumns = this.resolvedColumns.filter(column => !column.pinned)
+      let columnX = 0
+      for (const column of centerColumns) {
+        if (column.id === match.columnId) break
+        columnX += column.resolvedWidth
+      }
+      const column = centerColumns.find(item => item.id === match.columnId)
+      if (column) {
+        if (columnX < this.scrollX) nextScrollX = columnX
+        else if (columnX + column.resolvedWidth > this.scrollX + this.viewport.bodyWidth) {
+          nextScrollX = columnX + column.resolvedWidth - this.viewport.bodyWidth
+        }
+      }
+    }
+
+    this.setScroll(nextScrollX, match.rowIndex * this.rowHeight)
+  }
+
+  /**
+   * Фокусирует server-side search match через source.resolveRowIndex без локального скана.
+   */
+  private resolveServerSearchRowAndScroll(match: DataTableSearchState['activeMatch']): void {
+    if (!match || match.rowId === undefined) return
+    const requestId = ++this.serverSearchResolveRequestId
+    void this.serverRowModel.resolveRowIndex(match.rowId).then(rowIndex => {
+      if (requestId !== this.serverSearchResolveRequestId) return
+      this.scrollToResolvedSearchPosition({ ...match, rowIndex: rowIndex ?? match.rowIndex })
+    })
+  }
+
+  /**
+   * Прокручивает таблицу к найденной строке/ячейке.
+   */
+  private scrollToResolvedSearchPosition(match: NonNullable<DataTableSearchState['activeMatch']>): void {
     let nextScrollX = this.scrollX
     if (match.columnId) {
       const centerColumns = this.resolvedColumns.filter(column => !column.pinned)
@@ -1062,8 +1619,13 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг reorderColumns для DataTableRootNode.
    */
   private reorderColumns(payload: Parameters<DataTableRootApi<Row>['reorderColumns']>[0]): void {
-    const next = this.viewPipeline.reorderColumns(payload, this.props.columns)
+    const next = this.viewPipeline.reorderColumns(payload, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: next.order,
+    }
     this.props.onColumnOrderChange?.(next)
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1072,7 +1634,11 @@ export class DataTableRootNode<
    * Обновляет значение состояния DataTableRootNode.
    */
   private setColumnOrder(order: Array<string>, reason: 'drag' | 'api' = 'api'): void {
-    const nextOrder = this.viewPipeline.setColumnOrder(order, this.props.columns)
+    const nextOrder = this.viewPipeline.setColumnOrder(order, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: nextOrder,
+    }
     this.props.onColumnOrderChange?.({
       columnId: '',
       fromIndex: -1,
@@ -1080,6 +1646,7 @@ export class DataTableRootNode<
       order: nextOrder,
       reason,
     })
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1089,6 +1656,9 @@ export class DataTableRootNode<
    */
   private resetColumnOrder(): void {
     this.viewPipeline.resetColumnOrder()
+    const state = this.toColumnStateInput(this.getColumnState())
+    state.order = []
+    this.columnStateOverride = state
     this.props.onColumnOrderChange?.({
       columnId: '',
       fromIndex: -1,
@@ -1096,6 +1666,7 @@ export class DataTableRootNode<
       order: [],
       reason: 'reset',
     })
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1186,6 +1757,9 @@ export class DataTableRootNode<
     if (kind === 'search' || kind === 'all') this.props.onSearchChange?.(state.search)
     if (kind === 'grouping' || kind === 'all') this.props.onGroupingChange?.(state.grouping)
     this.props.onQueryChange?.(state.query)
+    if (kind === 'sort' || kind === 'filter' || kind === 'search' || kind === 'grouping' || kind === 'all') {
+      this.scheduleStatePersistence()
+    }
   }
 
   /**
@@ -1193,6 +1767,181 @@ export class DataTableRootNode<
    */
   private resolveSourceQuery(): DataTableQueryState | undefined {
     return this.viewPipeline.isServerControlled() ? undefined : this.viewPipeline.getQuery()
+  }
+
+  /**
+   * Возвращает query для авторитетной server-side модели.
+   */
+  private resolveServerSourceQuery(): DataTableQueryState {
+    return this.viewPipeline.getQuery()
+  }
+
+  /**
+   * Возвращает true, когда lazy/server source должен быть авторитетным view.
+   */
+  private isServerRowModelActive(): boolean {
+    const options = this.props.view.serverRowModel
+    if (!options || !options.enabled) return false
+    if (options.authoritative) return true
+    const state = this.viewPipeline.getState()
+    return this.store.rowCount > this.props.performance.maxClientRows
+      || state.mode.sorting === 'server'
+      || state.mode.filtering === 'server'
+      || state.mode.search === 'server'
+      || state.mode.grouping === 'server'
+  }
+
+  /**
+   * Синхронизирует server-side query, summary и SSE subscription.
+   */
+  private syncServerRowModel(): void {
+    const options = this.props.view.serverRowModel
+    if (!options || !options.enabled || !this.isServerRowModelActive()) {
+      this.serverRowModel.dispose()
+      return
+    }
+
+    const query = this.resolveServerSourceQuery()
+    const changed = this.serverRowModel.sync(query, { subscribe: options.subscribe })
+    if (changed) this.props.onServerQueryChange?.(query)
+    if (options.loadSummary && (changed || this.summaryState.source !== 'server')) this.requestServerSummary()
+  }
+
+  /**
+   * Запрашивает summary у server-side source с защитой от устаревших ответов.
+   */
+  private requestServerSummary(): void {
+    const requestId = ++this.serverSummaryRequestId
+    this.summaryState = {
+      values: { ...this.summaryState.values },
+      rowCount: this.store.rowCount,
+      revision: requestId,
+      source: 'server',
+      loading: true,
+    }
+    this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+
+    void this.serverRowModel.loadSummary().then(summary => {
+      if (!summary || requestId !== this.serverSummaryRequestId) return
+      this.summaryState = summary
+      this.props.onSummaryChange?.({ ...summary, values: { ...summary.values } })
+      this.refresh(['summary'])
+    })
+  }
+
+  /**
+   * Синхронизирует summary для server и client режимов без участия render pass.
+   */
+  private syncSummaryState(): void {
+    if (this.isServerRowModelActive()) {
+      if (this.props.view.serverRowModel && this.props.view.serverRowModel.loadSummary) return
+      const revision = this.store.takeRevision()
+      if (this.summaryState.source === 'server'
+        && !this.summaryState.loading
+        && this.summaryState.revision === revision
+        && this.summaryState.rowCount === this.store.rowCount) {
+        return
+      }
+      this.summaryState = {
+        values: { rowCount: this.store.rowCount },
+        rowCount: this.store.rowCount,
+        revision,
+        source: 'server',
+        loading: false,
+      }
+      this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+      return
+    }
+
+    if (this.store.rowCount > this.props.performance.maxClientRows) return
+    const revision = this.store.takeRevision()
+    if (this.summaryState.source === 'client'
+      && !this.summaryState.loading
+      && this.summaryState.revision === revision
+      && this.summaryState.rowCount === this.viewPipeline.rowCount) {
+      return
+    }
+
+    const rows = this.viewPipeline.getViewRows()
+      .filter((row): row is Extract<DataTableViewRow<Row>, { kind: 'data' }> => row.kind === 'data' && !!row.row)
+      .map(row => row.row as Row)
+    const result = this.summaryEngine.compute(rows, this.resolveSummaryRules(rows))
+    this.summaryState = {
+      values: { ...result.values, rowCount: result.rowCount },
+      rowCount: result.rowCount,
+      revision,
+      source: 'client',
+      loading: false,
+    }
+    this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+  }
+
+  /**
+   * Подбирает компактный набор summary-правил для client-mode runtime.
+   */
+  private resolveSummaryRules(rows: Array<Row>): Array<DataTableSummaryRule<Row>> {
+    const rules: Array<DataTableSummaryRule<Row>> = [{ id: 'rowCount', aggregate: 'count' }]
+    const sample = rows.slice(0, 50)
+    for (const column of this.resolvedColumns) {
+      if (rules.length >= 10) break
+      const candidate = column.field ?? column.id
+      const numeric = column.type === 'number'
+        || sample.some(row => Number.isFinite(Number(row[candidate as keyof Row])))
+      if (!numeric) continue
+      rules.push({
+        id: `${column.id}:sum`,
+        field: candidate,
+        aggregate: 'sum',
+      })
+    }
+    return rules
+  }
+
+  /**
+   * Делегирует поиск server-side source, когда локальный pipeline не должен сканировать строки.
+   */
+  private requestServerSearchIfNeeded(activeIndex = this.viewPipeline.getSearchState().activeIndex): void {
+    this.requestServerSearchPage({ mode: 'replace', activeIndex })
+  }
+
+  /**
+   * Запрашивает страницу server-side поиска и обновляет navigation state.
+   */
+  private requestServerSearchPage(options: { mode: 'replace' | 'append' | 'prepend'; activeIndex?: number }): void {
+    const search = this.viewPipeline.getSearchState().query
+    if (!search.text || !this.isServerRowModelActive()) return
+    if (this.serverSearchInFlight) return
+
+    this.syncServerRowModel()
+    const requestId = ++this.serverSearchRequestId
+    this.serverSearchInFlight = true
+    this.viewPipeline.setServerSearchLoading(true)
+    this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+    const direction: DataTableSearchDirection = options.mode === 'prepend' ? 'previous' : 'next'
+    const cursor = options.mode === 'prepend' ? this.serverSearchPreviousCursor : this.serverSearchCursor
+    void this.serverRowModel.search(search, cursor, direction).then(result => {
+      if (!result || requestId !== this.serverSearchRequestId) return
+      this.serverSearchCursor = result.cursor
+      this.serverSearchPreviousCursor = result.previousCursor
+      this.serverSearchHasMore = result.hasMore ?? !!result.cursor
+      if (options.mode === 'append') {
+        this.viewPipeline.appendServerSearchResult(result, options.activeIndex)
+      } else if (options.mode === 'prepend') {
+        this.viewPipeline.prependServerSearchResult(result, options.activeIndex)
+      } else {
+        this.viewPipeline.setServerSearchResult(result, Math.max(0, options.activeIndex ?? 0))
+      }
+      const match = this.viewPipeline.getSearchState().activeMatch
+      if (match) this.scrollToSearchMatch(match)
+      this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+      this.refresh(['data', 'interaction'])
+    }).finally(() => {
+      if (requestId === this.serverSearchRequestId) {
+        this.serverSearchInFlight = false
+        this.viewPipeline.setServerSearchLoading(false)
+        this.props.onSearchChange?.(this.viewPipeline.getSearchState())
+      }
+    })
   }
 
   /**
@@ -1247,7 +1996,12 @@ export class DataTableRootNode<
    * Нормализует и возвращает итоговое значение DataTableRootNode.
    */
   private resolveColumns(): Array<DataTableResolvedColumn<Row>> {
-    const columns = resolveDataTableColumns(this.viewPipeline.orderColumns(this.props.columns), this.props.pinnedColumns, this.widthOverrides, this.store)
+    const columns = resolveDataTableColumns(
+      this.viewPipeline.orderColumns(this.getColumnStateInputColumns()),
+      this.resolveEffectivePinnedColumns(),
+      this.createEffectiveWidthOverrides(),
+      this.store,
+    )
     const scale = this.zoomColumnScale
     const resolved = scale === 1
       ? columns
@@ -1261,6 +2015,169 @@ export class DataTableRootNode<
     this.columnIndexById.clear()
     resolved.forEach((column, index) => this.columnIndexById.set(column.id, index))
     return resolved
+  }
+
+  /**
+   * Возвращает columns input с примененными hidden/pinned state override.
+   */
+  private getColumnStateInputColumns(state: DataTableColumnState = this.resolveMergedColumnState()): Array<DataTableColumnInput<Row>> {
+    const hidden = new Set(state.hidden ?? [])
+    const pinned = this.resolvePinnedSideByColumn(state)
+    const columns = this.props.columns
+      .filter(column => !hidden.has(column.id))
+      .map(column => {
+        const side = pinned.get(column.id)
+        return side ? { ...column, pinned: side } : column
+      })
+    return this.orderColumnInputsByState(columns, state.order ?? [])
+  }
+
+  /**
+   * Возвращает pinnedColumns с учетом columnState.
+   */
+  private resolveEffectivePinnedColumns(): DataTableRootResolvedProps<Row>['pinnedColumns'] {
+    const state = this.resolveMergedColumnState()
+    if (state.pinned.left.length > 0 || state.pinned.right.length > 0) {
+      return {
+        left: [...state.pinned.left],
+        right: [...state.pinned.right],
+      }
+    }
+    return this.props.pinnedColumns
+  }
+
+  /**
+   * Возвращает pinnedRows с учетом группировочной политики.
+   */
+  private resolveEffectivePinnedRows(): DataTableRootResolvedProps<Row>['pinnedRows'] {
+    const grouping = this.props.view.grouping
+    const pinnedPolicy = this.props.view.groupingPinnedRows
+    if (grouping && grouping.enabled && pinnedPolicy && pinnedPolicy.global === 'hide') {
+      return { top: [], bottom: [] }
+    }
+    return this.props.pinnedRows
+  }
+
+  /**
+   * Собирает width overrides из props columnState и runtime resize map.
+   */
+  private createEffectiveWidthOverrides(): Map<string, number> {
+    const widths = new Map<string, number>()
+    const state = this.resolveMergedColumnState()
+    for (const [columnId, width] of Object.entries(state.widths)) widths.set(columnId, width)
+    for (const [columnId, width] of this.widthOverrides) widths.set(columnId, width)
+    return widths
+  }
+
+  /**
+   * Объединяет controlled props и локальное runtime состояние колонок.
+   */
+  private resolveMergedColumnState(): DataTableResolvedColumnState {
+    const base = this.props.columnState
+    const override = this.columnStateOverride
+    return {
+      widths: {
+        ...base.widths,
+        ...(override?.widths ?? {}),
+      },
+      order: override?.order ? [...override.order] : [...base.order],
+      hidden: override?.hidden ? [...override.hidden] : [...base.hidden],
+      pinned: {
+        left: override?.pinned?.left ? [...override.pinned.left] : [...base.pinned.left],
+        right: override?.pinned?.right ? [...override.pinned.right] : [...base.pinned.right],
+      },
+      groups: override?.groups ? [...override.groups] : [...base.groups],
+      autosizeMode: override?.autosizeMode ?? base.autosizeMode,
+      version: override?.version ?? base.version,
+    }
+  }
+
+  /**
+   * Приводит resolved column state к публичному input state.
+   */
+  private toColumnStateInput(state: DataTableResolvedColumnState): DataTableColumnState {
+    return {
+      widths: { ...state.widths },
+      order: [...state.order],
+      hidden: [...state.hidden],
+      pinned: {
+        left: [...state.pinned.left],
+        right: [...state.pinned.right],
+      },
+      groups: [...state.groups],
+      autosizeMode: state.autosizeMode,
+      version: state.version,
+    }
+  }
+
+  /**
+   * Возвращает публичный порядок колонок, сохраняя hidden columns в columnState.
+   */
+  private resolveColumnStateOrder(
+    runtimeOrder: Array<string>,
+    merged: DataTableResolvedColumnState,
+  ): Array<string> {
+    const allColumnIds = this.props.columns.map(column => column.id)
+    const baseline = merged.order.length > 0
+      ? this.mergeColumnOrderWithAllColumns(merged.order, allColumnIds)
+      : allColumnIds
+    if (runtimeOrder.length === 0) return baseline
+    return this.mergeColumnOrderWithAllColumns(runtimeOrder, baseline)
+  }
+
+  /**
+   * Дополняет order отсутствующими колонками без потери исходного порядка.
+   */
+  private mergeColumnOrderWithAllColumns(order: Array<string>, allColumnIds: Array<string>): Array<string> {
+    const columnSet = new Set(allColumnIds)
+    const seen = new Set<string>()
+    const result: Array<string> = []
+    for (const columnId of order) {
+      if (!columnSet.has(columnId) || seen.has(columnId)) continue
+      seen.add(columnId)
+      result.push(columnId)
+    }
+    for (const columnId of allColumnIds) {
+      if (seen.has(columnId)) continue
+      seen.add(columnId)
+      result.push(columnId)
+    }
+    return result
+  }
+
+  /**
+   * Публикует изменение columnState.
+   */
+  private emitColumnStateChange(): void {
+    this.props.onColumnStateChange?.(this.getColumnState())
+    this.scheduleStatePersistence()
+  }
+
+  /**
+   * Собирает быстрый lookup side для pinned columns.
+   */
+  private resolvePinnedSideByColumn(state: DataTableColumnState): Map<string, DataTableResolvedColumn<Row>['pinned']> {
+    const result = new Map<string, DataTableResolvedColumn<Row>['pinned']>()
+    for (const id of state.pinned?.left ?? []) result.set(id, 'left')
+    for (const id of state.pinned?.right ?? []) result.set(id, 'right')
+    return result
+  }
+
+  /**
+   * Стабильно сортирует column inputs по сохраненному order.
+   */
+  private orderColumnInputsByState(
+    columns: Array<DataTableColumnInput<Row>>,
+    order: Array<string>,
+  ): Array<DataTableColumnInput<Row>> {
+    if (order.length === 0) return columns
+    const rank = new Map(order.map((id, index) => [id, index]))
+    return [...columns].sort((left, right) => {
+      const leftRank = rank.get(left.id) ?? Number.MAX_SAFE_INTEGER
+      const rightRank = rank.get(right.id) ?? Number.MAX_SAFE_INTEGER
+      if (leftRank !== rightRank) return leftRank - rightRank
+      return columns.indexOf(left) - columns.indexOf(right)
+    })
   }
 
   /**
@@ -1278,6 +2195,7 @@ export class DataTableRootNode<
    * Создает runtime-сущность DataTableRootNode.
    */
   private createViewport(): DataTableViewport {
+    const pinnedRows = this.resolveEffectivePinnedRows()
     return createDataTableViewport({
       width: this.width || this.props.width,
       height: this.height || this.props.height,
@@ -1287,8 +2205,8 @@ export class DataTableRootNode<
       overscanColumns: this.props.overscanColumns,
       rowCount: this.viewPipeline.rowCount,
       columns: this.resolvedColumns,
-      pinnedTopCount: this.props.pinnedRows.top?.length ?? 0,
-      pinnedBottomCount: this.props.pinnedRows.bottom?.length ?? 0,
+      pinnedTopCount: pinnedRows.top?.length ?? 0,
+      pinnedBottomCount: pinnedRows.bottom?.length ?? 0,
       scrollX: this.scrollX,
       scrollY: this.scrollY,
     })
@@ -1335,6 +2253,7 @@ export class DataTableRootNode<
 
     this.on('mousedown', event => {
       this.trackTooltipModifiers(event)
+      this.keyboardFocusActive = true
       const [x, y] = this.trackPointerPosition(event)
       const scrollbarAxis = this.hitScrollbar(x, y)
       if (scrollbarAxis) {
@@ -1355,9 +2274,28 @@ export class DataTableRootNode<
         return
       }
 
+      if (this.handleColumnMenuPointerDown(x, y, event)) {
+        event.cancelBubble = true
+        return
+      }
+
       const target = this.resolveInteractionTargetAt(x, y)
       if (target) {
         if (target.zone === 'header') {
+          if (this.resolveColumnMenuHeaderTarget(target, x, y)) {
+            this.openColumnMenu(target)
+            event.cancelBubble = true
+            return
+          }
+          const filterTarget = this.resolveFilterUiTarget(target, x, y, event)
+          if (filterTarget && this.handleFilterUiAction(filterTarget)) {
+            event.cancelBubble = true
+            return
+          }
+          if (this.filterRowHeight > 0 && y >= this.headerHeight - this.filterRowHeight) {
+            event.cancelBubble = true
+            return
+          }
           if (this.startColumnDrag(target, event)) {
             event.cancelBubble = true
             return
@@ -1493,6 +2431,132 @@ export class DataTableRootNode<
       this.releasePointerCapture(event)
       event.cancelBubble = true
     })
+  }
+
+  /**
+   * Подключает keyboard navigation, пока таблица имеет runtime focus.
+   */
+  private setupKeyboardNavigationEvents(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('keydown', this.handleKeyboardNavigationKeydown)
+    window.addEventListener('pointerdown', this.handleKeyboardNavigationPointerDown, true)
+  }
+
+  /**
+   * Отключает keyboard navigation.
+   */
+  private teardownKeyboardNavigationEvents(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('keydown', this.handleKeyboardNavigationKeydown)
+    window.removeEventListener('pointerdown', this.handleKeyboardNavigationPointerDown, true)
+  }
+
+  /**
+   * Сбрасывает keyboard focus, когда пользователь уходит за пределы canvas.
+   */
+  private handleKeyboardNavigationPointerDownEvent(event: PointerEvent): void {
+    const target = event.target
+    if (target instanceof Node && this.canvas.element.contains(target)) return
+    this.keyboardFocusActive = false
+  }
+
+  /**
+   * Обрабатывает клавиатурную навигацию active cell.
+   */
+  private handleKeyboardNavigationKeydownEvent(event: KeyboardEvent): void {
+    const options = this.props.keyboardNavigation
+    if (!options || !options.enabled || !this.keyboardFocusActive) return
+    if (isEditableKeyboardTarget(event.target)) return
+
+    if (this.editingState) {
+      if (event.key === 'Escape' && this.props.editing !== false && this.props.editing.cancelOnEscape) {
+        this.cancelEdit()
+        this.emitKeyboardAction({ type: 'cancel', key: event.key })
+        event.preventDefault()
+      } else if (event.key === 'Enter' && this.props.editing !== false && this.props.editing.commitOnEnter) {
+        void this.commitEdit()
+        this.emitKeyboardAction({ type: 'commit', key: event.key })
+        event.preventDefault()
+      } else if (event.key === 'Tab' && options.tab === 'commit-edit') {
+        void this.commitEdit()
+        this.emitKeyboardAction({ type: 'commit', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (options.ctrlMetaShortcuts && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+      if (this.selectAllByKeyboard()) {
+        this.emitKeyboardAction({ type: 'select-all', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    const extend = !!event.shiftKey && options.shiftSelection
+    const direction = this.resolveKeyboardDirection(event, options)
+    if (direction) {
+      if (this.moveActiveCell(direction, { extend })) {
+        this.emitKeyboardAction({ type: 'move', key: event.key, direction })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'F2' || (event.key === 'Enter' && options.enter === 'edit')) {
+      const active = this.selection?.activeCell
+      if (active && this.startEdit(active.rowId, active.columnId)) {
+        this.emitKeyboardAction({ type: 'edit', key: event.key })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'Enter' && options.enter === 'move') {
+      if (this.moveActiveCell('down', { extend: false })) {
+        this.emitKeyboardAction({ type: 'move', key: event.key, direction: 'down' })
+        event.preventDefault()
+      }
+      return
+    }
+
+    if (event.key === 'Escape' && this.selection?.previewRange) {
+      this.commitSelectionState({ ...this.selection, previewRange: null }, { emitActive: false })
+      this.emitKeyboardAction({ type: 'cancel', key: event.key })
+      event.preventDefault()
+    }
+  }
+
+  /**
+   * Возвращает направление keyboard navigation для события.
+   */
+  private resolveKeyboardDirection(
+    event: KeyboardEvent,
+    options: Exclude<DataTableRootResolvedProps<Row>['keyboardNavigation'], false>,
+  ): DataTableActiveCellDirection | null {
+    if (options.arrows) {
+      if (event.key === 'ArrowUp') return 'up'
+      if (event.key === 'ArrowDown') return 'down'
+      if (event.key === 'ArrowLeft') return 'left'
+      if (event.key === 'ArrowRight') return 'right'
+    }
+    if (options.tab === 'move' && event.key === 'Tab') return event.shiftKey ? 'left' : 'right'
+    if (options.pageKeys) {
+      if (event.key === 'PageUp') return 'page-up'
+      if (event.key === 'PageDown') return 'page-down'
+    }
+    if (options.homeEnd) {
+      if (event.key === 'Home') return 'home'
+      if (event.key === 'End') return 'end'
+    }
+    return null
+  }
+
+  /**
+   * Публикует keyboard action callback.
+   */
+  private emitKeyboardAction(action: DataTableKeyboardAction): void {
+    this.props.onKeyboardAction?.(action)
   }
 
   /**
@@ -1686,6 +2750,147 @@ export class DataTableRootNode<
   }
 
   /**
+   * Обрабатывает pointer по открытому header menu.
+   */
+  private handleColumnMenuPointerDown(x: number, y: number, event: MouseEvent): boolean {
+    void event
+    const menu = this.columnMenuState
+    if (!menu) return false
+
+    const height = menu.actions.length * menu.itemHeight + 8
+    const inside = x >= menu.x && x <= menu.x + menu.width && y >= menu.y && y <= menu.y + height
+    if (!inside) {
+      this.columnMenuState = null
+      this.refresh(['interaction'])
+      return false
+    }
+
+    const index = Math.floor((y - menu.y - 4) / menu.itemHeight)
+    const action = menu.actions[index]
+    if (!action) return true
+    if (!action.disabled) {
+      this.executeColumnMenuAction(menu.column, action.id)
+      this.columnMenuState = null
+      this.refresh(['columns', 'layout', 'data'])
+    }
+    return true
+  }
+
+  /**
+   * Определяет header zone для открытия column menu.
+   */
+  private resolveColumnMenuHeaderTarget(target: DataTableInteractionTarget<Row>, x: number, y: number): boolean {
+    if (target.zone !== 'header') return false
+    const headerMainHeight = this.headerHeight - this.filterRowHeight
+    return y >= 0
+      && y < headerMainHeight
+      && x >= target.rect.x + Math.max(0, target.rect.width - 24)
+      && x <= target.rect.x + target.rect.width
+  }
+
+  /**
+   * Открывает menu действий для колонки.
+   */
+  private openColumnMenu(target: DataTableInteractionTarget<Row>): void {
+    const actions = this.createColumnMenuActions(target.column)
+    const width = 188
+    const itemHeight = 26
+    const height = actions.length * itemHeight + 8
+    const x = clampInteger(target.rect.x + target.rect.width - width, 4, Math.max(4, this.width - width - 4))
+    const y = clampInteger(this.headerHeight, 4, Math.max(4, this.height - height - 4))
+    this.columnMenuState = {
+      column: target.column,
+      rect: { ...target.rect },
+      x,
+      y,
+      width,
+      itemHeight,
+      actions,
+    }
+    this.refresh(['interaction'])
+  }
+
+  /**
+   * Формирует список production actions для header menu.
+   */
+  private createColumnMenuActions(column: DataTableResolvedColumn<Row>): Array<ColumnMenuAction> {
+    const sortEnabled = !!(this.props.view.sorting && column.sortable)
+    const filtered = filterStateHasColumn(this.viewPipeline.getState().filters, column.id)
+    const filterEnabled = !!(this.props.view.filtering && column.filter)
+    return [
+      { id: 'sort-asc', label: 'Sort ascending', disabled: !sortEnabled },
+      { id: 'sort-desc', label: 'Sort descending', disabled: !sortEnabled },
+      { id: 'clear-sort', label: 'Clear sort', disabled: !this.viewPipeline.getState().sort.some(rule => rule.columnId === column.id) },
+      { id: 'filter', label: filtered ? 'Next filter value' : 'Apply filter', disabled: !filterEnabled },
+      { id: 'clear-filter', label: 'Clear filter', disabled: !filtered },
+      { id: 'pin-left', label: 'Pin left', disabled: column.pinned === 'left' },
+      { id: 'pin-right', label: 'Pin right', disabled: column.pinned === 'right' },
+      { id: 'unpin', label: 'Unpin', disabled: !column.pinned },
+      { id: 'hide', label: 'Hide column', disabled: this.resolvedColumns.length <= 1 },
+      { id: 'autosize', label: 'Autosize column' },
+      { id: 'reset-columns', label: 'Reset column state' },
+    ]
+  }
+
+  /**
+   * Выполняет выбранное действие header menu.
+   */
+  private executeColumnMenuAction(column: DataTableResolvedColumn<Row>, action: ColumnMenuActionId): void {
+    if (action === 'sort-asc' || action === 'sort-desc') {
+      this.setColumnSortDirection(column.id, action === 'sort-asc' ? 'asc' : 'desc')
+      return
+    }
+    if (action === 'clear-sort') {
+      this.clearSort(column.id)
+      return
+    }
+    if (action === 'filter') {
+      this.handleFilterUiAction({
+        column,
+        rect: this.columnMenuState?.rect ?? { x: 0, y: 0, width: 0, height: 0 },
+        action: 'value',
+      })
+      return
+    }
+    if (action === 'clear-filter') {
+      this.clearFilter(column.id)
+      return
+    }
+    if (action === 'pin-left' || action === 'pin-right') {
+      this.pinColumn(column.id, action === 'pin-left' ? 'left' : 'right')
+      return
+    }
+    if (action === 'unpin') {
+      this.unpinColumn(column.id)
+      return
+    }
+    if (action === 'hide') {
+      this.hideColumn(column.id)
+      return
+    }
+    if (action === 'autosize') {
+      this.autosizeColumn(column.id)
+      return
+    }
+    this.resetColumnState()
+  }
+
+  /**
+   * Устанавливает direction для одной колонки без потери multi-sort chain.
+   */
+  private setColumnSortDirection(columnId: string, direction: 'asc' | 'desc'): void {
+    if (!this.props.view.sorting) return
+    const current = this.viewPipeline.getState().sort.filter(rule => rule.columnId !== columnId)
+    const next = this.props.view.sorting.multi
+      ? [...current, { columnId, direction }]
+      : [{ columnId, direction }]
+    this.viewPipeline.setSort(next)
+    this.emitViewQuery('sort')
+    this.setScroll(this.scrollX, 0)
+    this.refresh(['data', 'layout'])
+  }
+
+  /**
    * Обрабатывает runtime-событие DataTableRootNode.
    */
   private handleHeaderAction(target: DataTableInteractionTarget<Row>, event: MouseEvent): void {
@@ -1694,6 +2899,70 @@ export class DataTableRootNode<
     this.emitViewQuery('sort')
     this.setScroll(this.scrollX, 0)
     this.refresh(['data', 'layout'])
+  }
+
+  /**
+   * Определяет интерактивную область filter UI в header.
+   */
+  private resolveFilterUiTarget(
+    target: DataTableInteractionTarget<Row>,
+    x: number,
+    y: number,
+    event: MouseEvent,
+  ): FilterUiTarget<Row> | null {
+    if (!this.props.view.filterUi || !target.column.filter) return null
+    const filterRowHeight = this.filterRowHeight
+    const headerMainHeight = this.headerHeight - filterRowHeight
+    const rect: DataTableCellRect = {
+      x: target.rect.x,
+      y: 0,
+      width: target.rect.width,
+      height: this.headerHeight,
+    }
+
+    if (filterRowHeight > 0 && y >= headerMainHeight && this.props.view.filterUi.filterRow) {
+      rect.y = headerMainHeight
+      rect.height = filterRowHeight
+      const active = filterStateHasColumn(this.viewPipeline.getState().filters, target.column.id)
+      if ((active && x >= rect.x + rect.width - 18) || event.altKey || event.metaKey) {
+        return { column: target.column, rect, action: 'clear' }
+      }
+      if (x <= rect.x + Math.min(58, rect.width * 0.42)) return { column: target.column, rect, action: 'operator' }
+      return { column: target.column, rect, action: 'value' }
+    }
+
+    if (this.props.view.filterUi.headerMenu && y < headerMainHeight && x >= rect.x + rect.width - 28) {
+      rect.height = headerMainHeight
+      return {
+        column: target.column,
+        rect,
+        action: filterStateHasColumn(this.viewPipeline.getState().filters, target.column.id) && event.altKey
+          ? 'clear'
+          : 'value',
+      }
+    }
+    return null
+  }
+
+  /**
+   * Применяет быстрый built-in filter UI action.
+   */
+  private handleFilterUiAction(target: FilterUiTarget<Row>): boolean {
+    const active = resolveColumnFilterRule(this.viewPipeline.getState().filters, target.column.id)
+    if (target.action === 'clear') {
+      this.clearFilter(target.column.id)
+      return true
+    }
+
+    const filter = target.column.filter
+    const operator = target.action === 'operator'
+      ? resolveNextFilterOperator(filter, active?.operator)
+      : active?.operator ?? resolveDefaultFilterOperator(filter)
+    const value = target.action === 'value'
+      ? resolveNextFilterValue(filter, active?.value)
+      : active?.value ?? resolveDefaultFilterValue(filter)
+    this.setFilter(target.column.id, { operator, value })
+    return true
   }
 
   /**
@@ -1792,8 +3061,13 @@ export class DataTableRootNode<
       toIndex,
       order,
       reason: 'drag',
-    }, this.props.columns)
+    }, this.getColumnStateInputColumns())
+    this.columnStateOverride = {
+      ...this.toColumnStateInput(this.getColumnState()),
+      order: next.order,
+    }
     this.props.onColumnOrderChange?.(next)
+    this.emitColumnStateChange()
     this.emitViewQuery('column')
     this.refresh(['columns', 'layout'])
   }
@@ -1834,6 +3108,7 @@ export class DataTableRootNode<
     const drag = this.columnDragState
     if (!drag) return undefined
     const visible = this.visibleColumnRects('all', false)
+      .filter(item => item.column.id !== drag.column.id)
       .filter(item => (allowCrossPinned || item.column.pinned === drag.pinned) && item.column.reorderable !== false)
     if (visible.length === 0) return drag.targetIndex
     if (x < 0) return this.resolveColumnDragInsertionIndex(this.resolvedColumns.findIndex(column => column.id === visible[0]?.column.id), false)
@@ -1871,11 +3146,18 @@ export class DataTableRootNode<
    */
   private renderGrid(): void {
     const headerY = 0
-    const topRows = this.props.pinnedRows.top ?? []
-    const bottomRows = this.props.pinnedRows.bottom ?? []
+    const pinnedRows = this.resolveEffectivePinnedRows()
+    const topRows = pinnedRows.top ?? []
+    const bottomRows = pinnedRows.bottom ?? []
+    const filterRowHeight = this.filterRowHeight
+    const headerMainHeight = this.headerHeight - filterRowHeight
     this.nextVisibleCellKeys = new Set()
     this.cellEnterRenderCount = 0
-    this.renderPartitionedRowZone('header', [{} as Row], headerY, this.headerHeight, false)
+    this.renderPartitionedRowZone('header', [{} as Row], headerY, headerMainHeight, false)
+
+    if (filterRowHeight > 0) {
+      this.renderFilterRow(headerY + headerMainHeight, filterRowHeight)
+    }
 
     if (topRows.length > 0) {
       this.renderPartitionedRowZone('pinned-top', topRows, this.headerHeight, this.rowHeight, false)
@@ -1895,10 +3177,12 @@ export class DataTableRootNode<
 
     this.renderPinnedBottomGroupPanel()
     this.renderSearchOverlay()
+    this.renderClipboardFeedbackOverlay()
     this.renderTextSelectionOverlay()
     this.renderInteractionOverlay()
     this.renderInteractionLayer()
     this.renderColumnDragOverlay()
+    this.renderColumnMenu()
     this.renderTooltipLayer()
     this.renderScrollbars()
     this.renderScrollbarLayer()
@@ -1981,6 +3265,175 @@ export class DataTableRootNode<
     if (rows.length === 0) return
 
     this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.rowHeight, true)
+  }
+
+  /**
+   * Рисует встроенную canvas filter row под header captions.
+   */
+  private renderFilterRow(y: number, height: number): void {
+    this.renderFilterRowRegion('center', y, height, this.viewport.bodyX, this.viewport.bodyWidth)
+    if (this.viewport.pinnedLeftWidth > 0) {
+      this.renderFilterRowRegion('left', y, height, 0, this.viewport.pinnedLeftWidth)
+    }
+    if (this.viewport.pinnedRightWidth > 0) {
+      this.renderFilterRowRegion('right', y, height, this.width - this.viewport.pinnedRightWidth, this.viewport.pinnedRightWidth)
+    }
+  }
+
+  /**
+   * Рисует filter row для отдельного pinned/center региона.
+   */
+  private renderFilterRowRegion(
+    region: VisibleColumnRegion,
+    y: number,
+    height: number,
+    clipX: number,
+    clipWidth: number,
+  ): void {
+    if (clipWidth <= 0 || height <= 0) return
+
+    const schema: NovaSchema = []
+    const viewState = this.viewPipeline.getState()
+    for (const columnRect of this.visibleColumnRects(region)) {
+      const rect = {
+        x: columnRect.x,
+        y,
+        width: columnRect.width,
+        height,
+      }
+      const active = filterStateHasColumn(viewState.filters, columnRect.column.id)
+      schema.push({
+        type: 'rect',
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        styles: {
+          background: active ? '#eaf3ff' : '#f8fafc',
+          border: { color: '#d8e0ea', width: 1 },
+        },
+      })
+
+      const context = this.createFilterRowContext(columnRect, rect)
+      const template = columnRect.column.filterTemplate
+      if (template) {
+        schema.push(...template(context))
+        continue
+      }
+
+      const rule = resolveColumnFilterRule(viewState.filters, columnRect.column.id)
+      const operatorLabel = rule
+        ? formatFilterOperator(rule.operator)
+        : formatFilterOperator(resolveDefaultFilterOperator(columnRect.column.filter))
+      const valueLabel = rule
+        ? formatFilterValue(rule.value)
+        : resolveFilterPlaceholder(columnRect.column.filter)
+      const label = valueLabel
+      if (!label) continue
+
+      const chipWidth = Math.min(54, Math.max(32, Math.floor(rect.width * 0.36)))
+      schema.push({
+        type: 'rect',
+        x: rect.x + 4,
+        y: rect.y + 3,
+        width: chipWidth,
+        height: Math.max(0, rect.height - 6),
+        styles: {
+          background: active ? '#dbeafe' : '#eef2f7',
+          border: { color: active ? '#93c5fd' : '#d8e0ea', width: 1 },
+          radius: 4,
+        },
+      })
+      schema.push({
+        type: 'text',
+        text: operatorLabel,
+        x: rect.x + 8,
+        y: rect.y,
+        width: Math.max(0, chipWidth - 8),
+        height: rect.height,
+        styles: {
+          color: active ? '#1d4ed8' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: Math.max(9, this.fontSize - 3),
+            weight: '700',
+          },
+          lineHeight: Math.max(10, this.lineHeight - 3),
+          align: { horizontal: 'center', vertical: 'middle' },
+          ellipsis: true,
+        },
+      })
+
+      schema.push({
+        type: 'text',
+        text: label,
+        x: rect.x + chipWidth + 10,
+        y: rect.y,
+        width: Math.max(0, rect.width - chipWidth - (active ? 30 : 16)),
+        height: rect.height,
+        styles: {
+          color: active ? '#1d4ed8' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: Math.max(10, this.fontSize - 2),
+            weight: active ? '700' : '500',
+          },
+          lineHeight: Math.max(10, this.lineHeight - 2),
+          align: { horizontal: 'left', vertical: 'middle' },
+          ellipsis: true,
+        },
+      })
+
+      if (active) {
+        schema.push({
+          type: 'text',
+          text: 'x',
+          x: rect.x + rect.width - 18,
+          y: rect.y,
+          width: 14,
+          height: rect.height,
+          styles: {
+            color: '#64748b',
+            font: {
+              family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+              size: Math.max(12, this.fontSize),
+              weight: '800',
+            },
+            lineHeight: Math.max(10, this.lineHeight),
+            align: { horizontal: 'center', vertical: 'middle' },
+          },
+        })
+      }
+    }
+
+    this.renderer.clip(clipX, y, clipWidth, height)
+    this.renderer.schema(schema)
+    this.renderer.clearClip()
+  }
+
+  /**
+   * Собирает context для пользовательского #filter slot.
+   */
+  private createFilterRowContext(
+    columnRect: VisibleColumnRect<Row>,
+    rect: DataTableCellRect,
+  ): DataTableCellContext<Row> {
+    const row = {} as Row
+    const rowId = `__filter__:${columnRect.column.id}`
+    return {
+      row,
+      rowId,
+      rowIndex: -1,
+      viewRowIndex: -1,
+      column: columnRect.column,
+      columnIndex: columnRect.columnIndex,
+      value: summarizeColumnFilters(this.viewPipeline.getState().filters, columnRect.column.id),
+      rect,
+      state: this.createCellState(rect, rowId, -1, undefined, columnRect, 'header'),
+      zone: 'header',
+      store: this.store,
+      api: this.api,
+    }
   }
 
   /**
@@ -2318,6 +3771,10 @@ export class DataTableRootNode<
       editingInvalid: editingActive ? editing.invalid : false,
       editingDirty: editingActive ? editing.dirty : false,
       editingMessage: editingActive ? editing.message : undefined,
+      editPending: editingActive ? editing.pending : false,
+      editError: editingActive ? editing.error : undefined,
+      editRollback: editingActive ? editing.rollback : false,
+      editTransactionId: editingActive ? editing.transactionId : undefined,
       dragging: zone === 'header' && !!columnDrag?.active && columnDrag.column.id === columnRect.column.id,
     }
   }
@@ -2583,12 +4040,34 @@ export class DataTableRootNode<
       schema.push({
         type: 'text',
         text: `${context.state.sortPriority !== undefined ? context.state.sortPriority + 1 : ''}${context.state.sorted === 'asc' ? '↑' : context.state.sorted === 'desc' ? '↓' : ''}${context.state.filtered ? '•' : ''}`,
-        x: rect.x + rect.width - 22,
+        x: rect.x + rect.width - 48,
         y: rect.y,
-        width: 18,
+        width: 24,
         height: rect.height,
         styles: {
           color: context.state.filtered ? '#2563eb' : '#64748b',
+          font: {
+            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+            size: 12,
+            weight: '800',
+          },
+          align: {
+            horizontal: 'right',
+            vertical: 'middle',
+          },
+        },
+      })
+    }
+    if (isHeader) {
+      schema.push({
+        type: 'text',
+        text: '...',
+        x: rect.x + rect.width - 22,
+        y: rect.y,
+        width: 16,
+        height: rect.height,
+        styles: {
+          color: '#64748b',
           font: {
             family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
             size: 12,
@@ -2988,6 +4467,113 @@ export class DataTableRootNode<
   /**
    * Выполняет отрисовку DataTableRootNode.
    */
+  private renderClipboardFeedbackOverlay(): void {
+    const feedback = this.clipboardFeedback
+    if (!feedback.visible && feedback.invalid.length === 0) return
+
+    const schema: NovaSchema = []
+    if (feedback.invalid.length > 0) {
+      schema.push(...this.createClipboardInvalidCellMarkers(feedback.invalid))
+    }
+
+    if (feedback.visible) {
+      const palette = resolveClipboardFeedbackPalette(feedback.tone)
+      const label = `${feedback.message} · ${feedback.committed}/${feedback.skipped}/${feedback.invalid.length}`
+      const width = Math.min(Math.max(240, label.length * 7 + 28), Math.max(240, this.width - 24))
+      const x = Math.min(Math.max(8, this.viewport.bodyX + 8), Math.max(8, this.width - width - 8))
+      const y = Math.min(Math.max(this.headerHeight + 8, this.height - 46), Math.max(8, this.height - 46))
+
+      schema.push(
+        {
+          type: 'rect',
+          x,
+          y,
+          width,
+          height: 34,
+          styles: {
+            background: palette.background,
+            border: { color: palette.border, width: 1 },
+            radius: 7,
+            opacity: 0.96,
+          },
+        },
+        {
+          type: 'rect',
+          x: x + 8,
+          y: y + 10,
+          width: 4,
+          height: 14,
+          styles: {
+            background: palette.accent,
+            radius: 4,
+          },
+        },
+        {
+          type: 'text',
+          text: label,
+          x: x + 18,
+          y,
+          width: Math.max(0, width - 28),
+          height: 34,
+          styles: {
+            color: palette.color,
+            font: {
+              family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+              size: Math.max(10, this.fontSize - 1),
+              weight: '700',
+            },
+            lineHeight: this.lineHeight,
+            align: { horizontal: 'left', vertical: 'middle' },
+            ellipsis: true,
+          },
+        },
+      )
+    }
+
+    if (schema.length > 0) this.renderer.schema(schema)
+  }
+
+  /**
+   * Создает runtime-сущность DataTableRootNode.
+   */
+  private createClipboardInvalidCellMarkers(invalid: Array<DataTablePasteInvalidCell>): NovaSchema {
+    const schema: NovaSchema = []
+    const columnRects = this.visibleColumnRects('all')
+
+    for (const cell of invalid) {
+      if (!cell.columnId || cell.rowIndex < this.viewport.rowRange.start || cell.rowIndex >= this.viewport.rowRange.end) continue
+      const columnRect = columnRects.find(candidate => candidate.column.id === cell.columnId)
+      if (!columnRect) continue
+      const rect = this.clipRectToColumnRegion({
+        x: columnRect.x,
+        y: this.viewport.bodyY + cell.rowIndex * this.rowHeight - this.scrollY,
+        width: columnRect.width,
+        height: this.rowHeight,
+      }, columnRect.column, 'body')
+      if (!rect) continue
+
+      schema.push(
+        this.createOverlayRect(rect, 'rgba(248, 113, 113, 0.16)', 1, '#dc2626'),
+        {
+          type: 'rect',
+          x: rect.x + 2,
+          y: rect.y + 2,
+          width: Math.min(18, Math.max(0, rect.width - 4)),
+          height: 3,
+          styles: {
+            background: '#dc2626',
+            radius: 3,
+          },
+        },
+      )
+    }
+
+    return schema
+  }
+
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
   private renderPinnedBottomGroupPanel(): void {
     const template = this.props.pinnedBottomTemplate
     const grouping = this.props.view.grouping
@@ -2995,9 +4581,10 @@ export class DataTableRootNode<
     if (grouping.footerPlacement !== 'pinned-bottom' && grouping.footerPlacement !== 'both') return
 
     const rows = this.store.getRows()
+    const pinnedRows = this.resolveEffectivePinnedRows()
     const rect = {
       x: this.viewport.bodyX,
-      y: Math.max(this.viewport.bodyY, this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight - 124),
+      y: Math.max(this.viewport.bodyY, this.height - (pinnedRows.bottom?.length ?? 0) * this.rowHeight - 124),
       width: this.viewport.bodyWidth,
       height: 112,
     }
@@ -3170,6 +4757,68 @@ export class DataTableRootNode<
         },
       })
     }
+
+    this.renderer.schema(schema)
+  }
+
+  /**
+   * Выполняет отрисовку DataTableRootNode.
+   */
+  private renderColumnMenu(): void {
+    const menu = this.columnMenuState
+    if (!menu) return
+
+    const height = menu.actions.length * menu.itemHeight + 8
+    const schema: NovaSchema = [
+      {
+        type: 'rect',
+        x: menu.x,
+        y: menu.y,
+        width: menu.width,
+        height,
+        styles: {
+          background: '#ffffff',
+          opacity: 0.98,
+          border: { color: '#cbd5e1', width: 1, radius: 6 },
+        },
+      },
+    ]
+
+    menu.actions.forEach((action, index) => {
+      const y = menu.y + 4 + index * menu.itemHeight
+      schema.push(
+        {
+          type: 'rect',
+          x: menu.x + 4,
+          y,
+          width: menu.width - 8,
+          height: menu.itemHeight,
+          styles: {
+            background: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+            opacity: action.disabled ? 0.48 : 1,
+          },
+        },
+        {
+          type: 'text',
+          text: action.label,
+          x: menu.x + 12,
+          y,
+          width: menu.width - 24,
+          height: menu.itemHeight,
+          styles: {
+            color: action.disabled ? '#94a3b8' : '#172033',
+            font: {
+              family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+              size: 12,
+              weight: '700',
+            },
+            lineHeight: 16,
+            align: { horizontal: 'left', vertical: 'middle' },
+            ellipsis: true,
+          },
+        },
+      )
+    })
 
     this.renderer.schema(schema)
   }
@@ -3491,7 +5140,7 @@ export class DataTableRootNode<
     if (zone === 'header') return { top: 0, bottom: this.headerHeight }
     if (zone === 'pinned-top') return { top: this.headerHeight, bottom: this.viewport.bodyY }
     if (zone === 'pinned-bottom') {
-      const bottomRows = this.props.pinnedRows.bottom?.length ?? 0
+      const bottomRows = this.resolveEffectivePinnedRows().bottom?.length ?? 0
       return { top: this.height - bottomRows * this.rowHeight, bottom: this.height }
     }
     return {
@@ -3806,6 +5455,148 @@ export class DataTableRootNode<
    */
   private selectRange(range: DataTableSelectionRange, options: DataTableSelectionUpdateOptions = {}): void {
     this.applySelectionRange(this.normalizeSelectionRange(range), options)
+  }
+
+  /**
+   * Фокусирует конкретную ячейку по rowId + columnId.
+   */
+  private focusCell(rowId: DataTableRowId, columnId: string): boolean {
+    this.selectCell(rowId, columnId, { focus: true, scrollIntoView: true })
+    const active = this.selection?.activeCell
+    return !!active
+      && active.rowId === rowId
+      && active.columnId === columnId
+  }
+
+  /**
+   * Перемещает active cell и при необходимости расширяет selection.
+   */
+  private moveActiveCell(direction: DataTableActiveCellDirection, options: { extend?: boolean } = {}): boolean {
+    const current = this.resolveActiveCellForNavigation()
+    if (!current) return false
+    const target = this.resolveNavigationTarget(current, direction)
+    if (!target) return false
+
+    if (options.extend && this.selection?.anchor) {
+      this.selectRange(this.createSelectionRange(this.selection.anchor, target, 'cell'), {
+        append: false,
+        focus: true,
+        scrollIntoView: true,
+      })
+    } else {
+      this.applySelectionRange(this.createSelectionRange(target, target, 'cell'), {
+        append: false,
+        focus: true,
+      }, target)
+    }
+
+    const column = this.resolvedColumns[target.columnIndex]
+    if (column) this.scrollCellIntoView(target.rowIndex, column)
+    return true
+  }
+
+  /**
+   * Выбирает допустимый полный диапазон через Ctrl/Cmd+A.
+   */
+  private selectAllByKeyboard(): boolean {
+    if (this.props.selection === false || !this.props.selection.enabled || this.resolvedColumns.length === 0 || this.viewPipeline.rowCount === 0) {
+      return false
+    }
+
+    const firstRow = this.resolveNavigableRowIndex(0, 1)
+    const lastRow = this.resolveNavigableRowIndex(this.viewPipeline.rowCount - 1, -1)
+    if (firstRow === undefined || lastRow === undefined) return false
+
+    const firstColumn = this.resolvedColumns[0]
+    const lastColumn = this.resolvedColumns[this.resolvedColumns.length - 1]
+    if (!firstColumn || !lastColumn) return false
+
+    const start: DataTableSelectionAnchor = {
+      rowId: this.viewPipeline.getRowIdAt(firstRow) ?? firstRow,
+      rowIndex: firstRow,
+      columnId: firstColumn.id,
+      columnIndex: 0,
+    }
+    const end: DataTableSelectionAnchor = {
+      rowId: this.viewPipeline.getRowIdAt(lastRow) ?? lastRow,
+      rowIndex: lastRow,
+      columnId: lastColumn.id,
+      columnIndex: this.resolvedColumns.length - 1,
+    }
+    const mode = this.props.selection.mode
+    const unit: DataTableSelectionUnit = mode === 'row'
+      ? 'row'
+      : mode === 'column'
+        ? 'column'
+        : 'cell'
+    this.applySelectionRange(this.createSelectionRange(start, end, unit), { focus: true }, start)
+    return true
+  }
+
+  /**
+   * Возвращает active cell или первый видимый data cell.
+   */
+  private resolveActiveCellForNavigation(): DataTableSelectionAnchor | null {
+    if (this.selection?.activeCell) return this.selection.activeCell
+
+    const rowIndex = this.resolveNavigableRowIndex(this.viewport.rowRange.start, 1)
+    const column = this.resolvedColumns[0]
+    if (rowIndex === undefined || !column) return null
+    return {
+      rowId: this.viewPipeline.getRowIdAt(rowIndex) ?? rowIndex,
+      rowIndex,
+      columnId: column.id,
+      columnIndex: 0,
+    }
+  }
+
+  /**
+   * Считает следующий target для keyboard navigation.
+   */
+  private resolveNavigationTarget(
+    current: DataTableSelectionAnchor,
+    direction: DataTableActiveCellDirection,
+  ): DataTableSelectionAnchor | null {
+    let rowIndex = current.rowIndex
+    let columnIndex = current.columnIndex
+    const pageRows = Math.max(1, Math.floor(this.viewport.bodyHeight / this.rowHeight) - 1)
+
+    if (direction === 'up') rowIndex -= 1
+    else if (direction === 'down') rowIndex += 1
+    else if (direction === 'page-up') rowIndex -= pageRows
+    else if (direction === 'page-down') rowIndex += pageRows
+    else if (direction === 'left') columnIndex -= 1
+    else if (direction === 'right') columnIndex += 1
+    else if (direction === 'home') columnIndex = 0
+    else if (direction === 'end') columnIndex = this.resolvedColumns.length - 1
+
+    rowIndex = clampInteger(rowIndex, 0, Math.max(0, this.viewPipeline.rowCount - 1))
+    columnIndex = clampInteger(columnIndex, 0, Math.max(0, this.resolvedColumns.length - 1))
+    const rowDirection = rowIndex >= current.rowIndex ? 1 : -1
+    const nextRowIndex = this.resolveNavigableRowIndex(rowIndex, rowDirection)
+    const column = this.resolvedColumns[columnIndex]
+    if (nextRowIndex === undefined || !column) return null
+
+    return {
+      rowId: this.viewPipeline.getRowIdAt(nextRowIndex) ?? nextRowIndex,
+      rowIndex: nextRowIndex,
+      columnId: column.id,
+      columnIndex,
+    }
+  }
+
+  /**
+   * Пропускает group/footer rows при keyboard navigation.
+   */
+  private resolveNavigableRowIndex(start: number, step: 1 | -1): number | undefined {
+    if (this.viewPipeline.rowCount <= 0) return undefined
+    let index = clampInteger(start, 0, this.viewPipeline.rowCount - 1)
+    while (index >= 0 && index < this.viewPipeline.rowCount) {
+      const viewRow = this.viewPipeline.getViewRowAt(index)
+      if (!viewRow || viewRow.kind === 'data') return index
+      index += step
+    }
+    return undefined
   }
 
   /**
@@ -4220,6 +6011,44 @@ export class DataTableRootNode<
   }
 
   /**
+   * Очищает значения выделенных data cells как единую undoable transaction.
+   */
+  private clearSelectionValues(): DataTableTransaction<Row> | null {
+    if (!this.selection || this.selection.ranges.length === 0) return null
+    const deltas: Array<DataTableDelta<Row>> = []
+    for (const range of this.selection.ranges) {
+      const rows = this.resolveRowsForSelectionRange(range)
+      const columns = this.resolveColumnsForSelectionRange(range, false)
+      for (const row of rows) {
+        if (row.rowId === undefined) continue
+        for (const column of columns) {
+          if (column.editable === false) continue
+          const key = typeof column.field === 'string' ? column.field : column.id
+          deltas.push({ type: 'patch', rowId: row.rowId, patch: { [key]: '' } as Partial<Row> })
+        }
+      }
+    }
+    if (deltas.length === 0) return null
+    return this.commitDeltas(deltas, { source: 'clear', label: 'Clear selection' })
+  }
+
+  /**
+   * Заполняет выделение по текущему fill handle mode.
+   */
+  private fillSelection(
+    direction: DataTableFillDirection,
+    options: Partial<DataTableFillHandleOptions> = {},
+  ): DataTableTransaction<Row> | null {
+    const fillHandle = this.props.fillHandle
+    if (fillHandle === false || !fillHandle.enabled || !this.selection?.ranges[0]) return null
+    if (!fillHandle.directions.includes(direction)) return null
+    const mode = options.mode ?? fillHandle.mode
+    const deltas = createDataTableFillDeltas(this.store, this.selection.ranges[0], direction, { mode })
+    if (deltas.length === 0) return null
+    return this.commitDeltas(deltas, { source: 'fill', label: `Fill ${direction}` })
+  }
+
+  /**
    * Выполняет внутренний шаг copySelection для DataTableRootNode.
    */
   private copySelection(): string {
@@ -4247,7 +6076,7 @@ export class DataTableRootNode<
     const sourceText = text ?? await this.readClipboardText()
     if (!sourceText) return emptyResult
 
-    const matrix = parseClipboardMatrix(sourceText, this.props.clipboard.paste.parseFormat)
+    const matrix = parseDataTableClipboardMatrix(sourceText, this.props.clipboard.paste.parseFormat)
     const payload = {
       text: sourceText,
       matrix,
@@ -4259,37 +6088,70 @@ export class DataTableRootNode<
       const override = await (this.props.onBeforePaste?.(payload) ?? this.props.clipboard.onBeforePaste?.(payload))
       if (override === false) return emptyResult
       if (Array.isArray(override)) {
-        this.store.applyDeltaBatch(override)
-        this.refresh(['data', 'interaction'])
+        this.commitDeltas(override, { source: 'paste', label: 'Paste override' })
         const result = { committed: override.length, skipped: 0, invalid: [], deltas: override } satisfies DataTablePasteResult<Row>
+        this.setClipboardPasteResultFeedback(result)
         this.props.onPasteCommit?.(result)
         this.props.clipboard.onPasteCommit?.(result)
         return result
       }
       const result = await this.createPasteResult(matrix)
       if (result.invalid.length > 0 && this.props.clipboard.paste.invalid === 'reject') {
-        this.props.onPasteError?.({ message: 'Paste validation failed', result })
-        this.props.clipboard.onPasteError?.({ message: 'Paste validation failed', result })
+        const pasteError = { message: 'Paste validation failed', result }
+        this.setClipboardFeedback(createDataTableClipboardPasteErrorFeedback(pasteError))
+        this.props.onPasteError?.(pasteError)
+        this.props.clipboard.onPasteError?.(pasteError)
         return result
       }
       if (result.deltas.length > 0) {
-        this.store.applyDeltaBatch(result.deltas)
-        this.refresh(['data', 'interaction'])
+        this.commitDeltas(result.deltas, { source: 'paste', label: 'Paste' })
       }
+      this.setClipboardPasteResultFeedback(result)
       this.props.onPasteCommit?.(result)
       this.props.clipboard.onPasteCommit?.(result)
       return result
     } catch (error) {
-      this.props.onPasteError?.({
+      const pasteError = {
         message: error instanceof Error ? error.message : 'Paste failed',
         error,
-      })
-      this.props.clipboard.onPasteError?.({
-        message: error instanceof Error ? error.message : 'Paste failed',
-        error,
-      })
+      }
+      this.setClipboardFeedback(createDataTableClipboardPasteErrorFeedback(pasteError))
+      this.props.onPasteError?.(pasteError)
+      this.props.clipboard.onPasteError?.(pasteError)
       return emptyResult
     }
+  }
+
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
+  private setClipboardFeedback(feedback: DataTableClipboardFeedbackState<Row>): void {
+    this.clearClipboardFeedbackTimer()
+    this.clipboardFeedback = feedback
+    if (feedback.visible && feedback.ttlMs > 0) {
+      this.clipboardFeedbackHideTimer = setTimeout(() => {
+        this.clipboardFeedback = createDataTableClipboardFeedbackHidden() as DataTableClipboardFeedbackState<Row>
+        this.refresh(['interaction'])
+      }, feedback.ttlMs)
+    }
+    this.refresh(['interaction'])
+  }
+
+  /**
+   * Обновляет runtime-состояние DataTableRootNode.
+   */
+  private setClipboardPasteResultFeedback(result: DataTablePasteResult<Row>): void {
+    if (result.committed === 0 && result.skipped === 0 && result.invalid.length === 0) return
+    this.setClipboardFeedback(createDataTableClipboardPasteFeedback(result))
+  }
+
+  /**
+   * Очищает таймер DataTableRootNode.
+   */
+  private clearClipboardFeedbackTimer(): void {
+    if (!this.clipboardFeedbackHideTimer) return
+    clearTimeout(this.clipboardFeedbackHideTimer)
+    this.clipboardFeedbackHideTimer = null
   }
 
   /**
@@ -4693,16 +6555,17 @@ export class DataTableRootNode<
    * Нормализует и возвращает итоговое значение DataTableRootNode.
    */
   private resolvePinnedEditTarget(rowId: DataTableRowId, column: DataTableResolvedColumn<Row>): DataTableInteractionTarget<Row> | null {
+    const pinnedRows = this.resolveEffectivePinnedRows()
     const zones: Array<{ zone: 'pinned-top' | 'pinned-bottom'; rows: Array<Row>; y: (index: number) => number }> = [
       {
         zone: 'pinned-top',
-        rows: this.props.pinnedRows.top ?? [],
+        rows: pinnedRows.top ?? [],
         y: index => this.headerHeight + index * this.rowHeight,
       },
       {
         zone: 'pinned-bottom',
-        rows: this.props.pinnedRows.bottom ?? [],
-        y: index => this.height - (this.props.pinnedRows.bottom?.length ?? 0) * this.rowHeight + index * this.rowHeight,
+        rows: pinnedRows.bottom ?? [],
+        y: index => this.height - (pinnedRows.bottom?.length ?? 0) * this.rowHeight + index * this.rowHeight,
       },
     ]
 
@@ -4829,18 +6692,66 @@ export class DataTableRootNode<
       state.dirty = !Object.is(parsed, state.initialValue)
       state.invalid = false
       state.message = undefined
+      state.pending = true
+      state.transactionId = state.transactionId ?? `edit-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
-      await this.props.editing.onEditCommit?.({
+      const payload: DataTableEditCommitPayload<Row> = {
         state,
         value: parsed,
         previousValue: state.initialValue,
-      })
+        rowId: state.rowId,
+        columnId: state.column.id,
+        row: state.row,
+        draft,
+        parsedValue: parsed,
+        transactionId: state.transactionId,
+        source: 'edit',
+      }
 
-      if (this.props.editing.optimistic) this.applyCommittedEditValue(state, parsed)
+      const beforeResult = await this.props.editing.onBeforeEditCommit?.(payload)
+      if (beforeResult !== undefined && beforeResult !== true) {
+        this.setEditingInvalid(typeof beforeResult === 'string' ? beforeResult : 'Edit commit rejected')
+        return
+      }
+
+      this.props.editing.onEditPending?.(payload)
+      this.emitEditingChange()
+
+      const strategy = this.props.editing.commitStrategy
+      if (strategy === 'optimistic') this.applyCommittedEditValue(state, parsed)
+
+      await this.props.editing.onEditCommit?.(payload)
+
+      if (strategy === 'pessimistic') this.applyCommittedEditValue(state, parsed)
+
+      state.pending = false
+      state.error = undefined
+      state.rollback = false
       this.editingState = null
+      this.props.editing.onEditSuccess?.(payload)
       this.emitEditingChange()
       this.refresh(['data', 'interaction'])
     } catch (error) {
+      if (state.transactionId && this.props.editing.commitStrategy === 'optimistic') {
+        const rolledBack = this.undo()
+        if (rolledBack) {
+          state.rollback = true
+          this.props.editing.onEditRollback?.({
+            state,
+            value: parsed,
+            previousValue: state.initialValue,
+            rowId: state.rowId,
+            columnId: state.column.id,
+            row: state.row,
+            draft,
+            parsedValue: parsed,
+            transactionId: state.transactionId,
+            source: 'edit',
+          })
+        }
+      }
+      state.pending = false
+      state.error = error
       this.setEditingInvalid(error instanceof Error ? error.message : 'Edit commit failed')
       const nextState = this.editingState ?? state
       this.props.editing.onEditError?.({
@@ -4896,16 +6807,19 @@ export class DataTableRootNode<
   /**
    * Применяет подготовленное состояние DataTableRootNode.
    */
-  private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): void {
+  private applyCommittedEditValue(state: DataTableEditingState<Row>, value: unknown): DataTableTransaction<Row> | null {
     if (state.zone === 'body') {
-      this.store.setCell(state.rowId, state.column.id, value)
-      return
+      return this.commitDeltas(
+        { type: 'setCell', rowId: state.rowId, columnId: state.column.id, value },
+        { source: 'edit', label: `Edit ${state.column.id}` },
+      )
     }
 
     const key = typeof state.column.field === 'string'
       ? state.column.field
       : state.column.id
     state.row[key as keyof Row] = value as Row[keyof Row]
+    return null
   }
 
   /**
@@ -4991,6 +6905,10 @@ export class DataTableRootNode<
         editingInvalid: this.editingState.invalid,
         editingDirty: this.editingState.dirty,
         editingMessage: this.editingState.message,
+        editPending: this.editingState.pending,
+        editError: this.editingState.error,
+        editRollback: this.editingState.rollback,
+        editTransactionId: this.editingState.transactionId,
       },
       zone: context.zone,
       store: context.store,
@@ -5009,6 +6927,20 @@ export class DataTableRootNode<
       hoverAlpha: this.props.hoverAlpha,
       selectionAlpha: this.props.selectionAlpha,
     }
+  }
+
+  /**
+   * Возвращает compact accessibility state для DOM overlay wrapper.
+   */
+  private getAccessibilityState(): DataTableAccessibilityState {
+    return createDataTableAccessibilityState(this.props.accessibility, {
+      rowCount: this.viewPipeline.rowCount,
+      columnCount: this.resolvedColumns.length,
+      activeCell: this.selection?.activeCell ?? null,
+      selection: this.selection,
+      editing: !!this.editingState,
+      lastAction: this.keyboardFocusActive ? 'Table focused' : undefined,
+    })
   }
 
   /**
@@ -5096,7 +7028,8 @@ export class DataTableRootNode<
       }
     }
 
-    const topRows = this.props.pinnedRows.top ?? []
+    const pinnedRows = this.resolveEffectivePinnedRows()
+    const topRows = pinnedRows.top ?? []
     if (y >= this.headerHeight && y < this.viewport.bodyY) {
       const localIndex = Math.floor((y - this.headerHeight) / this.rowHeight)
       const row = topRows[localIndex]
@@ -5115,7 +7048,7 @@ export class DataTableRootNode<
       }
     }
 
-    const bottomRows = this.props.pinnedRows.bottom ?? []
+    const bottomRows = pinnedRows.bottom ?? []
     const bottomStart = this.height - bottomRows.length * this.rowHeight
     if (bottomRows.length > 0 && y >= bottomStart && y <= this.height) {
       const localIndex = Math.floor((y - bottomStart) / this.rowHeight)
@@ -5223,7 +7156,8 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг hitResizeHandle для DataTableRootNode.
    */
   private hitResizeHandle(x: number, y: number): VisibleColumnRect<Row> | null {
-    if (y < 0 || y > this.headerHeight) return null
+    const resizeHeight = this.headerHeight - this.filterRowHeight
+    if (y < 0 || y > resizeHeight) return null
 
     for (const rect of this.visibleColumnRects()) {
       if (!rect.column.resizable) continue
@@ -5512,6 +7446,34 @@ function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0))
 }
 
+function clampInteger(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.round(Number.isFinite(value) ? value : min)))
+}
+
+function cloneColumnStateInput(state: DataTableColumnState): DataTableColumnState {
+  return {
+    widths: state.widths ? { ...state.widths } : undefined,
+    order: state.order ? [...state.order] : undefined,
+    hidden: state.hidden ? [...state.hidden] : undefined,
+    pinned: state.pinned
+      ? {
+          left: state.pinned.left ? [...state.pinned.left] : undefined,
+          right: state.pinned.right ? [...state.pinned.right] : undefined,
+        }
+      : undefined,
+    groups: state.groups ? [...state.groups] : undefined,
+    autosizeMode: state.autosizeMode,
+    version: state.version,
+  }
+}
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  const tag = target.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select'
+}
+
 function resolveCoreTextSelectionOptions(
   options: DataTableRootResolvedProps['textSelection'],
 ) {
@@ -5534,6 +7496,134 @@ function escapeTooltipMarkdown(value: string): string {
 function filterStateHasColumn(filters: DataTableViewState['filters'], columnId: string): boolean {
   if (Array.isArray(filters)) return filters.some(rule => rule.columnId === columnId)
   return filters.rules.some(rule => 'logic' in rule ? filterStateHasColumn(rule, columnId) : rule.columnId === columnId)
+}
+
+function summarizeColumnFilters(filters: DataTableViewState['filters'], columnId: string): string {
+  const rules = collectColumnFilterRules(filters, columnId)
+  if (rules.length === 0) return ''
+  return rules
+    .slice(0, 2)
+    .map(rule => `${formatFilterOperator(rule.operator)} ${formatFilterValue(rule.value)}`)
+    .join(' · ')
+}
+
+function collectColumnFilterRules(
+  filters: DataTableViewState['filters'],
+  columnId: string,
+): Array<DataTableFilterRule> {
+  if (Array.isArray(filters)) return filters.filter(rule => rule.columnId === columnId)
+  return filters.rules.flatMap(rule => (
+    'logic' in rule
+      ? collectColumnFilterRules(rule, columnId)
+      : rule.columnId === columnId
+        ? [rule]
+        : []
+  ))
+}
+
+function resolveColumnFilterRule(filters: DataTableViewState['filters'], columnId: string): DataTableFilterRule | undefined {
+  return collectColumnFilterRules(filters, columnId)[0]
+}
+
+function resolveDefaultFilterOperator(filter: unknown): DataTableFilterOperator {
+  const operators = resolveFilterOperators(filter)
+  return resolveFilterConfigValue(filter, 'defaultOperator') as DataTableFilterOperator | undefined
+    ?? operators[0]
+    ?? 'contains'
+}
+
+function resolveNextFilterOperator(filter: unknown, current?: DataTableFilterOperator): DataTableFilterOperator {
+  const operators = resolveFilterOperators(filter)
+  if (!current) return operators[0] ?? resolveDefaultFilterOperator(filter)
+  const index = operators.indexOf(current)
+  return operators[(index + 1) % operators.length] ?? resolveDefaultFilterOperator(filter)
+}
+
+function resolveFilterOperators(filter: unknown): Array<DataTableFilterOperator> {
+  const configured = resolveFilterConfigValue(filter, 'operators')
+  if (Array.isArray(configured) && configured.length > 0) return configured as Array<DataTableFilterOperator>
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'number') return ['equals', 'gt', 'gte', 'lt', 'lte']
+  if (preset === 'date') return ['equals', 'gt', 'lt']
+  if (preset === 'set') return ['in', 'notIn']
+  if (preset === 'boolean') return ['is', 'isNot']
+  return ['contains', 'equals', 'startsWith', 'endsWith']
+}
+
+function resolveDefaultFilterValue(filter: unknown): unknown {
+  const defaultValue = resolveFilterConfigValue(filter, 'defaultValue')
+  if (defaultValue !== undefined) return defaultValue
+  const options = resolveFilterOptions(filter)
+  if (options.length > 0) {
+    const operator = resolveDefaultFilterOperator(filter)
+    if (operator === 'in' || operator === 'notIn') return [options[0]]
+    return options[0]
+  }
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'number') return 0
+  if (preset === 'boolean') return true
+  return ''
+}
+
+function resolveNextFilterValue(filter: unknown, current: unknown): unknown {
+  const options = resolveFilterOptions(filter)
+  if (options.length === 0) return current ?? resolveDefaultFilterValue(filter)
+  const currentValue = Array.isArray(current) ? current[0] : current
+  const index = options.findIndex(option => Object.is(option, currentValue))
+  const next = options[(index + 1) % options.length] ?? options[0]
+  const operator = resolveDefaultFilterOperator(filter)
+  return operator === 'in' || operator === 'notIn' ? [next] : next
+}
+
+function resolveFilterOptions(filter: unknown): Array<unknown> {
+  const options = resolveFilterConfigValue(filter, 'options')
+  if (Array.isArray(options)) return options
+  const preset = typeof filter === 'string'
+    ? filter
+    : resolveFilterConfigValue(filter, 'type')
+  if (preset === 'boolean') return [true, false]
+  return []
+}
+
+function resolveFilterConfigValue(filter: unknown, key: string): unknown {
+  if (!filter || typeof filter !== 'object') return undefined
+  return (filter as Record<string, unknown>)[key]
+}
+
+function formatFilterOperator(operator: DataTableFilterOperator): string {
+  const labels: Record<DataTableFilterOperator, string> = {
+    contains: 'has',
+    equals: '=',
+    startsWith: '^',
+    endsWith: '$',
+    gt: '>',
+    gte: '>=',
+    lt: '<',
+    lte: '<=',
+    between: '<>',
+    in: 'in',
+    notIn: 'not',
+    is: 'is',
+    isNot: 'not',
+  }
+  return labels[operator] ?? operator
+}
+
+function formatFilterValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(item => String(item)).join(', ')
+  if (value === undefined || value === null || value === '') return 'empty'
+  return String(value)
+}
+
+function resolveFilterPlaceholder(filter: unknown): string {
+  if (!filter) return ''
+  if (typeof filter === 'string') return filter
+  if (typeof filter === 'object' && filter && 'type' in filter) return String((filter as { type?: unknown }).type ?? 'filter')
+  return 'filter'
 }
 
 function estimateSearchTextWidth(value: string, fontSize: number): number {
@@ -5620,6 +7710,41 @@ function parseCsvLine(line: string): Array<string> {
   return cells
 }
 
+function resolveClipboardFeedbackPalette(
+  tone: DataTableClipboardFeedbackState['tone'],
+): { background: string; border: string; accent: string; color: string } {
+  if (tone === 'success') {
+    return {
+      background: '#ecfdf5',
+      border: '#a7f3d0',
+      accent: '#059669',
+      color: '#064e3b',
+    }
+  }
+  if (tone === 'warning') {
+    return {
+      background: '#fff7ed',
+      border: '#fed7aa',
+      accent: '#ea580c',
+      color: '#7c2d12',
+    }
+  }
+  if (tone === 'error') {
+    return {
+      background: '#fef2f2',
+      border: '#fecaca',
+      accent: '#dc2626',
+      color: '#7f1d1d',
+    }
+  }
+  return {
+    background: '#f8fafc',
+    border: '#cbd5e1',
+    accent: '#64748b',
+    color: '#0f172a',
+  }
+}
+
 function stringifyClipboardValue(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') return JSON.stringify(value)
@@ -5647,6 +7772,15 @@ function escapeHtmlCell(value: string): string {
 
 function escapeTsvCell(value: string): string {
   return /[\t\n\r"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+}
+
+function cloneSerializable<T>(value: T): T {
+  if (value === undefined || value === null) return value
+  try {
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    return value
+  }
 }
 
 function parseClipboardBoolean(value: unknown): boolean {

@@ -5,13 +5,23 @@ import type {
   DataTableClipboardOptions,
   DataTablePerformanceOptions,
   DataTableResolvedTextPerformanceOptions,
+  DataTableDetailRowsOptions,
   DataTableEditingOptions,
   DataTableEditTrigger,
+  DataTableColumnState,
+  DataTableColumnGroupInput,
+  DataTableColumnAutosizeMode,
+  DataTableStatePersistenceOptions,
+  DataTableKeyboardNavigationOptions,
   DataTableScrollbarAxisOptions,
+  DataTableResolvedColumnState,
+  DataTableResolvedStatePersistenceOptions,
+  DataTableResolvedDetailRowsOptions,
   DataTableResolvedInteractionOptions,
   DataTableResolvedClipboardOptions,
   DataTableResolvedPerformanceOptions,
   DataTableResolvedEditingOptions,
+  DataTableResolvedKeyboardNavigationOptions,
   DataTableResolvedSelectionOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
@@ -30,6 +40,9 @@ import type {
   DataTableZoomOptions,
 } from '@/model/types/datatable.types'
 import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
+import { normalizeDataTableAccessibility } from '@/model/runtime/DataTableAccessibility'
+import { normalizeDataTableFillHandle } from '@/model/runtime/DataTableFillHandle'
+import { normalizeDataTableHistory } from '@/model/runtime/DataTableTransactionHistory'
 
 export type DataTableRootDescriptor = NovaComponentDescriptor<
   DataTableRootResolvedProps,
@@ -44,6 +57,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   rows: { type: 'array' },
   rowKey: { type: 'any' },
   columns: { type: 'array' },
+  columnGroups: { type: 'array' },
   pinnedColumns: { type: 'object' },
   pinnedRows: { type: 'object' },
   rowHeight: { type: 'number' },
@@ -59,6 +73,13 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   textSelection: { type: 'any' },
   zoom: { type: 'any' },
   editing: { type: 'any' },
+  keyboardNavigation: { type: 'any' },
+  history: { type: 'any' },
+  fillHandle: { type: 'any' },
+  accessibility: { type: 'any' },
+  detailRows: { type: 'any' },
+  columnState: { type: 'object' },
+  statePersistence: { type: 'any' },
   performance: { type: 'object' },
   hoverAlpha: { type: 'number' },
   selectionAlpha: { type: 'number' },
@@ -73,10 +94,13 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   pinnedBottomTemplate: { type: 'function' },
   onViewportChange: { type: 'function' },
   onColumnResize: { type: 'function' },
+  onColumnStateChange: { type: 'function' },
   onSortChange: { type: 'function' },
   onFilterChange: { type: 'function' },
   onSearchChange: { type: 'function' },
   onQueryChange: { type: 'function' },
+  onServerQueryChange: { type: 'function' },
+  onSummaryChange: { type: 'function' },
   onRowOrderChange: { type: 'function' },
   onColumnOrderChange: { type: 'function' },
   onGroupingChange: { type: 'function' },
@@ -94,6 +118,7 @@ export const DATATABLE_ROOT_FIELD_DEFINITIONS = {
   onPasteError: { type: 'function' },
   onZoomChange: { type: 'function' },
   onEditingChange: { type: 'function' },
+  onKeyboardAction: { type: 'function' },
 } as const
 
 /**
@@ -118,6 +143,7 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     rows: props.rows,
     rowKey: props.rowKey,
     columns: props.columns ?? [],
+    columnGroups: normalizeColumnGroups(props.columnGroups),
     pinnedColumns: props.pinnedColumns ?? {},
     pinnedRows: {
       top: props.pinnedRows?.top ?? [],
@@ -140,6 +166,13 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     textSelection: normalizeDataTableTextSelection(props.textSelection),
     zoom: normalizeDataTableZoom(props.zoom),
     editing: normalizeDataTableEditing(props.editing),
+    keyboardNavigation: normalizeDataTableKeyboardNavigation(props.keyboardNavigation),
+    history: normalizeDataTableHistory(props.history),
+    fillHandle: normalizeDataTableFillHandle(props.fillHandle),
+    accessibility: normalizeDataTableAccessibility(props.accessibility),
+    detailRows: normalizeDataTableDetailRows(props.detailRows),
+    columnState: normalizeDataTableColumnState(props.columnState),
+    statePersistence: normalizeDataTableStatePersistence(props.statePersistence),
     performance: normalizeDataTablePerformance(props.performance),
     hoverAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).hoverAlpha, 0),
     selectionAlpha: finiteUnit((props as DataTableRootResolvedProps<Row>).selectionAlpha, 0),
@@ -154,10 +187,13 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     pinnedBottomTemplate: props.pinnedBottomTemplate,
     onViewportChange: props.onViewportChange,
     onColumnResize: props.onColumnResize,
+    onColumnStateChange: props.onColumnStateChange,
     onSortChange: props.onSortChange,
     onFilterChange: props.onFilterChange,
     onSearchChange: props.onSearchChange,
     onQueryChange: props.onQueryChange,
+    onServerQueryChange: props.onServerQueryChange,
+    onSummaryChange: props.onSummaryChange,
     onRowOrderChange: props.onRowOrderChange,
     onColumnOrderChange: props.onColumnOrderChange,
     onGroupingChange: props.onGroupingChange,
@@ -175,6 +211,71 @@ export function normalizeDataTableRootProps<Row extends Record<string, any>>(
     onPasteError: props.onPasteError,
     onZoomChange: props.onZoomChange,
     onEditingChange: props.onEditingChange,
+    onKeyboardAction: props.onKeyboardAction,
+  }
+}
+
+const DEFAULT_STATE_PERSISTENCE_SLICES = ['columnState', 'sort', 'filters', 'search', 'grouping'] as const
+
+export function normalizeDataTableStatePersistence(
+  persistence: false | DataTableStatePersistenceOptions | undefined,
+): false | DataTableResolvedStatePersistenceOptions {
+  if (persistence === false || !persistence || !persistence.key) return false
+
+  return {
+    key: persistence.key,
+    storage: persistence.storage ?? 'localStorage',
+    include: normalizeStatePersistenceSlices(persistence.include),
+    debounceMs: Math.max(0, persistence.debounceMs ?? 250),
+    version: Math.max(1, Math.floor(persistence.version ?? 1)),
+    migrate: persistence.migrate,
+  }
+}
+
+function normalizeStatePersistenceSlices(
+  include: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> | undefined,
+): Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> {
+  if (!include || include.length === 0) return [...DEFAULT_STATE_PERSISTENCE_SLICES]
+  const allowed = new Set(DEFAULT_STATE_PERSISTENCE_SLICES)
+  const result: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> = []
+  for (const slice of include) {
+    if (!allowed.has(slice) || result.includes(slice)) continue
+    result.push(slice)
+  }
+  return result.length > 0 ? result : [...DEFAULT_STATE_PERSISTENCE_SLICES]
+}
+
+export function normalizeDataTableKeyboardNavigation(
+  keyboardNavigation: false | DataTableKeyboardNavigationOptions | undefined,
+): false | DataTableResolvedKeyboardNavigationOptions {
+  if (keyboardNavigation === false || keyboardNavigation === undefined) return false
+
+  return {
+    enabled: keyboardNavigation.enabled ?? true,
+    arrows: keyboardNavigation.arrows ?? true,
+    tab: keyboardNavigation.tab ?? 'move',
+    enter: keyboardNavigation.enter ?? 'edit',
+    pageKeys: keyboardNavigation.pageKeys ?? true,
+    homeEnd: keyboardNavigation.homeEnd ?? true,
+    shiftSelection: keyboardNavigation.shiftSelection ?? true,
+    ctrlMetaShortcuts: keyboardNavigation.ctrlMetaShortcuts ?? true,
+  }
+}
+
+export function normalizeDataTableColumnState(
+  columnState: DataTableColumnState | undefined,
+): DataTableResolvedColumnState {
+  return {
+    widths: normalizeColumnWidths(columnState?.widths),
+    order: normalizeStringList(columnState?.order),
+    hidden: normalizeStringList(columnState?.hidden),
+    pinned: {
+      left: normalizeStringList(columnState?.pinned?.left),
+      right: normalizeStringList(columnState?.pinned?.right),
+    },
+    groups: normalizeColumnGroups(columnState?.groups),
+    autosizeMode: normalizeColumnAutosizeMode(columnState?.autosizeMode),
+    version: Math.max(1, Math.floor(columnState?.version ?? 1)),
   }
 }
 
@@ -192,12 +293,29 @@ export function normalizeDataTableEditing<Row extends Record<string, any>>(
     cancelOnEscape: editing?.cancelOnEscape ?? true,
     selectTextOnStart: editing?.selectTextOnStart ?? true,
     optimistic: editing?.optimistic ?? true,
+    commitStrategy: editing?.commitStrategy ?? (editing?.optimistic === false ? 'pessimistic' : 'optimistic'),
     className: editing?.className ?? '',
     onBeforeEditStart: editing?.onBeforeEditStart,
     onEditStart: editing?.onEditStart,
+    onBeforeEditCommit: editing?.onBeforeEditCommit,
+    onEditPending: editing?.onEditPending,
     onEditCommit: editing?.onEditCommit,
+    onEditSuccess: editing?.onEditSuccess,
+    onEditRollback: editing?.onEditRollback,
     onEditCancel: editing?.onEditCancel,
     onEditError: editing?.onEditError,
+  }
+}
+
+export function normalizeDataTableDetailRows<Row extends Record<string, any>>(
+  detailRows: false | DataTableDetailRowsOptions<Row> | undefined,
+): false | DataTableResolvedDetailRowsOptions<Row> {
+  if (detailRows === false) return false
+  return {
+    enabled: detailRows?.enabled ?? false,
+    height: detailRows?.height ?? 96,
+    template: detailRows?.template,
+    expanded: [...(detailRows?.expanded ?? [])],
   }
 }
 
@@ -209,6 +327,10 @@ export function normalizeDataTablePerformance(
     maxClientRows: Math.max(1_000, Math.floor(finiteNumber(performance?.maxClientRows, 100_000))),
     deltaFrameBudgetMs: finiteClamp(performance?.deltaFrameBudgetMs, 1, 32, 6),
     workerPipeline: performance?.workerPipeline ?? true,
+    workerThresholdRows: Math.max(1_000, Math.floor(finiteNumber(performance?.workerThresholdRows, performance?.maxClientRows ?? 100_000))),
+    indexSearch: performance?.indexSearch ?? true,
+    indexFilters: performance?.indexFilters ?? true,
+    memoryBudgetMb: Math.max(16, Math.floor(finiteNumber(performance?.memoryBudgetMb, 256))),
     text: normalizeDataTableTextPerformance(performance?.text),
   }
 }
@@ -271,6 +393,21 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           activeHighlightColor: view?.search?.activeHighlightColor ?? '#be123c',
           controlled: view?.search?.controlled ?? false,
         },
+    serverRowModel: view?.serverRowModel === false || view?.serverRowModel === undefined
+      ? false
+      : {
+          enabled: view.serverRowModel.enabled ?? true,
+          authoritative: view.serverRowModel.authoritative ?? true,
+          subscribe: view.serverRowModel.subscribe ?? true,
+          loadSummary: view.serverRowModel.loadSummary ?? true,
+          conflictPolicy: view.serverRowModel.conflictPolicy ?? 'server-wins',
+          retry: view.serverRowModel.retry === false
+            ? false
+            : {
+                attempts: Math.max(0, Math.floor(view.serverRowModel.retry?.attempts ?? 2)),
+                backoffMs: Math.max(0, Math.floor(view.serverRowModel.retry?.backoffMs ?? 250)),
+              },
+        },
     rowOrdering: view?.rowOrdering === false
       ? false
       : {
@@ -290,6 +427,8 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
       : {
           headerMenu: view?.filterUi?.headerMenu ?? false,
           filterRow: view?.filterUi?.filterRow ?? false,
+          advancedPanel: view?.filterUi?.advancedPanel ?? false,
+          chips: view?.filterUi?.chips ?? false,
         },
     grouping: view?.grouping === false
       ? false
@@ -303,6 +442,22 @@ export function normalizeDataTableView(view: DataTableViewOptions | undefined): 
           showGrandFooter: view?.grouping?.showGrandFooter ?? false,
           footerPlacement: view?.grouping?.footerPlacement ?? 'scroll',
           controlled: view?.grouping?.controlled ?? false,
+        },
+    groupingPinnedRows: view?.groupingPinnedRows === false
+      ? false
+      : {
+          global: view?.groupingPinnedRows?.global ?? 'show',
+          insideGroup: view?.groupingPinnedRows?.insideGroup ?? false,
+          placement: view?.groupingPinnedRows?.placement ?? 'group-end',
+        },
+    treeData: view?.treeData === false
+      ? false
+      : {
+          enabled: view?.treeData?.enabled ?? false,
+          getParentId: view?.treeData?.getParentId,
+          getChildren: view?.treeData?.getChildren,
+          expanded: view?.treeData?.expanded ?? 'none',
+          mode: view?.treeData?.mode ?? 'hybrid',
         },
   }
 }
@@ -621,6 +776,9 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
         'textSelection',
         'zoom',
         'editing',
+        'keyboardNavigation',
+        'columnState',
+        'statePersistence',
         'performance',
       ],
       render: [
@@ -681,4 +839,44 @@ function finiteNumber(value: unknown, fallback: number): number {
 function finiteClamp(value: unknown, min: number, max: number, fallback: number): number {
   const next = finiteNumber(value, fallback)
   return Math.max(min, Math.min(max, next))
+}
+
+function normalizeStringList(value: unknown): Array<string> {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))]
+}
+
+function normalizeColumnWidths(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, number> = {}
+  for (const [columnId, width] of Object.entries(value)) {
+    if (typeof width === 'number' && Number.isFinite(width)) {
+      result[columnId] = Math.max(24, Math.round(width))
+    }
+  }
+  return result
+}
+
+function normalizeColumnGroups(value: unknown): Array<DataTableColumnGroupInput> {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((group): group is DataTableColumnGroupInput => {
+      if (!group || typeof group !== 'object') return false
+      const candidate = group as DataTableColumnGroupInput
+      return typeof candidate.id === 'string'
+        && typeof candidate.title === 'string'
+        && Array.isArray(candidate.children)
+    })
+    .map(group => ({
+      id: group.id,
+      title: group.title,
+      children: normalizeStringList(group.children),
+      pinned: group.pinned === 'left' || group.pinned === 'right' ? group.pinned : undefined,
+    }))
+    .filter(group => group.children.length > 0)
+}
+
+function normalizeColumnAutosizeMode(value: unknown): DataTableColumnAutosizeMode {
+  if (value === 'visible' || value === 'sampled' || value === 'all-loaded' || value === 'server-estimated') return value
+  return 'sampled'
 }
