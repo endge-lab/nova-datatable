@@ -75,7 +75,7 @@ import {
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
-type BaseRow = Record<string, any>
+type BaseRow = any
 
 interface DataTableVueProps {
   store?: DataTableStoreApi<BaseRow>
@@ -917,6 +917,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
           {{ option.label }}
         </option>
       </select>
+      <!-- eslint-disable vue/html-self-closing -->
       <input
         v-else
         ref="editorElement"
@@ -930,6 +931,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
         @keydown="onEditorKeydown"
         @blur="onEditorBlur"
       />
+      <!-- eslint-enable vue/html-self-closing -->
     </div>
   </div>
 </template>

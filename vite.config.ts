@@ -83,7 +83,7 @@ export default defineConfig({
         noCheck: true,
         noEmit: false,
       },
-      beforeWriteFile(filePath, content) {
+      beforeWriteFile(filePath, _content) {
         if (filePath.endsWith(`${path.sep}main.d.ts`)) {
           return { content: publicTypesEntry }
         }
