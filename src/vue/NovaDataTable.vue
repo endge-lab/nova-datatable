@@ -455,7 +455,8 @@ function resolveRendererType(renderer: DataTableVueProps['renderer']): RendererT
   return RendererType.WebGL
 }
 
-function ready(payload: NovaCanvasReadyPayload): void {
+async function ready(payload: NovaCanvasReadyPayload): Promise<void> {
+  await nextTick()
   emit('ready', payload)
 }
 
