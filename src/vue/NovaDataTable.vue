@@ -457,6 +457,7 @@ function resolveRendererType(renderer: DataTableVueProps['renderer']): RendererT
 
 async function ready(payload: NovaCanvasReadyPayload): Promise<void> {
   await nextTick()
+  await dataTableRoot.$ready()
   emit('ready', payload)
 }
 
