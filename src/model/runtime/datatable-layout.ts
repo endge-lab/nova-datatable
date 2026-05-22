@@ -21,13 +21,15 @@ export function createDataTableViewport<Row extends Record<string, any>>(
   let pinnedLeftWidth = 0
   let pinnedRightWidth = 0
   let contentWidth = 0
-  const centerColumns: Array<DataTableResolvedColumn<Row>> = []
+  let centerColumnCount = 0
+  const centerColumnPrefix = [0]
   for (const column of input.columns) {
     if (column.pinned === 'left') pinnedLeftWidth += column.resolvedWidth
     else if (column.pinned === 'right') pinnedRightWidth += column.resolvedWidth
     else {
-      centerColumns.push(column)
+      centerColumnCount += 1
       contentWidth += column.resolvedWidth
+      centerColumnPrefix.push(contentWidth)
     }
   }
   const pinnedTopHeight = input.pinnedTopCount * input.rowHeight
@@ -42,7 +44,7 @@ export function createDataTableViewport<Row extends Record<string, any>>(
   const scrollX = clamp(input.scrollX, 0, maxScrollX)
   const scrollY = clamp(input.scrollY, 0, maxScrollY)
 
-  const centerRange = resolveColumnRange(scrollX, bodyWidth, centerColumns, input.overscanColumns)
+  const centerRange = resolveColumnRangeFromPrefix(scrollX, bodyWidth, centerColumnCount, centerColumnPrefix, input.overscanColumns)
 
   return {
     width: input.width,
@@ -103,13 +105,23 @@ export function resolveColumnRange<Row extends Record<string, any>>(
   for (let index = 0; index < columns.length; index += 1) {
     prefix[index + 1] = prefix[index]! + columns[index]!.resolvedWidth
   }
+  return resolveColumnRangeFromPrefix(scrollX, viewportWidth, columns.length, prefix, overscan)
+}
 
+function resolveColumnRangeFromPrefix(
+  scrollX: number,
+  viewportWidth: number,
+  columnCount: number,
+  prefix: Array<number>,
+  overscan: number,
+): DataTableRange & { offset: number } {
+  if (columnCount === 0) return { start: 0, end: 0, offset: 0 }
   const viewportStart = scrollX
   const viewportEnd = scrollX + viewportWidth
   const rawStart = Math.max(0, lowerBound(prefix, viewportStart) - 1)
-  const rawEnd = Math.min(columns.length, upperBound(prefix, viewportEnd))
+  const rawEnd = Math.min(columnCount, upperBound(prefix, viewportEnd))
   const start = Math.max(0, rawStart - overscan)
-  const end = Math.min(columns.length, rawEnd + overscan)
+  const end = Math.min(columnCount, rawEnd + overscan)
 
   return { start, end, offset: prefix[start] ?? 0 }
 }
