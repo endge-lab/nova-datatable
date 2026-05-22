@@ -271,7 +271,6 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
     const rect = resolveNodeRect(node, parentRect)
     const text = String(readProp(node, 'text') ?? '')
     const font = resolveFont(node)
-    const fontSize = typeof font?.size === 'number' ? font.size : 12
     const align = resolveAlign(node)
     const highlightRanges = readProp(node, 'highlightRanges')
     const highlightActive = readProp(node, 'highlightActive') === true

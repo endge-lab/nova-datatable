@@ -7672,7 +7672,7 @@ function sameSelectionRange(left: DataTableSelectionRange, right: DataTableSelec
     && (left.columnIds ?? []).join('\u0001') === (right.columnIds ?? []).join('\u0001')
 }
 
-function parseClipboardMatrix(text: string, format: DataTablePasteParseFormat): Array<Array<string>> {
+function _parseClipboardMatrix(text: string, format: DataTablePasteParseFormat): Array<Array<string>> {
   const delimiter = format === 'csv' ? ',' : '\t'
   if (format === 'plain') return [[text]]
   if (format === 'auto' && !text.includes('\t') && text.includes(',')) return parseDelimitedClipboard(text, ',')

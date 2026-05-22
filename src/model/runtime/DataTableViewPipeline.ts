@@ -1313,9 +1313,9 @@ function removeFilterNode(
   return rules.length === 0 ? null : { logic: rule.logic, rules }
 }
 
-function flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState {
+function _flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState {
   if (Array.isArray(filters)) return filters.map(rule => ({ ...rule }))
-  return filters.rules.flatMap(rule => 'logic' in rule ? flattenFilterRules(rule) : [{ ...rule }])
+  return filters.rules.flatMap(rule => 'logic' in rule ? _flattenFilterRules(rule) : [{ ...rule }])
 }
 
 function hasFilters(filters: DataTableFilterState | DataTableFilterExpression): boolean {
