@@ -343,6 +343,8 @@ function normalizeDataTableTextPerformance(
 
   const mode = normalizeTextPerformanceMode(text?.mode)
   return {
+    visible: text?.visible ?? true,
+    renderMode: normalizeTextRenderMode(text?.renderMode),
     mode,
     cache: text?.cache === 'none' ? 'none' : 'visible-reuse',
     raster: text?.raster ?? (mode === 'quality' ? 'sync' : 'deferred'),
@@ -359,6 +361,11 @@ function normalizeDataTableTextPerformance(
 function normalizeTextPerformanceMode(value: unknown): DataTableResolvedTextPerformanceOptions['mode'] {
   if (value === 'quality' || value === 'balanced' || value === 'fast' || value === 'ultra-fast') return value
   return 'balanced'
+}
+
+function normalizeTextRenderMode(value: unknown): DataTableResolvedTextPerformanceOptions['renderMode'] {
+  if (value === 'auto' || value === 'run-atlas' || value === 'glyph-atlas' || value === 'msdf') return value
+  return 'run-atlas'
 }
 
 export function normalizeDataTableView(view: DataTableViewOptions | undefined): DataTableResolvedViewOptions {

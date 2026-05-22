@@ -1,4 +1,4 @@
-import type { NovaMotionOptions, NovaSchema, RendererType } from '@endge/nova'
+import type { NovaMotionOptions, NovaSchema, NovaTextRenderMode, RendererType } from '@endge/nova'
 import type {
   NovaUiCommonProps,
   NovaUiCommonResolvedProps,
@@ -636,6 +636,8 @@ export type DataTableTextPerformanceRaster = 'sync' | 'deferred'
 export type DataTableTextPerformanceTruncate = 'ellipsis' | 'clip'
 
 export interface DataTableTextPerformanceOptions {
+  visible?: boolean
+  renderMode?: NovaTextRenderMode
   mode?: DataTableTextPerformanceMode
   cache?: DataTableTextPerformanceCache
   raster?: DataTableTextPerformanceRaster
@@ -649,6 +651,8 @@ export interface DataTableTextPerformanceOptions {
 }
 
 export interface DataTableResolvedTextPerformanceOptions {
+  visible: boolean
+  renderMode: NovaTextRenderMode
   mode: DataTableTextPerformanceMode
   cache: DataTableTextPerformanceCache
   raster: DataTableTextPerformanceRaster

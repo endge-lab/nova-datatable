@@ -4183,10 +4183,14 @@ export class DataTableRootNode<
     for (let index = startIndex; index < schema.length; index += 1) {
       const item = schema[index]
       if (!item || item.type !== 'text') continue
+      if (!textOptions.visible) {
+        item.active = false
+        continue
+      }
 
       item.meta = {
         ...item.meta,
-        textMode: item.meta?.textMode ?? 'run-atlas',
+        textMode: item.meta?.textMode ?? textOptions.renderMode,
         textRole: item.meta?.textRole ?? 'ui-label',
         textLod: item.meta?.textLod ?? 'always',
       }
@@ -4463,7 +4467,7 @@ export class DataTableRootNode<
 
     for (let index = startIndex; index < schema.length; index += 1) {
       const item = schema[index]
-      if (!item || item.type !== 'text' || typeof item.text !== 'string' || item.text.length === 0) continue
+      if (!item || item.type !== 'text' || item.active === false || typeof item.text !== 'string' || item.text.length === 0) continue
       const metaSelection = item.meta?.textSelection as { selectable?: boolean; copyable?: boolean; scope?: string } | undefined
       const selectable = this.props.textSelection.mode === 'visible-cells'
         ? true

@@ -437,7 +437,7 @@ function resolveRendererConfig(performance: DataTablePerformanceOptions | undefi
   return {
     text: {
       quality: mode === 'quality' ? 'quality' : mode === 'balanced' ? 'balanced' : 'performance',
-      mode: 'run-atlas',
+      mode: text.renderMode ?? 'run-atlas',
       dynamicBuckets: mode === 'quality' || mode === 'balanced',
       fallbackPreviousScale: true,
       prewarmAdjacentBuckets: mode === 'quality',

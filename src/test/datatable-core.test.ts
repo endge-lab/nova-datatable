@@ -7,6 +7,7 @@ import {
   RaphSchedulerType,
   RendererType,
   type NovaApp,
+  type NovaSchema,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
 import { createDataTableStore } from '@/model/module/DataTableStore'
@@ -2461,6 +2462,47 @@ describe('DataTable Root runtime', () => {
 
     root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 180, clientY: 80 }))
     expect(app.canvas.element.style.cursor).toBe('default')
+
+    app.destroy()
+  })
+
+  it('applies text render mode and can hide text items for diagnostics', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const collectTextItems = () => {
+      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ schema: NovaSchema }> }>
+      return [...layers.values()]
+        .flatMap(layer => layer.segments)
+        .flatMap(segment => segment.schema)
+        .filter(item => item.type === 'text')
+    }
+
+    root.setProps({
+      performance: {
+        text: {
+          renderMode: 'glyph-atlas',
+          mode: 'fast',
+          batchDefaultCells: true,
+        },
+      },
+    } as never)
+    app.raph.run()
+    expect(collectTextItems().some(item => item.meta?.textMode === 'glyph-atlas')).toBe(true)
+
+    root.setProps({
+      performance: {
+        text: {
+          visible: false,
+          renderMode: 'run-atlas',
+          mode: 'fast',
+          batchDefaultCells: true,
+        },
+      },
+    } as never)
+    app.raph.run()
+    const hiddenTextItems = collectTextItems()
+    expect(hiddenTextItems.length).toBeGreaterThan(0)
+    expect(hiddenTextItems.every(item => item.active === false)).toBe(true)
 
     app.destroy()
   })
