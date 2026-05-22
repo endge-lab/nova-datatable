@@ -18,6 +18,7 @@ import {
   type NovaApp,
   type NovaDragEventMeta,
   type NovaRectBatch,
+  type NovaTextBatch,
   type NovaSchema,
   type NovaSurface,
 } from '@endge/nova'
@@ -259,7 +260,28 @@ interface DataTableRectBatchRenderSegment {
   clip?: DataTableCellRect
 }
 
-type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment
+interface DataTableTextBatchRenderSegment {
+  kind: 'text-batch'
+  textBatch: NovaTextBatch
+  schema: NovaSchema
+  clip?: DataTableCellRect
+}
+
+type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment | DataTableTextBatchRenderSegment
+
+interface DataTableTextBatchBuilder {
+  align: DataTableColumnAlign
+  text: Array<string>
+  x: Array<number>
+  y: Array<number>
+  width: Array<number>
+  height: Array<number>
+  clipX: Array<number>
+  clipY: Array<number>
+  clipWidth: Array<number>
+  clipHeight: Array<number>
+  color: Array<string>
+}
 
 interface DataTableCellTemplateFragment {
   schema: NovaSchema
@@ -347,6 +369,8 @@ function createRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
     schemaItems: 0,
     rectBatchSegments: 0,
     rectBatchItems: 0,
+    textBatchSegments: 0,
+    textBatchItems: 0,
   }
 }
 
@@ -3563,6 +3587,8 @@ export class DataTableRootNode<
       schemaItems: this.renderLayerDiagnostics.schemaItems,
       rectBatchSegments: this.renderLayerDiagnostics.rectBatchSegments,
       rectBatchItems: this.renderLayerDiagnostics.rectBatchItems,
+      textBatchSegments: this.renderLayerDiagnostics.textBatchSegments,
+      textBatchItems: this.renderLayerDiagnostics.textBatchItems,
     }
   }
 
@@ -3581,6 +3607,8 @@ export class DataTableRootNode<
     this.renderLayerDiagnostics.schemaItems = 0
     this.renderLayerDiagnostics.rectBatchSegments = 0
     this.renderLayerDiagnostics.rectBatchItems = 0
+    this.renderLayerDiagnostics.textBatchSegments = 0
+    this.renderLayerDiagnostics.textBatchItems = 0
   }
 
   /**
@@ -3652,6 +3680,25 @@ export class DataTableRootNode<
   }
 
   /**
+   * Добавляет text batch в текущий render layer или сразу в renderer.
+   */
+  private emitTextBatch(textBatch: NovaTextBatch): void {
+    if (textBatch.count <= 0) return
+    const segment: DataTableRenderSegment = {
+      kind: 'text-batch',
+      textBatch,
+      schema: [] as unknown as NovaSchema,
+      clip: this.activeRenderClip ? { ...this.activeRenderClip } : undefined,
+    }
+    const layer = this.activeRenderLayerId ? this.renderLayers.get(this.activeRenderLayerId) : null
+    if (layer) {
+      layer.segments.push(segment)
+      return
+    }
+    this.emitRenderSegment(segment)
+  }
+
+  /**
    * Выполняет отрисовку render segment.
    */
   private emitRenderSegment(segment: DataTableRenderSegment): void {
@@ -3662,9 +3709,16 @@ export class DataTableRootNode<
         this.renderer.schema(segment.schema)
         return
       }
-      this.renderLayerDiagnostics.rectBatchSegments += 1
-      this.renderLayerDiagnostics.rectBatchItems += segment.rectBatch.count
-      this.renderer.rects(segment.rectBatch)
+      if (segment.kind === 'rect-batch') {
+        this.renderLayerDiagnostics.rectBatchSegments += 1
+        this.renderLayerDiagnostics.rectBatchItems += segment.rectBatch.count
+        this.renderer.rects(segment.rectBatch)
+        return
+      }
+      this.renderLayerDiagnostics.textBatchSegments += 1
+      this.renderLayerDiagnostics.textBatchItems += segment.textBatch.count
+      this.renderer.texts(segment.textBatch)
+      return
     }
 
     if (segment.clip) {
@@ -4134,6 +4188,7 @@ export class DataTableRootNode<
     includeGroupRows = true,
   ): void {
     const schema: NovaSchema = []
+    const textBatchBuilders = new Map<DataTableColumnAlign, DataTableTextBatchBuilder>()
     const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
     const gridRowTops: Array<number> = []
 
@@ -4179,12 +4234,18 @@ export class DataTableRootNode<
       }
       this.renderDefaultCellBackgroundSpans(schema, contexts)
       for (const context of contexts) {
+        if (this.canRenderDefaultCellAsTextBatch(context)) {
+          this.appendDefaultCellTextBatch(textBatchBuilders, context)
+          this.registerDefaultCellTextSelectionTarget(context)
+          continue
+        }
         this.renderCell(schema, context, this.canBatchDefaultCellBackground(context))
       }
     })
 
     this.renderRowZoneGrid(schema, columnRects, gridRowTops, rowHeight)
     this.emitSchema(schema)
+    this.emitDefaultCellTextBatches(textBatchBuilders)
   }
 
   /**
@@ -4276,6 +4337,127 @@ export class DataTableRootNode<
    */
   private canBatchDefaultCellBackground(context: DataTableCellContext<Row>): boolean {
     return !this.resolveCellTemplate(context)
+  }
+
+  /**
+   * Проверяет, можно ли вывести default text cell через retained text batch.
+   */
+  private canRenderDefaultCellAsTextBatch(context: DataTableCellContext<Row>): boolean {
+    const textOptions = this.props.performance.text
+    if (!textOptions || !textOptions.batchDefaultCells) return false
+    if (!textOptions.visible) return false
+    if (this.resolveCellTemplate(context)) return false
+    if (context.zone === 'header') return false
+    if (context.column.animated) return false
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return false
+    if (this.props.interaction.motion && this.props.interaction.motion.cells) return false
+
+    const searchState = this.getRenderViewState().search
+    const searchHighlight = searchState.query.highlight ?? 'cell-text'
+    return !(context.state.searchRanges?.length && searchHighlightHasText(searchHighlight))
+  }
+
+  /**
+   * Добавляет default text cell в retained text batch.
+   */
+  private appendDefaultCellTextBatch(
+    builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>,
+    context: DataTableCellContext<Row>,
+  ): void {
+    const textOptions = this.props.performance.text
+    if (textOptions && !textOptions.visible) return
+
+    const { rect, value, column } = context
+    const textRect = {
+      x: rect.x + 10,
+      y: rect.y,
+      width: Math.max(0, rect.width - 20),
+      height: rect.height,
+    }
+    const x = textOptions?.skipSubpixelText ? Math.round(textRect.x) : textRect.x
+    const y = textOptions?.skipSubpixelText ? Math.round(textRect.y) : textRect.y
+    const builder = this.resolveDefaultTextBatchBuilder(builders, column.align)
+
+    builder.text.push(String(value ?? ''))
+    builder.x.push(x)
+    builder.y.push(y)
+    builder.width.push(textRect.width)
+    builder.height.push(textRect.height)
+    builder.clipX.push(x)
+    builder.clipY.push(y)
+    builder.clipWidth.push(textRect.width)
+    builder.clipHeight.push(textRect.height)
+    builder.color.push('#263142')
+  }
+
+  /**
+   * Возвращает builder для одной группы text batch с общим align.
+   */
+  private resolveDefaultTextBatchBuilder(
+    builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>,
+    align: DataTableColumnAlign,
+  ): DataTableTextBatchBuilder {
+    const current = builders.get(align)
+    if (current) return current
+
+    const next: DataTableTextBatchBuilder = {
+      align,
+      text: [],
+      x: [],
+      y: [],
+      width: [],
+      height: [],
+      clipX: [],
+      clipY: [],
+      clipWidth: [],
+      clipHeight: [],
+      color: [],
+    }
+    builders.set(align, next)
+    return next
+  }
+
+  /**
+   * Отправляет retained text batches после сборки row zone.
+   */
+  private emitDefaultCellTextBatches(builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>): void {
+    for (const builder of builders.values()) {
+      if (builder.text.length === 0) continue
+      const textOptions = this.props.performance.text
+      const batch: NovaTextBatch = {
+        count: builder.text.length,
+        text: builder.text,
+        x: Float32Array.from(builder.x),
+        y: Float32Array.from(builder.y),
+        width: Float32Array.from(builder.width),
+        height: Float32Array.from(builder.height),
+        clipX: Float32Array.from(builder.clipX),
+        clipY: Float32Array.from(builder.clipY),
+        clipWidth: Float32Array.from(builder.clipWidth),
+        clipHeight: Float32Array.from(builder.clipHeight),
+        color: builder.color,
+        font: {
+          family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+          size: this.fontSize,
+          weight: '500',
+          style: 'normal',
+        },
+        lineHeight: this.lineHeight,
+        align: {
+          horizontal: builder.align,
+          vertical: 'middle',
+        },
+        ellipsis: textOptions?.truncate !== 'clip',
+        meta: {
+          textMode: textOptions?.renderMode ?? 'run-atlas',
+          textRole: 'ui-label',
+          textLod: 'always',
+        },
+        revision: this.store.takeDataRevision() + this.invalidation.get('zoom') + 1,
+        staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + 1,
+      }
+      this.emitTextBatch(batch)
+    }
   }
 
   /**
@@ -5074,6 +5256,45 @@ export class DataTableRootNode<
         copyText: item.text,
       })
     }
+  }
+
+  /**
+   * Регистрирует selectable target для default text batch без schema item.
+   */
+  private registerDefaultCellTextSelectionTarget(context: DataTableCellContext<Row>): void {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    if (this.props.performance.text && !this.props.performance.text.visible) return
+    if (this.isTextSelectionIndexSuppressed()) return
+    if (!this.isTextSelectionZoneEnabled(context.zone)) return
+    if (this.props.textSelection.mode !== 'visible-cells') return
+
+    const rect = {
+      x: context.rect.x + 10,
+      y: context.rect.y,
+      width: Math.max(0, context.rect.width - 20),
+      height: context.rect.height,
+    }
+    const text = String(context.value ?? '')
+    if (!text) return
+
+    this.textSelection.register({
+      id: `${context.zone}:${String(context.rowId)}:${context.column.id}:default-text-batch`,
+      text,
+      rect,
+      selectable: true,
+      copyable: true,
+      scope: `${context.zone}:${context.column.id}`,
+      ownerId: `${String(context.rowId)}:${context.column.id}`,
+      order: context.rowIndex * 100_000 + context.columnIndex * 100,
+      context: {
+        rowId: context.rowId,
+        rowIndex: context.rowIndex,
+        columnId: context.column.id,
+        columnIndex: context.columnIndex,
+        zone: context.zone,
+      },
+      copyText: text,
+    })
   }
 
   /**

@@ -2640,6 +2640,13 @@ describe('DataTable Root runtime', () => {
         .flatMap(segment => segment.schema)
         .filter(item => item.type === 'text')
     }
+    const collectTextBatches = () => {
+      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ kind: string; textBatch?: { meta?: Record<string, unknown> } }> }>
+      return [...layers.values()]
+        .flatMap(layer => layer.segments)
+        .filter(segment => segment.kind === 'text-batch' && segment.textBatch)
+        .map(segment => segment.textBatch!)
+    }
 
     root.setProps({
       performance: {
@@ -2651,7 +2658,10 @@ describe('DataTable Root runtime', () => {
       },
     } as never)
     app.raph.run()
-    expect(collectTextItems().some(item => item.meta?.textMode === 'glyph-atlas')).toBe(true)
+    expect(
+      collectTextItems().some(item => item.meta?.textMode === 'glyph-atlas')
+      || collectTextBatches().some(batch => batch.meta?.textMode === 'glyph-atlas'),
+    ).toBe(true)
 
     root.setProps({
       performance: {

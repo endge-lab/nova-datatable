@@ -511,6 +511,8 @@ export interface DataTableRenderDiagnostics {
   schemaItems: number
   rectBatchSegments: number
   rectBatchItems: number
+  textBatchSegments: number
+  textBatchItems: number
 }
 
 export interface DataTableServerRowModelOptions {
