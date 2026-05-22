@@ -397,6 +397,7 @@ export class DataTableRootNode<
   private visibleAnimatedCells = false
   private activeRenderLayerId: DataTableRenderLayerId | null = null
   private activeRenderClip: DataTableCellRect | null = null
+  private renderViewState: DataTableViewState | null = null
   private readonly renderLayers = createRenderLayerCache()
   private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
@@ -3609,32 +3610,39 @@ export class DataTableRootNode<
       this.cellEnterRenderCount = 0
     }
     this.visibleAnimatedCells = false
+    const previousViewState = this.renderViewState
+    this.renderViewState = this.viewPipeline.getState()
 
-    this.renderLayer('base', () => this.emitSchema(buildBoxSchema(this.props, this.width, this.height)))
-    this.renderLayer('header', () => this.renderHeaderLayer())
-    this.renderLayer('pinned', () => this.renderPinnedLayer())
-    this.renderLayer('body-static', () => this.renderBodyRows(false))
-    this.renderLayer('body-animated', () => this.renderBodyRows(true))
-    this.renderLayer('group-summary', () => this.renderPinnedBottomGroupPanel())
-    this.renderLayer('search', () => this.renderSearchOverlay())
-    this.renderLayer('selection', () => {
-      this.renderClipboardFeedbackOverlay()
-      this.renderTextSelectionOverlay()
-      this.renderSelectionOverlay()
-    })
-    this.renderLayer('interaction', () => {
-      this.renderHoverOverlay()
-      this.renderInteractionLayer()
-    })
-    this.renderLayer('drag-menu-tooltip', () => {
-      this.renderColumnDragOverlay()
-      this.renderColumnMenu()
-      this.renderTooltipLayer()
-    })
-    this.renderLayer('scrollbars', () => {
-      this.renderScrollbars()
-      this.renderScrollbarLayer()
-    })
+    try {
+      this.renderLayer('base', () => this.emitSchema(buildBoxSchema(this.props, this.width, this.height)))
+      this.renderLayer('header', () => this.renderHeaderLayer())
+      this.renderLayer('pinned', () => this.renderPinnedLayer())
+      this.renderLayer('body-static', () => this.renderBodyRows(false))
+      this.renderLayer('body-animated', () => this.renderBodyRows(true))
+      this.renderLayer('group-summary', () => this.renderPinnedBottomGroupPanel())
+      this.renderLayer('search', () => this.renderSearchOverlay())
+      this.renderLayer('selection', () => {
+        this.renderClipboardFeedbackOverlay()
+        this.renderTextSelectionOverlay()
+        this.renderSelectionOverlay()
+      })
+      this.renderLayer('interaction', () => {
+        this.renderHoverOverlay()
+        this.renderInteractionLayer()
+      })
+      this.renderLayer('drag-menu-tooltip', () => {
+        this.renderColumnDragOverlay()
+        this.renderColumnMenu()
+        this.renderTooltipLayer()
+      })
+      this.renderLayer('scrollbars', () => {
+        this.renderScrollbars()
+        this.renderScrollbarLayer()
+      })
+    } finally {
+      this.renderViewState = previousViewState
+    }
+
     if (rebuildsCellLayers) this.finalizeVisibleCellKeys()
     this.queueAnimationLoopSync()
   }
@@ -4253,6 +4261,13 @@ export class DataTableRootNode<
   }
 
   /**
+   * Возвращает snapshot view state текущего render-pass без повторного клонирования на каждую ячейку.
+   */
+  private getRenderViewState(): DataTableViewState {
+    return this.renderViewState ?? this.viewPipeline.getState()
+  }
+
+  /**
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderDefaultGroupRow(row: RenderedGroupRow<Row>, rect: DataTableCellRect): NovaSchema {
@@ -4309,7 +4324,7 @@ export class DataTableRootNode<
   ): DataTableCellContext<Row>['state'] {
     const hover = this.hoverActive ? this.hoverTarget : null
     const selection = this.selectionActive ? this.selection : null
-    const viewState = this.viewPipeline.getState()
+    const viewState = this.getRenderViewState()
     const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
     const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
     const searchRowHit = this.viewPipeline.getSearchMatchForRow(rowId)
@@ -4578,7 +4593,7 @@ export class DataTableRootNode<
   private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>, backgroundPainted = false): void {
     const { rect, value, column, zone, rowIndex } = context
     const isHeader = zone === 'header'
-    const searchState = this.viewPipeline.getSearchState()
+    const searchState = this.getRenderViewState().search
     const searchHighlight = searchState.query.highlight ?? 'cell-text'
     const background = this.resolveDefaultCellVisualBackground(context)
     const color = isHeader ? '#172033' : '#263142'
@@ -4860,7 +4875,7 @@ export class DataTableRootNode<
   private resolveDefaultCellVisualBackground(context: DataTableCellContext<Row>): string {
     const isHeader = context.zone === 'header'
     const isPinned = context.zone === 'pinned-top' || context.zone === 'pinned-bottom'
-    const searchState = this.viewPipeline.getSearchState()
+    const searchState = this.getRenderViewState().search
     const searchHighlight = searchState.query.highlight ?? 'cell-text'
     const cellSearchHighlighted = !isHeader
       && context.state.searchMatched
@@ -5040,7 +5055,7 @@ export class DataTableRootNode<
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderSearchOverlay(): void {
-    const searchState = this.viewPipeline.getSearchState()
+    const searchState = this.getRenderViewState().search
     const highlight = searchState.query.highlight ?? 'cell-text'
     if (!searchState.query.text || !searchHighlightHasRow(highlight)) return
 

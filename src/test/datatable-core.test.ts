@@ -1248,6 +1248,9 @@ describe('DataTableViewPipeline', () => {
       activeMatch: { rowId: 'row-2', rowIndex: 2 },
       local: false,
     })
+    expect(pipeline.getSearchMatchForCell('row-1', 'name')?.index).toBe(0)
+    expect(pipeline.getSearchMatchForCell('row-2', 'name')?.index).toBe(1)
+    expect(pipeline.getSearchMatchForRow('row-2')?.match.value).toBe('Row 2')
     expect(pipeline.rowCount).toBe(10_000_000)
     expect(pipeline.getViewRowAt(2)?.storeIndex).toBe(2)
   })

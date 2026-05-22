@@ -53,6 +53,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private searchCursor: string | undefined
   private searchPreviousCursor: string | undefined
   private searchHasMore = false
+  private readonly searchMatchByCell = new Map<string, { match: DataTableSearchMatch; index: number }>()
+  private readonly searchMatchByRow = new Map<string, { match: DataTableSearchMatch; index: number }>()
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
   private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
@@ -336,6 +338,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   clearSearch(): void {
     this.search = this.createSearchQuery('')
     this.searchMatches = []
+    this.reindexSearchMatches()
     this.searchActiveIndex = -1
     this.searchTotalOverride = undefined
     this.searchLoading = false
@@ -419,6 +422,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     activeIndex = 0,
   ): void {
     this.searchMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
+    this.reindexSearchMatches()
     this.searchTotalOverride = result.total
     this.searchCursor = result.cursor
     this.searchPreviousCursor = result.previousCursor
@@ -444,6 +448,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   ): void {
     const nextMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
     this.searchMatches = [...this.searchMatches, ...nextMatches]
+    this.reindexSearchMatches()
     this.searchTotalOverride = result.total ?? this.searchTotalOverride
     this.searchCursor = result.cursor
     this.searchPreviousCursor = result.previousCursor ?? this.searchPreviousCursor
@@ -475,6 +480,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   ): void {
     const previousMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
     this.searchMatches = [...previousMatches, ...this.searchMatches]
+    this.reindexSearchMatches()
     this.searchTotalOverride = result.total ?? this.searchTotalOverride
     this.searchCursor = result.cursor ?? this.searchCursor
     this.searchPreviousCursor = result.previousCursor
@@ -497,24 +503,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch; index: number } | null {
-    for (let index = 0; index < this.searchMatches.length; index += 1) {
-      const match = this.searchMatches[index]!
-      if (match.rowId === rowId && (match.columnId === columnId || this.search.scope === 'rows')) {
-        return { match, index }
-      }
-    }
-    return null
+    return this.search.scope === 'rows'
+      ? this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
+      : this.searchMatchByCell.get(createSearchCellKey(rowId, columnId)) ?? null
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchMatchForRow(rowId: DataTableRowId): { match: DataTableSearchMatch; index: number } | null {
-    for (let index = 0; index < this.searchMatches.length; index += 1) {
-      const match = this.searchMatches[index]!
-      if (match.rowId === rowId) return { match, index }
-    }
-    return null
+    return this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
   }
 
   /**
@@ -668,6 +666,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.filters = this.view.filtering ? cloneFilters(this.view.filtering.initial) : []
     this.search = this.createSearchQuery('')
     this.searchMatches = []
+    this.reindexSearchMatches()
     this.searchActiveIndex = -1
     this.searchTotalOverride = undefined
     this.searchLoading = false
@@ -864,6 +863,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private rebuildSearchMatches(): void {
     if (!this.localSearch || !this.isSearchActive()) {
       this.searchMatches = []
+      this.reindexSearchMatches()
       this.searchActiveIndex = -1
       this.searchTotalOverride = undefined
       this.searchLoading = false
@@ -882,6 +882,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       matches.push(...this.matchSearchRow(viewRow))
     }
     this.searchMatches = matches
+    this.reindexSearchMatches()
     this.searchTotalOverride = undefined
     this.searchLoading = false
     this.searchCursor = undefined
@@ -890,6 +891,24 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     if (matches.length === 0) this.searchActiveIndex = -1
     else if (this.searchActiveIndex < 0) this.searchActiveIndex = 0
     else this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1)
+  }
+
+  /**
+   * Rebuilds compact lookup maps for render-time search highlight checks.
+   */
+  private reindexSearchMatches(): void {
+    this.searchMatchByCell.clear()
+    this.searchMatchByRow.clear()
+
+    for (let index = 0; index < this.searchMatches.length; index += 1) {
+      const match = this.searchMatches[index]!
+      const entry = { match, index }
+      const rowKey = createSearchRowKey(match.rowId)
+      if (!this.searchMatchByRow.has(rowKey)) this.searchMatchByRow.set(rowKey, entry)
+      if (match.columnId === undefined) continue
+      const cellKey = createSearchCellKey(match.rowId, match.columnId)
+      if (!this.searchMatchByCell.has(cellKey)) this.searchMatchByCell.set(cellKey, entry)
+    }
   }
 
   /**
@@ -1322,6 +1341,14 @@ function _flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpr
 function hasFilters(filters: DataTableFilterState | DataTableFilterExpression): boolean {
   if (Array.isArray(filters)) return filters.length > 0
   return filters.rules.length > 0
+}
+
+function createSearchRowKey(rowId: DataTableRowId): string {
+  return `${typeof rowId}:${String(rowId)}`
+}
+
+function createSearchCellKey(rowId: DataTableRowId, columnId: string): string {
+  return `${createSearchRowKey(rowId)}\u0000${columnId}`
 }
 
 function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ start: number; end: number }> {
