@@ -445,14 +445,18 @@ function resolveRendererConfig(performance: DataTablePerformanceOptions | undefi
       bucketThrottleMs: mode === 'quality' ? 40 : mode === 'balanced' ? 60 : 0,
       visibleOnlyRaster: true,
       maxAtlasMemoryMB: mode === 'ultra-fast' ? 96 : 160,
+      minRasterScale: mode === 'ultra-fast' ? 1 : mode === 'fast' ? 2 : 1,
+      maxRasterScale: mode === 'quality' ? 4 : mode === 'balanced' ? 3 : mode === 'fast' ? 2 : 1,
       zoomBuckets: mode === 'quality'
         ? [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4]
-        : [1],
+        : mode === 'balanced'
+          ? [0.75, 1, 1.25, 1.5, 2]
+          : [1],
       interaction: {
         mode: mode === 'quality' ? 'stable-quality' : 'performance',
         idleMs: mode === 'quality' ? 80 : 140,
         rasterBudgetMs: interactionBudgetMs,
-        maxRasterScale: mode === 'quality' ? 4 : 1,
+        maxRasterScale: mode === 'quality' ? 4 : mode === 'balanced' ? 3 : mode === 'fast' ? 2 : 1,
         freezeBuckets: mode !== 'quality',
         prewarm: false,
       },
