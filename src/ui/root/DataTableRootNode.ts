@@ -4315,7 +4315,8 @@ export class DataTableRootNode<
     columnPredicate?: (column: DataTableResolvedColumn<Row>) => boolean,
     includeGroupRows = true,
   ): void {
-    const schema: NovaSchema = []
+    const backgroundSchema: NovaSchema = []
+    const contentSchema: NovaSchema = []
     const textBatchBuilders = new Map<string, DataTableTextBatchBuilder>()
     const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
     const gridRowTops: Array<number> = []
@@ -4328,7 +4329,7 @@ export class DataTableRootNode<
         : yStart + localIndex * rowHeight
 
       if (renderedRow.kind !== 'data') {
-        if (includeGroupRows) this.renderGroupLikeRow(schema, renderedRow, y, rowHeight, columnRegion)
+        if (includeGroupRows) this.renderGroupLikeRow(contentSchema, renderedRow, y, rowHeight, columnRegion)
         return
       }
 
@@ -4360,19 +4361,20 @@ export class DataTableRootNode<
           api: this.api,
         })
       }
-      this.renderDefaultCellBackgroundSpans(schema, contexts)
+      this.renderDefaultCellBackgroundSpans(backgroundSchema, contexts)
       for (const context of contexts) {
         if (this.canRenderDefaultCellAsTextBatch(context)) {
           this.appendDefaultCellTextBatch(textBatchBuilders, context)
           this.registerDefaultCellTextSelectionTarget(context)
           continue
         }
-        this.renderCell(schema, context, this.canBatchDefaultCellBackground(context), textBatchBuilders)
+        this.renderCell(contentSchema, context, this.canBatchDefaultCellBackground(context), textBatchBuilders)
       }
     })
 
-    this.renderRowZoneGrid(schema, columnRects, gridRowTops, rowHeight)
-    this.emitSchema(schema)
+    this.renderRowZoneGrid(contentSchema, columnRects, gridRowTops, rowHeight)
+    this.emitSchema(backgroundSchema)
+    this.emitSchema(contentSchema)
     this.emitDefaultCellTextBatches(textBatchBuilders)
   }
 
