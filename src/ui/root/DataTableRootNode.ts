@@ -763,7 +763,10 @@ export class DataTableRootNode<
       ? this.serverRowModel.ensureRange(this.viewport.rowRange)
       : this.store.ensureRange(this.viewport.rowRange, this.resolveSourceQuery()).then(() => true)
     void rangeLoader.then(fresh => {
-      if (fresh && this.store.takeRevision() !== revisionBeforeRangeLoad) this.refresh(['data'])
+      if (fresh && this.store.takeRevision() !== revisionBeforeRangeLoad) {
+        this.refresh(['data'])
+        this.store.clearDirtyState()
+      }
       return undefined
     })
     this.props.onViewportChange?.({ ...this.viewport })
