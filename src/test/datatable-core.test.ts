@@ -2273,6 +2273,61 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('renders default cell backgrounds as plain rects and draws grid lines separately', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    const bodyLayer = (root as any).renderLayers.get('body-static')
+    const bodySchema = bodyLayer.segments.flatMap((segment: { schema: NovaSchema }) => segment.schema)
+
+    expect(bodySchema.some(item => item.type === 'line')).toBe(true)
+    expect(bodySchema.some(item => item.type === 'rect' && ((item as any).styles?.border?.width ?? 0) > 0)).toBe(false)
+
+    app.destroy()
+  })
+
+  it('coalesces wheel scroll bursts into one animation-frame scroll update', () => {
+    const callbacks: Array<FrameRequestCallback> = []
+    const originalRequestAnimationFrame = globalThis.requestAnimationFrame
+    const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+    Object.defineProperty(globalThis, 'requestAnimationFrame', {
+      configurable: true,
+      value: vi.fn((callback: FrameRequestCallback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      }),
+    })
+    Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+      configurable: true,
+      value: vi.fn(),
+    })
+
+    const app = createApp()
+    const root = mountRoot(app)
+    try {
+      root.eventHandlers.wheel?.(new WheelEvent('wheel', { deltaY: 10, bubbles: true, cancelable: true }))
+      root.eventHandlers.wheel?.(new WheelEvent('wheel', { deltaY: 12, bubbles: true, cancelable: true }))
+      root.eventHandlers.wheel?.(new WheelEvent('wheel', { deltaY: 14, bubbles: true, cancelable: true }))
+
+      expect(callbacks).toHaveLength(1)
+      expect(root.getApi().getViewport().scrollY).toBe(0)
+
+      callbacks[0]?.(performance.now())
+      app.raph.run()
+
+      expect(root.getApi().getViewport().scrollY).toBe(36)
+    } finally {
+      app.destroy()
+      Object.defineProperty(globalThis, 'requestAnimationFrame', {
+        configurable: true,
+        value: originalRequestAnimationFrame,
+      })
+      Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+        configurable: true,
+        value: originalCancelAnimationFrame,
+      })
+    }
+  })
+
   it('keeps lazy summary sparse during viewport scroll', () => {
     const app = createApp()
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))

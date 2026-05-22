@@ -429,6 +429,8 @@ export class DataTableRootNode<
   private serverSearchResolveRequestId = 0
   private gestureStartZoomValue = 1
   private gestureActive = false
+  private pendingWheelScroll: { x: number; y: number } | null = null
+  private wheelScrollFrame = 0
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
   private readonly handleKeyboardNavigationKeydown = (event: KeyboardEvent) => this.handleKeyboardNavigationKeydownEvent(event)
@@ -485,6 +487,7 @@ export class DataTableRootNode<
     this.setupTooltipKeyboardEvents()
     this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
+      this.cancelPendingWheelScroll()
       this.releaseAnimationLoop()
       this.serverRowModel.dispose()
       this.teardownTrackpadGestureEvents()
@@ -883,6 +886,45 @@ export class DataTableRootNode<
       kinds.push('viewport-scroll-y')
     }
     return kinds.length > 0 ? kinds : ['scrollbar']
+  }
+
+  /**
+   * Коалесцирует wheel burst до одного scroll update за animation frame.
+   */
+  private scheduleWheelScroll(x: number, y: number): void {
+    this.pendingWheelScroll = { x, y }
+    if (this.wheelScrollFrame !== 0) return
+
+    if (typeof requestAnimationFrame !== 'function') {
+      this.flushPendingWheelScroll()
+      return
+    }
+
+    this.wheelScrollFrame = requestAnimationFrame(() => {
+      this.wheelScrollFrame = 0
+      this.flushPendingWheelScroll()
+    })
+  }
+
+  /**
+   * Применяет последний накопленный wheel scroll target.
+   */
+  private flushPendingWheelScroll(): void {
+    const pending = this.pendingWheelScroll
+    this.pendingWheelScroll = null
+    if (!pending) return
+    this.setScroll(pending.x, pending.y)
+  }
+
+  /**
+   * Сбрасывает отложенный wheel scroll при unmount.
+   */
+  private cancelPendingWheelScroll(): void {
+    if (this.wheelScrollFrame !== 0 && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.wheelScrollFrame)
+    }
+    this.wheelScrollFrame = 0
+    this.pendingWheelScroll = null
   }
 
   /**
@@ -2532,9 +2574,11 @@ export class DataTableRootNode<
         event.cancelBubble = true
         return
       }
-      const nextX = this.scrollX + event.deltaX + (event.shiftKey ? event.deltaY : 0)
-      const nextY = this.scrollY + (event.shiftKey ? 0 : event.deltaY)
-      this.setScroll(nextX, nextY)
+      const baseX = this.pendingWheelScroll?.x ?? this.scrollX
+      const baseY = this.pendingWheelScroll?.y ?? this.scrollY
+      const nextX = baseX + event.deltaX + (event.shiftKey ? event.deltaY : 0)
+      const nextY = baseY + (event.shiftKey ? 0 : event.deltaY)
+      this.scheduleWheelScroll(nextX, nextY)
       event.preventDefault()
       event.cancelBubble = true
     })
@@ -3968,6 +4012,7 @@ export class DataTableRootNode<
   ): void {
     const schema: NovaSchema = []
     const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
+    const gridRowTops: Array<number> = []
 
     rows.forEach((rowInput, localIndex) => {
       const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
@@ -3982,6 +4027,7 @@ export class DataTableRootNode<
       }
 
       const { row, rowId } = renderedRow
+      gridRowTops.push(y)
       for (const columnRect of columnRects) {
         const rect: DataTableCellRect = {
           x: columnRect.x,
@@ -4009,7 +4055,42 @@ export class DataTableRootNode<
       }
     })
 
+    this.renderRowZoneGrid(schema, columnRects, gridRowTops, rowHeight)
     this.emitSchema(schema)
+  }
+
+  /**
+   * Рисует плотную сетку отдельными line-batches вместо border на каждой ячейке.
+   */
+  private renderRowZoneGrid(
+    schema: NovaSchema,
+    columnRects: Array<VisibleColumnRect<Row>>,
+    rowTops: Array<number>,
+    rowHeight: number,
+  ): void {
+    if (columnRects.length === 0 || rowTops.length === 0) return
+
+    const firstColumn = columnRects[0]
+    const lastColumn = columnRects[columnRects.length - 1]
+    if (!firstColumn || !lastColumn) return
+
+    const x1 = firstColumn.x
+    const x2 = lastColumn.x + lastColumn.width
+    const y1 = Math.min(...rowTops)
+    const y2 = Math.max(...rowTops) + rowHeight
+    const style = { color: '#d8e0ea', width: 1 }
+
+    schema.push({ type: 'line', x1, y1, x2, y2: y1, styles: style })
+    for (const y of rowTops) {
+      const bottom = y + rowHeight
+      schema.push({ type: 'line', x1, y1: bottom, x2, y2: bottom, styles: style })
+    }
+
+    schema.push({ type: 'line', x1, y1, x2: x1, y2, styles: style })
+    for (const columnRect of columnRects) {
+      const x = columnRect.x + columnRect.width
+      schema.push({ type: 'line', x1: x, y1, x2: x, y2, styles: style })
+    }
   }
 
   /**
@@ -4459,10 +4540,6 @@ export class DataTableRootNode<
         height: rect.height,
         styles: {
           background,
-          border: {
-            color: '#d8e0ea',
-            width: 1,
-          },
         },
       },
       {
