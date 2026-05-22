@@ -398,6 +398,9 @@ export class DataTableRootNode<
   private activeRenderLayerId: DataTableRenderLayerId | null = null
   private activeRenderClip: DataTableCellRect | null = null
   private renderViewState: DataTableViewState | null = null
+  private readonly renderVisibleColumnRects = new Map<string, Array<VisibleColumnRect<Row>>>()
+  private readonly renderSortIndexByColumn = new Map<string, number>()
+  private readonly renderFilteredColumnIds = new Set<string>()
   private readonly renderLayers = createRenderLayerCache()
   private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
@@ -3612,6 +3615,7 @@ export class DataTableRootNode<
     this.visibleAnimatedCells = false
     const previousViewState = this.renderViewState
     this.renderViewState = this.viewPipeline.getState()
+    this.prepareRenderPassIndexes(this.renderViewState)
 
     try {
       this.renderLayer('base', () => this.emitSchema(buildBoxSchema(this.props, this.width, this.height)))
@@ -3640,11 +3644,35 @@ export class DataTableRootNode<
         this.renderScrollbarLayer()
       })
     } finally {
+      this.clearRenderPassIndexes()
       this.renderViewState = previousViewState
     }
 
     if (rebuildsCellLayers) this.finalizeVisibleCellKeys()
     this.queueAnimationLoopSync()
+  }
+
+  /**
+   * Подготавливает дешевые lookup-структуры на один render pass.
+   */
+  private prepareRenderPassIndexes(viewState: DataTableViewState): void {
+    this.renderVisibleColumnRects.clear()
+    this.renderSortIndexByColumn.clear()
+    this.renderFilteredColumnIds.clear()
+
+    viewState.sort.forEach((rule, index) => {
+      this.renderSortIndexByColumn.set(rule.columnId, index)
+    })
+    collectFilterStateColumnIds(viewState.filters, this.renderFilteredColumnIds)
+  }
+
+  /**
+   * Очищает lookup-структуры render pass.
+   */
+  private clearRenderPassIndexes(): void {
+    this.renderVisibleColumnRects.clear()
+    this.renderSortIndexByColumn.clear()
+    this.renderFilteredColumnIds.clear()
   }
 
   /**
@@ -4325,7 +4353,13 @@ export class DataTableRootNode<
     const hover = this.hoverActive ? this.hoverTarget : null
     const selection = this.selectionActive ? this.selection : null
     const viewState = this.getRenderViewState()
-    const sortIndex = viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
+    const useRenderIndexes = !!this.renderViewState
+    const sortIndex = useRenderIndexes
+      ? this.renderSortIndexByColumn.get(columnRect.column.id) ?? -1
+      : viewState.sort.findIndex(rule => rule.columnId === columnRect.column.id)
+    const filtered = useRenderIndexes
+      ? this.renderFilteredColumnIds.has(columnRect.column.id)
+      : filterStateHasColumn(viewState.filters, columnRect.column.id)
     const searchHit = this.viewPipeline.getSearchMatchForCell(rowId, columnRect.column.id)
     const searchRowHit = this.viewPipeline.getSearchMatchForRow(rowId)
     const editing = this.editingState
@@ -4375,7 +4409,7 @@ export class DataTableRootNode<
       pinnedRow: zone === 'pinned-top' || zone === 'pinned-bottom' ? zone.replace('pinned-', '') as DataTablePinnedRowPosition : undefined,
       sorted: sortIndex >= 0 ? viewState.sort[sortIndex]?.direction : undefined,
       sortPriority: sortIndex >= 0 ? sortIndex : undefined,
-      filtered: filterStateHasColumn(viewState.filters, columnRect.column.id),
+      filtered,
       searchMatched: !!searchHit,
       searchActive: !!searchHit && viewState.search.activeIndex === searchHit.index,
       searchRowMatched: !!searchRowHit,
@@ -4890,7 +4924,19 @@ export class DataTableRootNode<
    * Выполняет внутренний шаг visibleColumnRects для DataTableRootNode.
    */
   private visibleColumnRects(region: VisibleColumnRegion = 'all', animated = true): Array<VisibleColumnRect<Row>> {
-    if (this.columnDragState?.active) return this.visibleColumnRectsForDrag(region, animated)
+    const cacheKey = this.renderViewState
+      ? `${this.columnDragState?.active ? 'drag' : 'normal'}:${region}:${animated ? 1 : 0}`
+      : ''
+    if (cacheKey) {
+      const cached = this.renderVisibleColumnRects.get(cacheKey)
+      if (cached) return cached
+    }
+
+    if (this.columnDragState?.active) {
+      const dragRects = this.visibleColumnRectsForDrag(region, animated)
+      if (cacheKey) this.renderVisibleColumnRects.set(cacheKey, dragRects)
+      return dragRects
+    }
 
     const left = this.resolvedColumns.filter(column => column.pinned === 'left')
     const center = this.resolvedColumns.filter(column => !column.pinned)
@@ -4928,6 +4974,7 @@ export class DataTableRootNode<
       }
     }
 
+    if (cacheKey) this.renderVisibleColumnRects.set(cacheKey, rects)
     return rects
   }
 
@@ -8192,6 +8239,17 @@ function escapeTooltipMarkdown(value: string): string {
 function filterStateHasColumn(filters: DataTableViewState['filters'], columnId: string): boolean {
   if (Array.isArray(filters)) return filters.some(rule => rule.columnId === columnId)
   return filters.rules.some(rule => 'logic' in rule ? filterStateHasColumn(rule, columnId) : rule.columnId === columnId)
+}
+
+function collectFilterStateColumnIds(filters: DataTableViewState['filters'], result: Set<string>): void {
+  if (Array.isArray(filters)) {
+    for (const rule of filters) result.add(rule.columnId)
+    return
+  }
+  for (const rule of filters.rules) {
+    if ('logic' in rule) collectFilterStateColumnIds(rule, result)
+    else result.add(rule.columnId)
+  }
 }
 
 function summarizeColumnFilters(filters: DataTableViewState['filters'], columnId: string): string {
