@@ -2307,6 +2307,9 @@ describe('DataTable Root runtime', () => {
     const root = uiRoot.children[0] as DataTableRootNode<Row>
     const bodyLayer = (root as any).renderLayers.get('body-static')
     const bodySchema = bodyLayer.segments.flatMap((segment: { schema: NovaSchema }) => segment.schema)
+    const bodyRectBatchItems = bodyLayer.segments
+      .filter((segment: { kind: string }) => segment.kind === 'rect-batch')
+      .reduce((sum: number, segment: { rectBatch: { count: number } }) => sum + segment.rectBatch.count, 0)
     const textCount = bodySchema.filter(item => item.type === 'text').length
     const backgroundCount = bodySchema.filter(item => item.type === 'rect').length
     const gridRectCount = bodySchema.filter(item =>
@@ -2315,7 +2318,8 @@ describe('DataTable Root runtime', () => {
       && (item as any).styles?.background === '#d8e0ea',
     ).length
 
-    expect(gridRectCount).toBeGreaterThan(0)
+    expect(gridRectCount + bodyRectBatchItems).toBeGreaterThan(0)
+    expect(bodyRectBatchItems).toBeGreaterThan(0)
     expect(bodySchema.some(item => item.type === 'line')).toBe(false)
     expect(bodySchema.some(item => item.type === 'rect' && ((item as any).styles?.border?.width ?? 0) > 0)).toBe(false)
     expect(backgroundCount).toBeLessThan(textCount)

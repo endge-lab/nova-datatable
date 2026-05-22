@@ -289,6 +289,8 @@ interface DataTableTextBatchBuilder {
   color: Array<string>
 }
 
+type DataTableBatchableRect = Extract<NovaSchema[number], { type: 'rect' }>
+
 interface DataTableCellTemplateFragment {
   schema: NovaSchema
   width: number
@@ -346,6 +348,18 @@ const DATA_TABLE_OVERLAY_RENDER_LAYERS: Array<DataTableRenderLayerId> = [
   'scrollbars',
 ]
 const DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY = 8
+const DATA_TABLE_BATCHABLE_NAMED_COLORS = new Set(['black', 'white', 'red', 'green', 'blue', 'transparent'])
+
+/**
+ * Проверяет, что background можно представить как solid RGBA в NovaRectBatch.
+ */
+function isBatchableRectBackground(background: string): boolean {
+  const value = background.trim().toLowerCase()
+  return value.startsWith('#')
+    || value.startsWith('rgb(')
+    || value.startsWith('rgba(')
+    || DATA_TABLE_BATCHABLE_NAMED_COLORS.has(value)
+}
 
 /**
  * Создает внутренний render-layer cache.
@@ -3653,6 +3667,46 @@ export class DataTableRootNode<
    */
   private emitSchema(schema: NovaSchema): void {
     if (schema.length === 0) return
+    this.emitSchemaPrimitiveBatches(schema)
+  }
+
+  /**
+   * Делит schema на последовательные schema/rect-batch segments, сохраняя порядок.
+   */
+  private emitSchemaPrimitiveBatches(schema: NovaSchema): void {
+    let schemaRun: NovaSchema = []
+    let rectRun: Array<DataTableBatchableRect> = []
+
+    const flushSchemaRun = () => {
+      if (schemaRun.length === 0) return
+      this.emitSchemaSegment(schemaRun)
+      schemaRun = []
+    }
+
+    const flushRectRun = () => {
+      if (rectRun.length === 0) return
+      this.emitRectBatch(this.createRectBatchFromSchemaRects(rectRun))
+      rectRun = []
+    }
+
+    for (const item of schema) {
+      if (this.isBatchableSchemaRect(item)) {
+        flushSchemaRun()
+        rectRun.push(item)
+        continue
+      }
+      flushRectRun()
+      schemaRun.push(item)
+    }
+
+    flushSchemaRun()
+    flushRectRun()
+  }
+
+  /**
+   * Добавляет обычный schema segment в текущий layer.
+   */
+  private emitSchemaSegment(schema: NovaSchema): void {
     const segment: DataTableRenderSegment = {
       kind: 'schema',
       schema,
@@ -3664,6 +3718,59 @@ export class DataTableRootNode<
       return
     }
     this.emitRenderSegment(segment)
+  }
+
+  /**
+   * Простые rects без border/radius/opacity можно рисовать одним batch.
+   */
+  private isBatchableSchemaRect(item: NovaSchema[number] | undefined): item is DataTableBatchableRect {
+    if (!item || item.type !== 'rect' || item.active === false) return false
+    if (item.width <= 0 || item.height <= 0) return false
+
+    const styles = item.styles
+    if (!styles || typeof styles.background !== 'string') return false
+    if (!isBatchableRectBackground(styles.background)) return false
+    if (styles.border) return false
+    if (styles.radius !== undefined && styles.radius !== 0) return false
+    if (styles.opacity !== undefined && styles.opacity !== 1) return false
+    return true
+  }
+
+  /**
+   * Собирает NovaRectBatch из последовательного run простых rect items.
+   */
+  private createRectBatchFromSchemaRects(items: Array<DataTableBatchableRect>): NovaRectBatch {
+    const count = items.length
+    const colors = new Float32Array(count * 4)
+    const states = new Float32Array(count)
+    const x = new Float32Array(count)
+    const y = new Float32Array(count)
+    const width = new Float32Array(count)
+    const height = new Float32Array(count)
+
+    items.forEach((item, index) => {
+      const color = parseNovaColor(item.styles?.background)
+      x[index] = item.x
+      y[index] = item.y
+      width[index] = item.width
+      height[index] = item.height
+      colors[index * 4] = color.r
+      colors[index * 4 + 1] = color.g
+      colors[index * 4 + 2] = color.b
+      colors[index * 4 + 3] = color.a
+    })
+
+    return {
+      count,
+      x,
+      y,
+      width,
+      height,
+      colors,
+      states,
+      revision: this.store.takeDataRevision() + this.invalidation.get('viewport') + this.invalidation.get('zoom') + 1,
+      staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + this.invalidation.get('layout') + 1,
+    }
   }
 
   /**
