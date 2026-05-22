@@ -270,7 +270,13 @@ interface DataTableTextBatchRenderSegment {
 type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment | DataTableTextBatchRenderSegment
 
 interface DataTableTextBatchBuilder {
-  align: DataTableColumnAlign
+  align?: NovaTextBatch['align']
+  font?: NovaTextBatch['font']
+  lineHeight?: number
+  padding?: NovaTextBatch['padding']
+  ellipsis?: boolean
+  meta?: NovaTextBatch['meta']
+  clip: boolean
   text: Array<string>
   x: Array<number>
   y: Array<number>
@@ -4188,7 +4194,7 @@ export class DataTableRootNode<
     includeGroupRows = true,
   ): void {
     const schema: NovaSchema = []
-    const textBatchBuilders = new Map<DataTableColumnAlign, DataTableTextBatchBuilder>()
+    const textBatchBuilders = new Map<string, DataTableTextBatchBuilder>()
     const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
     const gridRowTops: Array<number> = []
 
@@ -4239,7 +4245,7 @@ export class DataTableRootNode<
           this.registerDefaultCellTextSelectionTarget(context)
           continue
         }
-        this.renderCell(schema, context, this.canBatchDefaultCellBackground(context))
+        this.renderCell(schema, context, this.canBatchDefaultCellBackground(context), textBatchBuilders)
       }
     })
 
@@ -4361,7 +4367,7 @@ export class DataTableRootNode<
    * Добавляет default text cell в retained text batch.
    */
   private appendDefaultCellTextBatch(
-    builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>,
+    builders: Map<string, DataTableTextBatchBuilder>,
     context: DataTableCellContext<Row>,
   ): void {
     const textOptions = this.props.performance.text
@@ -4376,7 +4382,29 @@ export class DataTableRootNode<
     }
     const x = textOptions?.skipSubpixelText ? Math.round(textRect.x) : textRect.x
     const y = textOptions?.skipSubpixelText ? Math.round(textRect.y) : textRect.y
-    const builder = this.resolveDefaultTextBatchBuilder(builders, column.align)
+    const align = {
+      horizontal: column.align,
+      vertical: 'middle' as const,
+    }
+    const font = {
+      family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+      size: this.fontSize,
+      weight: '500' as const,
+      style: 'normal' as const,
+    }
+    const meta = {
+      textMode: textOptions?.renderMode ?? 'run-atlas',
+      textRole: 'ui-label' as const,
+      textLod: 'always' as const,
+    }
+    const builder = this.resolveTextBatchBuilder(builders, {
+      align,
+      font,
+      lineHeight: this.lineHeight,
+      ellipsis: textOptions?.truncate !== 'clip',
+      clip: true,
+      meta,
+    })
 
     builder.text.push(String(value ?? ''))
     builder.x.push(x)
@@ -4393,15 +4421,22 @@ export class DataTableRootNode<
   /**
    * Возвращает builder для одной группы text batch с общим align.
    */
-  private resolveDefaultTextBatchBuilder(
-    builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>,
-    align: DataTableColumnAlign,
+  private resolveTextBatchBuilder(
+    builders: Map<string, DataTableTextBatchBuilder>,
+    options: Pick<DataTableTextBatchBuilder, 'align' | 'font' | 'lineHeight' | 'padding' | 'ellipsis' | 'clip' | 'meta'>,
   ): DataTableTextBatchBuilder {
-    const current = builders.get(align)
+    const key = this.createTextBatchBuilderKey(options)
+    const current = builders.get(key)
     if (current) return current
 
     const next: DataTableTextBatchBuilder = {
-      align,
+      align: options.align,
+      font: options.font,
+      lineHeight: options.lineHeight,
+      padding: options.padding,
+      ellipsis: options.ellipsis,
+      clip: options.clip,
+      meta: options.meta,
       text: [],
       x: [],
       y: [],
@@ -4413,17 +4448,33 @@ export class DataTableRootNode<
       clipHeight: [],
       color: [],
     }
-    builders.set(align, next)
+    builders.set(key, next)
     return next
+  }
+
+  /**
+   * Создает ключ группировки retained text batch.
+   */
+  private createTextBatchBuilderKey(
+    options: Pick<DataTableTextBatchBuilder, 'align' | 'font' | 'lineHeight' | 'padding' | 'ellipsis' | 'clip' | 'meta'>,
+  ): string {
+    return JSON.stringify({
+      align: options.align ?? null,
+      font: options.font ?? null,
+      lineHeight: options.lineHeight ?? null,
+      padding: options.padding ?? null,
+      ellipsis: options.ellipsis ?? null,
+      clip: options.clip,
+      meta: options.meta ?? null,
+    })
   }
 
   /**
    * Отправляет retained text batches после сборки row zone.
    */
-  private emitDefaultCellTextBatches(builders: Map<DataTableColumnAlign, DataTableTextBatchBuilder>): void {
+  private emitDefaultCellTextBatches(builders: Map<string, DataTableTextBatchBuilder>): void {
     for (const builder of builders.values()) {
       if (builder.text.length === 0) continue
-      const textOptions = this.props.performance.text
       const batch: NovaTextBatch = {
         count: builder.text.length,
         text: builder.text,
@@ -4431,30 +4482,21 @@ export class DataTableRootNode<
         y: Float32Array.from(builder.y),
         width: Float32Array.from(builder.width),
         height: Float32Array.from(builder.height),
-        clipX: Float32Array.from(builder.clipX),
-        clipY: Float32Array.from(builder.clipY),
-        clipWidth: Float32Array.from(builder.clipWidth),
-        clipHeight: Float32Array.from(builder.clipHeight),
         color: builder.color,
-        font: {
-          family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-          size: this.fontSize,
-          weight: '500',
-          style: 'normal',
-        },
-        lineHeight: this.lineHeight,
-        align: {
-          horizontal: builder.align,
-          vertical: 'middle',
-        },
-        ellipsis: textOptions?.truncate !== 'clip',
-        meta: {
-          textMode: textOptions?.renderMode ?? 'run-atlas',
-          textRole: 'ui-label',
-          textLod: 'always',
-        },
+        font: builder.font,
+        lineHeight: builder.lineHeight,
+        padding: builder.padding,
+        align: builder.align,
+        ellipsis: builder.ellipsis,
+        meta: builder.meta,
         revision: this.store.takeDataRevision() + this.invalidation.get('zoom') + 1,
         staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + 1,
+      }
+      if (builder.clip) {
+        batch.clipX = Float32Array.from(builder.clipX)
+        batch.clipY = Float32Array.from(builder.clipY)
+        batch.clipWidth = Float32Array.from(builder.clipWidth)
+        batch.clipHeight = Float32Array.from(builder.clipHeight)
       }
       this.emitTextBatch(batch)
     }
@@ -4700,7 +4742,12 @@ export class DataTableRootNode<
   /**
    * Выполняет отрисовку DataTableRootNode.
    */
-  private renderCell(schema: NovaSchema, context: DataTableCellContext<Row>, defaultBackgroundPainted = false): void {
+  private renderCell(
+    schema: NovaSchema,
+    context: DataTableCellContext<Row>,
+    defaultBackgroundPainted = false,
+    textBatchBuilders?: Map<string, DataTableTextBatchBuilder>,
+  ): void {
     const startIndex = schema.length
     const template = this.resolveCellTemplate(context)
     if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
@@ -4710,6 +4757,7 @@ export class DataTableRootNode<
       this.applyTextPerformanceHints(schema, startIndex)
       this.applyCellEnterOpacity(schema, context, startIndex)
       this.applyColumnDragCellOpacity(schema, context, startIndex)
+      this.extractBatchableTemplateText(schema, context, startIndex, textBatchBuilders)
       this.registerTextSelectionTargets(schema, context, startIndex)
       return
     }
@@ -4728,6 +4776,98 @@ export class DataTableRootNode<
     return context.zone === 'header'
       ? context.column.headerTemplate ?? this.props.headerTemplate
       : context.column.cellTemplate ?? this.props.cellTemplate
+  }
+
+  /**
+   * Компилирует безопасный tail из text items custom DSL в retained text batch.
+   */
+  private extractBatchableTemplateText(
+    schema: NovaSchema,
+    context: DataTableCellContext<Row>,
+    startIndex: number,
+    textBatchBuilders?: Map<string, DataTableTextBatchBuilder>,
+  ): void {
+    const textOptions = this.props.performance.text
+    if (!textBatchBuilders || !textOptions || !textOptions.batchDefaultCells || !textOptions.visible) return
+    if (this.props.textSelection && this.props.textSelection.enabled) return
+    if (context.zone === 'header') return
+    if (context.column.animated) return
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return
+    if (this.props.interaction.motion && this.props.interaction.motion.cells) return
+
+    const length = schema.length - startIndex
+    if (length <= 0) return
+
+    let firstTextIndex = -1
+    for (let index = startIndex; index < schema.length; index += 1) {
+      const item = schema[index]
+      if (item?.type === 'text') {
+        if (firstTextIndex < 0) firstTextIndex = index
+        continue
+      }
+      if (firstTextIndex >= 0) return
+    }
+    if (firstTextIndex < 0) return
+
+    const textItems = schema.slice(firstTextIndex)
+    for (const item of textItems) {
+      if (!this.canCompileSchemaTextItem(item)) return
+    }
+
+    for (const item of textItems) this.appendSchemaTextItemToBatch(textBatchBuilders, item)
+    schema.splice(firstTextIndex, schema.length - firstTextIndex)
+  }
+
+  /**
+   * Проверяет, можно ли перенести schema text item в retained batch.
+   */
+  private canCompileSchemaTextItem(item: NovaSchema[number]): boolean {
+    if (!item || item.type !== 'text') return false
+    if (item.active === false) return false
+    const candidate = item as { text?: unknown; parser?: unknown; clip?: unknown }
+    if (typeof candidate.text !== 'string') return false
+    if (candidate.parser) return false
+    const clip = candidate.clip
+    return clip === undefined || clip === true || (clip !== false && typeof clip === 'object')
+  }
+
+  /**
+   * Добавляет schema text item в retained text batch builder.
+   */
+  private appendSchemaTextItemToBatch(
+    builders: Map<string, DataTableTextBatchBuilder>,
+    item: NovaSchema[number],
+  ): void {
+    const textItem = item as Extract<NovaSchema[number], { type: 'text' }>
+    const clip = textItem.clip
+    const clipRect = clip && typeof clip === 'object'
+      ? clip
+      : {
+          x: textItem.x,
+          y: textItem.y,
+          width: textItem.width,
+          height: textItem.height,
+        }
+    const builder = this.resolveTextBatchBuilder(builders, {
+      align: textItem.styles?.align,
+      font: textItem.styles?.font,
+      lineHeight: textItem.styles?.lineHeight,
+      padding: textItem.styles?.padding,
+      ellipsis: textItem.styles?.ellipsis,
+      clip: !!clip || textItem.styles?.ellipsis === true,
+      meta: textItem.meta,
+    })
+
+    builder.text.push(textItem.text)
+    builder.x.push(textItem.x)
+    builder.y.push(textItem.y)
+    builder.width.push(textItem.width)
+    builder.height.push(textItem.height)
+    builder.clipX.push(clipRect.x)
+    builder.clipY.push(clipRect.y)
+    builder.clipWidth.push(clipRect.width)
+    builder.clipHeight.push(clipRect.height)
+    builder.color.push(textItem.styles?.color ?? '#263142')
   }
 
   /**
