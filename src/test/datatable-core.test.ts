@@ -2276,7 +2276,7 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('renders default cell backgrounds as plain rects and draws grid lines separately', () => {
+  it('renders default cell backgrounds as plain rects and draws grid lines as batch-friendly rects', () => {
     const app = createApp()
     const surface = app.createSurface('datatable-default-background-span-test')
     const uiRoot = app.schema.createNode(surface, {
@@ -2309,8 +2309,14 @@ describe('DataTable Root runtime', () => {
     const bodySchema = bodyLayer.segments.flatMap((segment: { schema: NovaSchema }) => segment.schema)
     const textCount = bodySchema.filter(item => item.type === 'text').length
     const backgroundCount = bodySchema.filter(item => item.type === 'rect').length
+    const gridRectCount = bodySchema.filter(item =>
+      item.type === 'rect'
+      && (((item as any).width === 1) || ((item as any).height === 1))
+      && (item as any).styles?.background === '#d8e0ea',
+    ).length
 
-    expect(bodySchema.some(item => item.type === 'line')).toBe(true)
+    expect(gridRectCount).toBeGreaterThan(0)
+    expect(bodySchema.some(item => item.type === 'line')).toBe(false)
     expect(bodySchema.some(item => item.type === 'rect' && ((item as any).styles?.border?.width ?? 0) > 0)).toBe(false)
     expect(backgroundCount).toBeLessThan(textCount)
 

@@ -500,6 +500,17 @@ export interface DataTableResolvedPerformanceOptions {
   text: false | DataTableResolvedTextPerformanceOptions
 }
 
+export interface DataTableRenderDiagnostics {
+  layerRebuilds: Record<string, number>
+  templateCalls: number
+  interactionRebuilds: number
+  animatedLayerRebuilds: number
+  schemaSegments: number
+  schemaItems: number
+  rectBatchSegments: number
+  rectBatchItems: number
+}
+
 export interface DataTableServerRowModelOptions {
   enabled?: boolean
   authoritative?: boolean
@@ -1724,6 +1735,7 @@ export interface DataTableRootApi<Row extends Record<string, any> = Record<strin
   clearSelectionValues: () => DataTableTransaction<Row> | null
   fillSelection: (direction: DataTableFillDirection, options?: Partial<DataTableFillHandleOptions>) => DataTableTransaction<Row> | null
   getAccessibilityState: () => DataTableAccessibilityState
+  getRenderDiagnostics: () => DataTableRenderDiagnostics
   refresh: () => void
   batch: (callback: (api: DataTableRootApi<Row>) => void) => void
   getViewport: () => DataTableViewport

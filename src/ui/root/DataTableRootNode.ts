@@ -82,6 +82,7 @@ import type {
   DataTableResolvedColumnState,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedZoomWheelOptions,
+  DataTableRenderDiagnostics,
   DataTableRootApi,
   DataTableRootOptions,
   DataTableRootProps,
@@ -245,10 +246,20 @@ type DataTableRenderLayerId =
   | 'drag-menu-tooltip'
   | 'scrollbars'
 
-interface DataTableRenderSegment {
+interface DataTableSchemaRenderSegment {
+  kind: 'schema'
   schema: NovaSchema
   clip?: DataTableCellRect
 }
+
+interface DataTableRectBatchRenderSegment {
+  kind: 'rect-batch'
+  rectBatch: NovaRectBatch
+  schema: NovaSchema
+  clip?: DataTableCellRect
+}
+
+type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment
 
 interface DataTableRenderLayerCache {
   id: DataTableRenderLayerId
@@ -258,11 +269,8 @@ interface DataTableRenderLayerCache {
   rebuilds: number
 }
 
-interface DataTableRenderLayerDiagnostics {
+interface DataTableRenderLayerDiagnostics extends DataTableRenderDiagnostics {
   layerRebuilds: Record<DataTableRenderLayerId, number>
-  templateCalls: number
-  interactionRebuilds: number
-  animatedLayerRebuilds: number
 }
 
 const DATA_TABLE_RENDER_LAYER_IDS: Array<DataTableRenderLayerId> = [
@@ -326,6 +334,10 @@ function createRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
     templateCalls: 0,
     interactionRebuilds: 0,
     animatedLayerRebuilds: 0,
+    schemaSegments: 0,
+    schemaItems: 0,
+    rectBatchSegments: 0,
+    rectBatchItems: 0,
   }
 }
 
@@ -549,6 +561,7 @@ export class DataTableRootNode<
       clearSelectionValues: () => this.clearSelectionValues(),
       fillSelection: (direction, options) => this.fillSelection(direction, options),
       getAccessibilityState: () => this.getAccessibilityState(),
+      getRenderDiagnostics: () => this.__getRenderLayerDiagnostics(),
       refresh: () => this.refresh(),
       batch: callback => this.batch(callback),
       getViewport: () => ({ ...this.viewport }),
@@ -3514,6 +3527,10 @@ export class DataTableRootNode<
       templateCalls: this.renderLayerDiagnostics.templateCalls,
       interactionRebuilds: this.renderLayerDiagnostics.interactionRebuilds,
       animatedLayerRebuilds: this.renderLayerDiagnostics.animatedLayerRebuilds,
+      schemaSegments: this.renderLayerDiagnostics.schemaSegments,
+      schemaItems: this.renderLayerDiagnostics.schemaItems,
+      rectBatchSegments: this.renderLayerDiagnostics.rectBatchSegments,
+      rectBatchItems: this.renderLayerDiagnostics.rectBatchItems,
     }
   }
 
@@ -3526,6 +3543,10 @@ export class DataTableRootNode<
     this.renderLayerDiagnostics.templateCalls = 0
     this.renderLayerDiagnostics.interactionRebuilds = 0
     this.renderLayerDiagnostics.animatedLayerRebuilds = 0
+    this.renderLayerDiagnostics.schemaSegments = 0
+    this.renderLayerDiagnostics.schemaItems = 0
+    this.renderLayerDiagnostics.rectBatchSegments = 0
+    this.renderLayerDiagnostics.rectBatchItems = 0
   }
 
   /**
@@ -3565,7 +3586,27 @@ export class DataTableRootNode<
   private emitSchema(schema: NovaSchema): void {
     if (schema.length === 0) return
     const segment: DataTableRenderSegment = {
+      kind: 'schema',
       schema,
+      clip: this.activeRenderClip ? { ...this.activeRenderClip } : undefined,
+    }
+    const layer = this.activeRenderLayerId ? this.renderLayers.get(this.activeRenderLayerId) : null
+    if (layer) {
+      layer.segments.push(segment)
+      return
+    }
+    this.emitRenderSegment(segment)
+  }
+
+  /**
+   * Добавляет rect batch в текущий render layer или сразу в renderer.
+   */
+  private emitRectBatch(rectBatch: NovaRectBatch): void {
+    if (rectBatch.count <= 0) return
+    const segment: DataTableRenderSegment = {
+      kind: 'rect-batch',
+      rectBatch,
+      schema: [] as unknown as NovaSchema,
       clip: this.activeRenderClip ? { ...this.activeRenderClip } : undefined,
     }
     const layer = this.activeRenderLayerId ? this.renderLayers.get(this.activeRenderLayerId) : null
@@ -3580,13 +3621,25 @@ export class DataTableRootNode<
    * Выполняет отрисовку render segment.
    */
   private emitRenderSegment(segment: DataTableRenderSegment): void {
+    const render = () => {
+      if (segment.kind === 'schema') {
+        this.renderLayerDiagnostics.schemaSegments += 1
+        this.renderLayerDiagnostics.schemaItems += segment.schema.length
+        this.renderer.schema(segment.schema)
+        return
+      }
+      this.renderLayerDiagnostics.rectBatchSegments += 1
+      this.renderLayerDiagnostics.rectBatchItems += segment.rectBatch.count
+      this.renderer.rects(segment.rectBatch)
+    }
+
     if (segment.clip) {
       this.renderer.clip(segment.clip.x, segment.clip.y, segment.clip.width, segment.clip.height)
-      this.renderer.schema(segment.schema)
+      render()
       this.renderer.clearClip()
       return
     }
-    this.renderer.schema(segment.schema)
+    render()
   }
 
   /**
@@ -4119,18 +4172,18 @@ export class DataTableRootNode<
     const x2 = lastColumn.x + lastColumn.width
     const y1 = Math.min(...rowTops)
     const y2 = Math.max(...rowTops) + rowHeight
-    const style = { color: '#d8e0ea', width: 1 }
+    const color = '#d8e0ea'
 
-    schema.push({ type: 'line', x1, y1, x2, y2: y1, styles: style })
+    schema.push({ type: 'rect', x: x1, y: y1, width: Math.max(0, x2 - x1), height: 1, styles: { background: color } })
     for (const y of rowTops) {
       const bottom = y + rowHeight
-      schema.push({ type: 'line', x1, y1: bottom, x2, y2: bottom, styles: style })
+      schema.push({ type: 'rect', x: x1, y: bottom, width: Math.max(0, x2 - x1), height: 1, styles: { background: color } })
     }
 
-    schema.push({ type: 'line', x1, y1, x2: x1, y2, styles: style })
+    schema.push({ type: 'rect', x: x1, y: y1, width: 1, height: Math.max(0, y2 - y1), styles: { background: color } })
     for (const columnRect of columnRects) {
       const x = columnRect.x + columnRect.width
-      schema.push({ type: 'line', x1: x, y1, x2: x, y2, styles: style })
+      schema.push({ type: 'rect', x, y: y1, width: 1, height: Math.max(0, y2 - y1), styles: { background: color } })
     }
   }
 

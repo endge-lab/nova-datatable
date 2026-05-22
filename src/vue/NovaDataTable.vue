@@ -751,6 +751,7 @@ defineExpose<NovaDataTableRef<BaseRow>>({
   clearSelectionValues: (): DataTableTransaction<BaseRow> | null => getRootApi().clearSelectionValues(),
   fillSelection: (direction: DataTableFillDirection, options?: Partial<DataTableFillHandleOptions>): DataTableTransaction<BaseRow> | null => getRootApi().fillSelection(direction, options),
   getAccessibilityState: (): DataTableAccessibilityState => getRootApi().getAccessibilityState(),
+  getRenderDiagnostics: () => getRootApi().getRenderDiagnostics(),
   refresh: () => getRootApi().refresh(),
   batch: callback => getRootApi().batch(callback),
   getViewport: () => getRootApi().getViewport(),
