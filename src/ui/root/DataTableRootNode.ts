@@ -2450,12 +2450,16 @@ export class DataTableRootNode<
     })
 
     this.on('mousemove', event => {
-      if (this.resizeState) return
       this.trackTooltipModifiers(event)
       const [x, y] = this.trackPointerPosition(event)
+      if (this.resizeState) {
+        this.syncNativeCursor(x, y)
+        return
+      }
       this.pointerInside = true
       this.revealScrollbars('hover')
       this.updateHoveredScrollbarAxis(x, y)
+      this.syncNativeCursor(x, y)
       const nextHover = this.resolveInteractionTargetAt(x, y)
       this.updateHover(nextHover)
     })
@@ -2467,6 +2471,7 @@ export class DataTableRootNode<
       this.scheduleScrollbarHide('hover')
       this.clearHover()
       this.scheduleTooltipClose()
+      this.nova.cursor('default')
     })
 
     this.on('mousedown', event => {
@@ -2482,6 +2487,7 @@ export class DataTableRootNode<
 
       const resizeColumn = this.hitResizeHandle(x, y)
       if (resizeColumn) {
+        this.nova.cursor('col-resize')
         this.resizeState = {
           column: resizeColumn.column,
           startX: x,
@@ -2610,6 +2616,7 @@ export class DataTableRootNode<
       const nextWidth = this.resizeState.startWidth + meta.totalDx
       const [x, y] = this.toLocal(meta.x, meta.y)
       this.lastPointerPosition = { x, y }
+      this.syncNativeCursor(x, y)
       this.applyColumnWidth(this.resizeState.column.id, nextWidth)
       event.cancelBubble = true
     })
@@ -2646,6 +2653,7 @@ export class DataTableRootNode<
       if (!this.resizeState) return
       this.resizeState = null
       this.syncHoverAfterViewportChange()
+      this.syncNativeCursorFromLastPosition()
       this.releasePointerCapture(event)
       event.cancelBubble = true
     })
@@ -7550,6 +7558,29 @@ export class DataTableRootNode<
   private toLocalPointerPosition(event: MouseEvent): [number, number] {
     const position = this.events.getCanvasMousePosition(event)
     return this.toLocal(position.x, position.y)
+  }
+
+  /**
+   * Синхронизирует native cursor для canvas-only resize affordance.
+   */
+  private syncNativeCursor(x: number, y: number): void {
+    if (this.resizeState || this.hitResizeHandle(x, y)) {
+      this.nova.cursor('col-resize')
+      return
+    }
+    this.nova.cursor('default')
+  }
+
+  /**
+   * Восстанавливает cursor после drag lifecycle.
+   */
+  private syncNativeCursorFromLastPosition(): void {
+    const position = this.lastPointerPosition
+    if (!position || !this.pointerInside) {
+      this.nova.cursor('default')
+      return
+    }
+    this.syncNativeCursor(position.x, position.y)
   }
 
   /**

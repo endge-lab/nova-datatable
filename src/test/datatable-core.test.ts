@@ -2449,6 +2449,22 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('updates native cursor only over header resize handles', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 180, clientY: 14 }))
+    expect(app.canvas.element.style.cursor).toBe('col-resize')
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 80, clientY: 14 }))
+    expect(app.canvas.element.style.cursor).toBe('default')
+
+    root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 180, clientY: 80 }))
+    expect(app.canvas.element.style.cursor).toBe('default')
+
+    app.destroy()
+  })
+
   it('copies and pastes selected cells through typed column policies', async () => {
     const app = createApp()
     const root = mountRoot(app)
