@@ -13,9 +13,11 @@ import {
 } from '@endge/nova-ui-kit'
 import {
   NovaTextSelectionService,
+  parseNovaColor,
   type NovaTextSelectionRange,
   type NovaApp,
   type NovaDragEventMeta,
+  type NovaRectBatch,
   type NovaSchema,
   type NovaSurface,
 } from '@endge/nova'
@@ -300,6 +302,7 @@ const DATA_TABLE_OVERLAY_RENDER_LAYERS: Array<DataTableRenderLayerId> = [
   'drag-menu-tooltip',
   'scrollbars',
 ]
+const DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY = 8
 
 /**
  * Создает внутренний render-layer cache.
@@ -323,6 +326,20 @@ function createRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
     templateCalls: 0,
     interactionRebuilds: 0,
     animatedLayerRebuilds: 0,
+  }
+}
+
+function createEmptyOverlayRectBatch(capacity: number): NovaRectBatch {
+  return {
+    count: capacity,
+    x: new Float32Array(capacity),
+    y: new Float32Array(capacity),
+    width: new Float32Array(capacity),
+    height: new Float32Array(capacity),
+    colors: new Float32Array(capacity * 4),
+    states: new Float32Array(capacity),
+    revision: 1,
+    staticRevision: 1,
   }
 }
 
@@ -382,6 +399,7 @@ export class DataTableRootNode<
   private activeRenderClip: DataTableCellRect | null = null
   private readonly renderLayers = createRenderLayerCache()
   private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
+  private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
   private lastPointerPosition: { x: number; y: number } | null = null
@@ -2055,6 +2073,12 @@ export class DataTableRootNode<
       this.syncEditingRect()
     }
     this.markRenderLayersDirtyForRefresh(kinds)
+    if (!requiresRuntimeSync && this.canRefreshRetainedHoverOverlay(kinds)) {
+      this.updateHoverOverlayBatch()
+      this.dirtyRetainedRender()
+      this.nova.invalidate()
+      return
+    }
     this.dirty({ update: requiresRuntimeSync, render: true })
     this.nova.invalidate()
   }
@@ -2063,10 +2087,30 @@ export class DataTableRootNode<
    * Определяет набор dirty-слоев из изменившихся props.
    */
   private resolveRefreshKindsForProps(changedKeys: Array<keyof DataTableRootResolvedProps<Row>>): Array<string> {
+    if (changedKeys.length > 0 && changedKeys.every(key => key === 'hoverAlpha')) {
+      return ['hover']
+    }
+    if (changedKeys.length > 0 && changedKeys.every(key => key === 'selectionAlpha')) {
+      return ['selection']
+    }
+    if (changedKeys.length > 0 && changedKeys.every(key => key === 'tooltipAlpha')) {
+      return ['tooltip']
+    }
     if (changedKeys.length > 0 && changedKeys.every(key => key === 'hoverAlpha' || key === 'selectionAlpha' || key === 'tooltipAlpha')) {
       return ['interaction']
     }
     return ['layout', 'data']
+  }
+
+  /**
+   * Проверяет, можно ли обновить hover через retained batch без render-frame rebuild.
+   */
+  private canRefreshRetainedHoverOverlay(kinds: Array<string>): boolean {
+    return kinds.length > 0
+      && kinds.every(kind => kind === 'hover')
+      && !this.props.interactionLayerTemplate
+      && !this.columnDragState?.active
+      && this.columnDragLayoutMotion.size === 0
   }
 
   /**
@@ -4928,29 +4972,68 @@ export class DataTableRootNode<
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderHoverOverlay(): void {
+    this.updateHoverOverlayBatch()
+    this.renderer.rects(this.hoverOverlayBatch)
+  }
+
+  /**
+   * Обновляет retained hover batch без пересборки grid render frame.
+   */
+  private updateHoverOverlayBatch(): void {
     const hover = this.hoverTarget
     const options = this.props.interaction.hover
-    if (this.resizeState || !hover || !options || options.mode === 'none' || this.props.hoverAlpha <= 0) return
-
-    const alpha = this.props.hoverAlpha
     const schema: NovaSchema = []
-    if (isGroupInteractionZone(hover.zone)) {
-      schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
-      this.emitSchema(schema)
-      return
+    if (!this.resizeState && hover && options && options.mode !== 'none' && this.props.hoverAlpha > 0) {
+      const alpha = this.props.hoverAlpha
+      if (isGroupInteractionZone(hover.zone)) {
+        schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
+      } else {
+        if (modeHasRow(options.mode)) {
+          schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
+        }
+        if (modeHasColumn(options.mode)) {
+          schema.push(...this.createColumnOverlayRects(hover, options.columnColor, alpha, options.pinned))
+        }
+        if (modeHasCell(options.mode) && options.cellColor) {
+          const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column, hover.zone)
+          if (cellRect) schema.push(this.createOverlayRect(cellRect, options.cellColor, alpha))
+        }
+      }
     }
 
-    if (modeHasRow(options.mode)) {
-      schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
+    this.writeOverlaySchemaToRectBatch(schema, this.hoverOverlayBatch)
+  }
+
+  /**
+   * Записывает простые rect overlay в retained batch.
+   */
+  private writeOverlaySchemaToRectBatch(schema: NovaSchema, batch: NovaRectBatch): void {
+    for (let index = 0; index < batch.count; index += 1) {
+      const item = schema[index]
+      const colorOffset = index * 4
+      if (!item || item.type !== 'rect') {
+        batch.x[index] = 0
+        batch.y[index] = 0
+        batch.width[index] = 0
+        batch.height[index] = 0
+        batch.colors[colorOffset] = 0
+        batch.colors[colorOffset + 1] = 0
+        batch.colors[colorOffset + 2] = 0
+        batch.colors[colorOffset + 3] = 0
+        continue
+      }
+      const color = parseNovaColor(item.styles?.background, 0x00000000)
+      batch.x[index] = item.x
+      batch.y[index] = item.y
+      batch.width[index] = Math.max(0, item.width)
+      batch.height[index] = Math.max(0, item.height)
+      batch.colors[colorOffset] = color.r
+      batch.colors[colorOffset + 1] = color.g
+      batch.colors[colorOffset + 2] = color.b
+      batch.colors[colorOffset + 3] = color.a * (item.styles?.opacity ?? 1)
     }
-    if (modeHasColumn(options.mode)) {
-      schema.push(...this.createColumnOverlayRects(hover, options.columnColor, alpha, options.pinned))
-    }
-    if (modeHasCell(options.mode) && options.cellColor) {
-      const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column, hover.zone)
-      if (cellRect) schema.push(this.createOverlayRect(cellRect, options.cellColor, alpha))
-    }
-    this.emitSchema(schema)
+    batch.revision = (batch.revision ?? 0) + 1
+    batch.staticRevision = (batch.staticRevision ?? 0) + 1
   }
 
   /**
@@ -5498,7 +5581,7 @@ export class DataTableRootNode<
       if (previous && target && !sameInteractionGeometry(previous, target)) {
         this.hoverTarget = target
         this.syncTooltipTarget(target)
-        this.refresh(['interaction'])
+        this.refresh(['hover'])
       }
       return
     }
@@ -5518,7 +5601,7 @@ export class DataTableRootNode<
     } else {
       this.animateInteractionAlpha('hoverAlpha', 0)
     }
-    this.refresh(['interaction'])
+    this.refresh(['hover'])
   }
 
   /**

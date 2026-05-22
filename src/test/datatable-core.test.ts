@@ -126,6 +126,10 @@ function installStorageMock(): Storage {
   return storage
 }
 
+function expectFillStyleNear(styleSets: Array<[PropertyKey, unknown]>, colorPrefix: string): void {
+  expect(styleSets.some(([property, value]) => property === 'fillStyle' && String(value).startsWith(colorPrefix))).toBe(true)
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
   document.body.innerHTML = ''
@@ -2488,9 +2492,9 @@ describe('DataTable Root runtime', () => {
       width: 120,
       height: 36,
     })
-    expect(styleSets).toContainEqual(['fillStyle', 'rgba(37, 99, 235, 0.08)'])
-    expect(styleSets).toContainEqual(['fillStyle', 'rgba(14, 165, 233, 0.07)'])
-    expect(styleSets).toContainEqual(['fillStyle', 'rgba(250, 204, 21, 0.16)'])
+    expectFillStyleNear(styleSets, 'rgba(37, 99, 235, 0.07')
+    expectFillStyleNear(styleSets, 'rgba(14, 165, 233, 0.07')
+    expectFillStyleNear(styleSets, 'rgba(250, 204, 21, 0.16')
 
     app.destroy()
   })
@@ -2652,9 +2656,9 @@ describe('DataTable Root runtime', () => {
       height: 20,
     })
     const styleSets = canvasContextStub?.__sets as Array<[PropertyKey, unknown]>
-    expect(styleSets).toContainEqual(['fillStyle', 'rgba(37, 99, 235, 0.08)'])
-    expect(styleSets).not.toContainEqual(['fillStyle', 'rgba(14, 165, 233, 0.07)'])
-    expect(styleSets).not.toContainEqual(['fillStyle', 'rgba(250, 204, 21, 0.16)'])
+    expectFillStyleNear(styleSets, 'rgba(37, 99, 235, 0.07')
+    expect(styleSets.some(([property, value]) => property === 'fillStyle' && String(value).startsWith('rgba(14, 165, 233, 0.07'))).toBe(false)
+    expect(styleSets.some(([property, value]) => property === 'fillStyle' && String(value).startsWith('rgba(250, 204, 21, 0.16'))).toBe(false)
 
     root.eventHandlers.mousedown?.(new MouseEvent('mousedown', { clientX: 210, clientY: 36 }))
     expect(root.getApi().getInteraction().selection).toBeNull()
