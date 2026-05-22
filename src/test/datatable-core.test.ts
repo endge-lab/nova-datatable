@@ -2275,12 +2275,41 @@ describe('DataTable Root runtime', () => {
 
   it('renders default cell backgrounds as plain rects and draws grid lines separately', () => {
     const app = createApp()
-    const root = mountRoot(app)
+    const surface = app.createSurface('datatable-default-background-span-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 640, height: 240 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(30),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            columns: [
+              { id: 'name', field: 'name', width: 120 },
+              { id: 'status', field: 'status', width: 100 },
+              { id: 'amount', field: 'amount', width: 100 },
+              { id: 'amount2', field: 'amount', width: 100 },
+              { id: 'status2', field: 'status', width: 100 },
+            ],
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
     const bodyLayer = (root as any).renderLayers.get('body-static')
     const bodySchema = bodyLayer.segments.flatMap((segment: { schema: NovaSchema }) => segment.schema)
+    const textCount = bodySchema.filter(item => item.type === 'text').length
+    const backgroundCount = bodySchema.filter(item => item.type === 'rect').length
 
     expect(bodySchema.some(item => item.type === 'line')).toBe(true)
     expect(bodySchema.some(item => item.type === 'rect' && ((item as any).styles?.border?.width ?? 0) > 0)).toBe(false)
+    expect(backgroundCount).toBeLessThan(textCount)
 
     app.destroy()
   })

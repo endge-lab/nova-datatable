@@ -4028,6 +4028,7 @@ export class DataTableRootNode<
 
       const { row, rowId } = renderedRow
       gridRowTops.push(y)
+      const contexts: Array<DataTableCellContext<Row>> = []
       for (const columnRect of columnRects) {
         const rect: DataTableCellRect = {
           x: columnRect.x,
@@ -4035,7 +4036,7 @@ export class DataTableRootNode<
           width: columnRect.width,
           height: rowHeight,
         }
-        this.renderCell(schema, {
+        contexts.push({
           row,
           rowId,
           rowIndex,
@@ -4052,6 +4053,10 @@ export class DataTableRootNode<
           store: this.store,
           api: this.api,
         })
+      }
+      this.renderDefaultCellBackgroundSpans(schema, contexts)
+      for (const context of contexts) {
+        this.renderCell(schema, context, this.canBatchDefaultCellBackground(context))
       }
     })
 
@@ -4091,6 +4096,63 @@ export class DataTableRootNode<
       const x = columnRect.x + columnRect.width
       schema.push({ type: 'line', x1: x, y1, x2: x, y2, styles: style })
     }
+  }
+
+  /**
+   * Объединяет соседние фоны default cells в row spans.
+   */
+  private renderDefaultCellBackgroundSpans(
+    schema: NovaSchema,
+    contexts: Array<DataTableCellContext<Row>>,
+  ): void {
+    let active: { x: number; y: number; width: number; height: number; background: string } | null = null
+
+    const flush = () => {
+      if (!active) return
+      schema.push({
+        type: 'rect',
+        x: active.x,
+        y: active.y,
+        width: active.width,
+        height: active.height,
+        styles: { background: active.background },
+      })
+      active = null
+    }
+
+    for (const context of contexts) {
+      if (!this.canBatchDefaultCellBackground(context)) {
+        flush()
+        continue
+      }
+      const rect = context.rect
+      const background = this.resolveDefaultCellVisualBackground(context)
+      if (active
+        && active.background === background
+        && Math.abs(active.y - rect.y) < 0.5
+        && Math.abs(active.height - rect.height) < 0.5
+        && Math.abs(active.x + active.width - rect.x) < 0.5) {
+        active.width += rect.width
+        continue
+      }
+      flush()
+      active = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        background,
+      }
+    }
+
+    flush()
+  }
+
+  /**
+   * Проверяет, можно ли рисовать фон default cell в объединенном row span.
+   */
+  private canBatchDefaultCellBackground(context: DataTableCellContext<Row>): boolean {
+    return !this.resolveCellTemplate(context)
   }
 
   /**
@@ -4320,11 +4382,9 @@ export class DataTableRootNode<
   /**
    * Выполняет отрисовку DataTableRootNode.
    */
-  private renderCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
+  private renderCell(schema: NovaSchema, context: DataTableCellContext<Row>, defaultBackgroundPainted = false): void {
     const startIndex = schema.length
-    const template = context.zone === 'header'
-      ? context.column.headerTemplate ?? this.props.headerTemplate
-      : context.column.cellTemplate ?? this.props.cellTemplate
+    const template = this.resolveCellTemplate(context)
     if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
 
     if (template) {
@@ -4337,11 +4397,20 @@ export class DataTableRootNode<
       return
     }
 
-    this.renderDefaultCell(schema, context)
+    this.renderDefaultCell(schema, context, defaultBackgroundPainted)
     this.applyTextPerformanceHints(schema, startIndex)
     this.applyCellEnterOpacity(schema, context, startIndex)
     this.applyColumnDragCellOpacity(schema, context, startIndex)
     this.registerTextSelectionTargets(schema, context, startIndex)
+  }
+
+  /**
+   * Возвращает template для ячейки с учетом header/body precedence.
+   */
+  private resolveCellTemplate(context: DataTableCellContext<Row>): ((context: DataTableCellContext<Row>) => NovaSchema) | undefined {
+    return context.zone === 'header'
+      ? context.column.headerTemplate ?? this.props.headerTemplate
+      : context.column.cellTemplate ?? this.props.cellTemplate
   }
 
   /**
@@ -4506,20 +4575,12 @@ export class DataTableRootNode<
   /**
    * Выполняет отрисовку DataTableRootNode.
    */
-  private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>): void {
+  private renderDefaultCell(schema: NovaSchema, context: DataTableCellContext<Row>, backgroundPainted = false): void {
     const { rect, value, column, zone, rowIndex } = context
     const isHeader = zone === 'header'
-    const isPinned = zone === 'pinned-top' || zone === 'pinned-bottom'
     const searchState = this.viewPipeline.getSearchState()
     const searchHighlight = searchState.query.highlight ?? 'cell-text'
-    const cellSearchHighlighted = !isHeader
-      && context.state.searchMatched
-      && searchHighlightHasCell(searchHighlight)
-    const background = isHeader && context.state.dragging
-      ? '#dbeafe'
-      : cellSearchHighlighted
-      ? context.state.searchActive ? '#fff1f2' : '#fef3c7'
-      : this.resolveDefaultCellBackground(context, isHeader, isPinned, rowIndex)
+    const background = this.resolveDefaultCellVisualBackground(context)
     const color = isHeader ? '#172033' : '#263142'
     const text = String(value ?? '')
     const textRect = {
@@ -4531,8 +4592,8 @@ export class DataTableRootNode<
     const fontSize = this.fontSize
     const fontWeight = isHeader ? '700' : '500'
 
-    schema.push(
-      {
+    if (!backgroundPainted) {
+      schema.push({
         type: 'rect',
         x: rect.x,
         y: rect.y,
@@ -4541,28 +4602,29 @@ export class DataTableRootNode<
         styles: {
           background,
         },
-      },
-      {
-        type: 'text',
-        text,
-        ...textRect,
-        styles: {
-          color,
-          font: {
-            family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-            size: fontSize,
-            weight: fontWeight,
-            style: 'normal',
-          },
-          lineHeight: this.lineHeight,
-          align: {
-            horizontal: column.align,
-            vertical: 'middle',
-          },
-          ellipsis: true,
+      })
+    }
+
+    schema.push({
+      type: 'text',
+      text,
+      ...textRect,
+      styles: {
+        color,
+        font: {
+          family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
+          size: fontSize,
+          weight: fontWeight,
+          style: 'normal',
         },
+        lineHeight: this.lineHeight,
+        align: {
+          horizontal: column.align,
+          vertical: 'middle',
+        },
+        ellipsis: true,
       },
-    )
+    })
 
     if (!isHeader && context.state.searchRanges?.length && searchHighlightHasText(searchHighlight)) {
       schema.push(...this.renderDefaultCellSearchTextHighlights(
@@ -4790,6 +4852,23 @@ export class DataTableRootNode<
     if (isPinnedRow) return '#fff8df'
     if (isHeader) return '#eef3f8'
     return rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
+  }
+
+  /**
+   * Возвращает визуальный фон default cell с учетом search/drag states.
+   */
+  private resolveDefaultCellVisualBackground(context: DataTableCellContext<Row>): string {
+    const isHeader = context.zone === 'header'
+    const isPinned = context.zone === 'pinned-top' || context.zone === 'pinned-bottom'
+    const searchState = this.viewPipeline.getSearchState()
+    const searchHighlight = searchState.query.highlight ?? 'cell-text'
+    const cellSearchHighlighted = !isHeader
+      && context.state.searchMatched
+      && searchHighlightHasCell(searchHighlight)
+
+    if (isHeader && context.state.dragging) return '#dbeafe'
+    if (cellSearchHighlighted) return context.state.searchActive ? '#fff1f2' : '#fef3c7'
+    return this.resolveDefaultCellBackground(context, isHeader, isPinned, context.rowIndex)
   }
 
   /**
