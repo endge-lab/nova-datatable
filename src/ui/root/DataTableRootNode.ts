@@ -5092,8 +5092,8 @@ export class DataTableRootNode<
     const cached = this.cellTemplateFragmentCache.get(cacheKey)
     if (cached && Math.abs(cached.width - context.rect.width) < 0.5 && Math.abs(cached.height - context.rect.height) < 0.5) {
       this.renderLayerDiagnostics.templateCacheHits += 1
-      this.touchCellTemplateFragmentCache(cacheKey, cached)
-      schema.push(...this.createAbsoluteSchemaFromCellFragment(cached.schema, context.rect))
+      this.touchCellTemplateFragmentCache(cached)
+      this.appendAbsoluteSchemaFromCellFragment(schema, cached.schema, context.rect)
       return
     }
 
@@ -5225,14 +5225,18 @@ export class DataTableRootNode<
   /**
    * Создает absolute schema из локального fragment cache.
    */
-  private createAbsoluteSchemaFromCellFragment(schema: NovaSchema, rect: DataTableCellRect): NovaSchema {
-    return schema.map(item => {
+  private appendAbsoluteSchemaFromCellFragment(
+    target: NovaSchema,
+    schema: NovaSchema,
+    rect: DataTableCellRect,
+  ): void {
+    for (const item of schema) {
       const next = this.cloneSchemaItem(item)
       const positional = next as { x?: unknown; y?: unknown }
       if (typeof positional.x === 'number') positional.x += rect.x
       if (typeof positional.y === 'number') positional.y += rect.y
-      return next
-    })
+      target.push(next)
+    }
   }
 
   /**
@@ -5266,12 +5270,8 @@ export class DataTableRootNode<
   /**
    * Обновляет LRU-порядок fragment cache.
    */
-  private touchCellTemplateFragmentCache(cacheKey: string, fragment: DataTableCellTemplateFragment): void {
-    this.cellTemplateFragmentCache.delete(cacheKey)
-    this.cellTemplateFragmentCache.set(cacheKey, {
-      ...fragment,
-      createdAt: performance.now(),
-    })
+  private touchCellTemplateFragmentCache(fragment: DataTableCellTemplateFragment): void {
+    fragment.createdAt = performance.now()
   }
 
   /**
