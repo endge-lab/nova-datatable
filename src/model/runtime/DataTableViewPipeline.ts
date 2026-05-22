@@ -757,6 +757,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
     if (this.view.serverRowModel && this.view.serverRowModel.enabled && this.view.serverRowModel.authoritative) return false
     if (this.store.rowCount > this.maxClientRows) return false
+    if (this.store.loadedRowCount < this.store.rowCount) return false
     if (mode === 'client') return true
     if (mode === 'server') return false
     return this.store.loadedRowCount >= this.store.rowCount

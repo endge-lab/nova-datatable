@@ -1478,6 +1478,42 @@ describe('DataTableViewPipeline', () => {
     expect(pipeline.getViewRowAt(5_000)?.storeIndex).toBe(5_000)
     expect(getRow).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps sparse lazy stores sparse below maxClientRows until rows are materialized', () => {
+    const getRow = vi.fn((index: number) => rows(1, index)[0])
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 100_000,
+        getRow,
+      },
+    })
+    const pipeline = new DataTableViewPipeline<Row>(store)
+
+    pipeline.sync({
+      columns: resolveDataTableColumns<Row>([
+        { id: 'amount', field: 'amount', sortable: true },
+        { id: 'status', field: 'status', filter: 'set' },
+      ], {}, new Map(), store),
+      performance: normalizeDataTablePerformance({ maxClientRows: 100_000 }),
+      view: {
+        sorting: { mode: 'client', multi: true, headerClick: 'append', controlled: false, initial: [{ columnId: 'amount', direction: 'desc' }] },
+        filtering: { mode: 'client', controlled: false, initial: [{ columnId: 'status', operator: 'equals', value: 'active' }] },
+        search: false,
+        serverRowModel: false,
+        rowOrdering: false,
+        columnOrdering: false,
+        filterUi: false,
+        grouping: false,
+        groupingPinnedRows: false,
+      },
+    })
+
+    expect(pipeline.rowCount).toBe(100_000)
+    expect(getRow).not.toHaveBeenCalled()
+    expect(pipeline.getViewRowAt(999)?.storeIndex).toBe(999)
+    expect(getRow).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('DataTableSummaryEngine', () => {
