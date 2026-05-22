@@ -503,6 +503,8 @@ export interface DataTableResolvedPerformanceOptions {
 export interface DataTableRenderDiagnostics {
   layerRebuilds: Record<string, number>
   templateCalls: number
+  templateCacheHits: number
+  templateCacheMisses: number
   interactionRebuilds: number
   animatedLayerRebuilds: number
   schemaSegments: number

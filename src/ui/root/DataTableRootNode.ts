@@ -261,6 +261,13 @@ interface DataTableRectBatchRenderSegment {
 
 type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment
 
+interface DataTableCellTemplateFragment {
+  schema: NovaSchema
+  width: number
+  height: number
+  createdAt: number
+}
+
 interface DataTableRenderLayerCache {
   id: DataTableRenderLayerId
   segments: Array<DataTableRenderSegment>
@@ -332,6 +339,8 @@ function createRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
   return {
     layerRebuilds: Object.fromEntries(DATA_TABLE_RENDER_LAYER_IDS.map(id => [id, 0])) as Record<DataTableRenderLayerId, number>,
     templateCalls: 0,
+    templateCacheHits: 0,
+    templateCacheMisses: 0,
     interactionRebuilds: 0,
     animatedLayerRebuilds: 0,
     schemaSegments: 0,
@@ -416,6 +425,9 @@ export class DataTableRootNode<
   private readonly renderLayers = createRenderLayerCache()
   private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
+  private readonly cellTemplateIds = new WeakMap<(context: DataTableCellContext<Row>) => NovaSchema, number>()
+  private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
+  private nextCellTemplateId = 1
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
   private lastPointerPosition: { x: number; y: number } | null = null
@@ -2188,6 +2200,7 @@ export class DataTableRootNode<
    */
   private refresh(kinds: Array<string> = ['data', 'layout', 'viewport']): void {
     this.invalidation.bumpMany(kinds)
+    this.invalidateCellTemplateFragmentCacheForRefresh(kinds)
     const requiresRuntimeSync = this.refreshRequiresRuntimeSync(kinds)
     if (requiresRuntimeSync) {
       this.resolvedColumns = this.resolveColumns()
@@ -2269,6 +2282,23 @@ export class DataTableRootNode<
         return
       }
       this.markRenderLayersDirty(DATA_TABLE_OVERLAY_RENDER_LAYERS)
+    }
+  }
+
+  /**
+   * Сбрасывает cache пользовательских cell fragments только для изменений, которые
+   * реально меняют данные, view или геометрию. Pixel-scroll оставляет cache живым.
+   */
+  private invalidateCellTemplateFragmentCacheForRefresh(kinds: Array<string>): void {
+    if (kinds.length === 0 || kinds.some(kind => [
+      'data',
+      'layout',
+      'columns',
+      'view',
+      'zoom',
+      'custom',
+    ].includes(kind))) {
+      this.cellTemplateFragmentCache.clear()
     }
   }
 
@@ -3525,6 +3555,8 @@ export class DataTableRootNode<
     return {
       layerRebuilds: { ...this.renderLayerDiagnostics.layerRebuilds },
       templateCalls: this.renderLayerDiagnostics.templateCalls,
+      templateCacheHits: this.renderLayerDiagnostics.templateCacheHits,
+      templateCacheMisses: this.renderLayerDiagnostics.templateCacheMisses,
       interactionRebuilds: this.renderLayerDiagnostics.interactionRebuilds,
       animatedLayerRebuilds: this.renderLayerDiagnostics.animatedLayerRebuilds,
       schemaSegments: this.renderLayerDiagnostics.schemaSegments,
@@ -3541,6 +3573,8 @@ export class DataTableRootNode<
     const next = createRenderLayerDiagnostics()
     Object.assign(this.renderLayerDiagnostics.layerRebuilds, next.layerRebuilds)
     this.renderLayerDiagnostics.templateCalls = 0
+    this.renderLayerDiagnostics.templateCacheHits = 0
+    this.renderLayerDiagnostics.templateCacheMisses = 0
     this.renderLayerDiagnostics.interactionRebuilds = 0
     this.renderLayerDiagnostics.animatedLayerRebuilds = 0
     this.renderLayerDiagnostics.schemaSegments = 0
@@ -4490,8 +4524,7 @@ export class DataTableRootNode<
     if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
 
     if (template) {
-      this.renderLayerDiagnostics.templateCalls += 1
-      schema.push(...template(context))
+      this.appendCellTemplateSchema(schema, context, template)
       this.applyTextPerformanceHints(schema, startIndex)
       this.applyCellEnterOpacity(schema, context, startIndex)
       this.applyColumnDragCellOpacity(schema, context, startIndex)
@@ -4513,6 +4546,218 @@ export class DataTableRootNode<
     return context.zone === 'header'
       ? context.column.headerTemplate ?? this.props.headerTemplate
       : context.column.cellTemplate ?? this.props.cellTemplate
+  }
+
+  /**
+   * Добавляет schema пользовательского template с cache по visible cell fragment.
+   */
+  private appendCellTemplateSchema(
+    schema: NovaSchema,
+    context: DataTableCellContext<Row>,
+    template: (context: DataTableCellContext<Row>) => NovaSchema,
+  ): void {
+    if (!this.canUseCellTemplateFragmentCache(context)) {
+      this.renderLayerDiagnostics.templateCalls += 1
+      schema.push(...template(context))
+      return
+    }
+
+    const cacheKey = this.createCellTemplateFragmentCacheKey(context, template)
+    const cached = this.cellTemplateFragmentCache.get(cacheKey)
+    if (cached && Math.abs(cached.width - context.rect.width) < 0.5 && Math.abs(cached.height - context.rect.height) < 0.5) {
+      this.renderLayerDiagnostics.templateCacheHits += 1
+      this.touchCellTemplateFragmentCache(cacheKey, cached)
+      schema.push(...this.createAbsoluteSchemaFromCellFragment(cached.schema, context.rect))
+      return
+    }
+
+    this.renderLayerDiagnostics.templateCalls += 1
+    this.renderLayerDiagnostics.templateCacheMisses += 1
+    const rendered = template(context)
+    schema.push(...rendered)
+    this.storeCellTemplateFragment(cacheKey, rendered, context.rect)
+  }
+
+  /**
+   * Проверяет, можно ли cache'ировать template ячейки без изменения поведения.
+   */
+  private canUseCellTemplateFragmentCache(context: DataTableCellContext<Row>): boolean {
+    const textPerformance = this.props.performance.text
+    if (!textPerformance || textPerformance.cache === 'none') return false
+    if (context.zone !== 'header' && context.column.animated) return false
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return false
+    return true
+  }
+
+  /**
+   * Создает стабильный ключ fragment cache для текущей ячейки.
+   */
+  private createCellTemplateFragmentCacheKey(
+    context: DataTableCellContext<Row>,
+    template: (context: DataTableCellContext<Row>) => NovaSchema,
+  ): string {
+    return [
+      this.getCellTemplateId(template),
+      context.zone,
+      String(context.rowId),
+      context.column.id,
+      Math.round(context.rect.width * 10) / 10,
+      Math.round(context.rect.height * 10) / 10,
+      context.zone === 'header' ? this.invalidation.get('columns') : this.store.takeDataRevision(),
+      this.invalidation.get('view'),
+      this.invalidation.get('zoom'),
+      this.createCellTemplateStateSignature(context),
+    ].join('|')
+  }
+
+  /**
+   * Возвращает короткий id template-функции для cache key.
+   */
+  private getCellTemplateId(template: (context: DataTableCellContext<Row>) => NovaSchema): number {
+    const current = this.cellTemplateIds.get(template)
+    if (current) return current
+    const next = this.nextCellTemplateId
+    this.nextCellTemplateId += 1
+    this.cellTemplateIds.set(template, next)
+    return next
+  }
+
+  /**
+   * Собирает только те state-флаги, которые пользовательский DSL может читать.
+   */
+  private createCellTemplateStateSignature(context: DataTableCellContext<Row>): string {
+    const state = context.state
+    return [
+      state.hovered ? 1 : 0,
+      state.rowHovered ? 1 : 0,
+      state.columnHovered ? 1 : 0,
+      state.selected ? 1 : 0,
+      state.rowSelected ? 1 : 0,
+      state.columnSelected ? 1 : 0,
+      state.activeCell ? 1 : 0,
+      state.searchMatched ? 1 : 0,
+      state.searchActive ? 1 : 0,
+      state.searchRowMatched ? 1 : 0,
+      state.searchRowActive ? 1 : 0,
+      state.editing ? 1 : 0,
+      state.editingInvalid ? 1 : 0,
+      state.editPending ? 1 : 0,
+      state.dragging ? 1 : 0,
+      state.sorted ?? '',
+      state.sortPriority ?? '',
+      state.filtered ? 1 : 0,
+      state.searchMatchIndex ?? '',
+      state.searchRanges?.map(range => `${range.start}-${range.end}`).join(',') ?? '',
+    ].join(':')
+  }
+
+  /**
+   * Сохраняет schema в координатах ячейки, если fragment не использует внешнюю сцену.
+   */
+  private storeCellTemplateFragment(cacheKey: string, schema: NovaSchema, rect: DataTableCellRect): void {
+    if (!this.isCellTemplateSchemaLocal(schema, rect)) return
+    this.cellTemplateFragmentCache.set(cacheKey, {
+      schema: this.createRelativeSchemaForCellFragment(schema, rect),
+      width: rect.width,
+      height: rect.height,
+      createdAt: performance.now(),
+    })
+    this.trimCellTemplateFragmentCache()
+  }
+
+  /**
+   * Проверяет, что пользовательский template рисует внутри или около ячейки.
+   */
+  private isCellTemplateSchemaLocal(schema: NovaSchema, rect: DataTableCellRect): boolean {
+    const margin = Math.max(32, Math.min(96, rect.width))
+    const minX = rect.x - margin
+    const maxX = rect.x + rect.width + margin
+    const minY = rect.y - margin
+    const maxY = rect.y + rect.height + margin
+
+    return schema.every(item => {
+      const candidate = item as { x?: unknown; y?: unknown }
+      if (typeof candidate.x === 'number' && (candidate.x < minX || candidate.x > maxX)) return false
+      if (typeof candidate.y === 'number' && (candidate.y < minY || candidate.y > maxY)) return false
+      return true
+    })
+  }
+
+  /**
+   * Переводит absolute schema ячейки в локальные координаты fragment cache.
+   */
+  private createRelativeSchemaForCellFragment(schema: NovaSchema, rect: DataTableCellRect): NovaSchema {
+    return schema.map(item => {
+      const next = this.cloneSchemaItem(item)
+      const positional = next as { x?: unknown; y?: unknown }
+      if (typeof positional.x === 'number') positional.x -= rect.x
+      if (typeof positional.y === 'number') positional.y -= rect.y
+      return next
+    })
+  }
+
+  /**
+   * Создает absolute schema из локального fragment cache.
+   */
+  private createAbsoluteSchemaFromCellFragment(schema: NovaSchema, rect: DataTableCellRect): NovaSchema {
+    return schema.map(item => {
+      const next = this.cloneSchemaItem(item)
+      const positional = next as { x?: unknown; y?: unknown }
+      if (typeof positional.x === 'number') positional.x += rect.x
+      if (typeof positional.y === 'number') positional.y += rect.y
+      return next
+    })
+  }
+
+  /**
+   * Клонирует schema item так, чтобы последующие opacity/text hints не мутировали cache.
+   */
+  private cloneSchemaItem<T extends NovaSchema[number]>(item: T): T {
+    const source = item as Record<string, any>
+    const styles = source.styles && typeof source.styles === 'object'
+      ? {
+          ...source.styles,
+          font: source.styles.font && typeof source.styles.font === 'object' ? { ...source.styles.font } : source.styles.font,
+          align: source.styles.align && typeof source.styles.align === 'object' ? { ...source.styles.align } : source.styles.align,
+          border: source.styles.border && typeof source.styles.border === 'object' ? { ...source.styles.border } : source.styles.border,
+        }
+      : source.styles
+    const meta = source.meta && typeof source.meta === 'object'
+      ? {
+          ...source.meta,
+          textSelection: source.meta.textSelection && typeof source.meta.textSelection === 'object'
+            ? { ...source.meta.textSelection }
+            : source.meta.textSelection,
+        }
+      : source.meta
+    return {
+      ...source,
+      styles,
+      meta,
+    } as T
+  }
+
+  /**
+   * Обновляет LRU-порядок fragment cache.
+   */
+  private touchCellTemplateFragmentCache(cacheKey: string, fragment: DataTableCellTemplateFragment): void {
+    this.cellTemplateFragmentCache.delete(cacheKey)
+    this.cellTemplateFragmentCache.set(cacheKey, {
+      ...fragment,
+      createdAt: performance.now(),
+    })
+  }
+
+  /**
+   * Ограничивает fragment cache по memory budget и не дает ему расти при длинном scroll.
+   */
+  private trimCellTemplateFragmentCache(): void {
+    const limit = Math.max(1_000, Math.min(30_000, Math.floor(this.props.performance.memoryBudgetMb * 64)))
+    while (this.cellTemplateFragmentCache.size > limit) {
+      const first = this.cellTemplateFragmentCache.keys().next().value as string | undefined
+      if (!first) return
+      this.cellTemplateFragmentCache.delete(first)
+    }
   }
 
   /**
