@@ -8,6 +8,7 @@ import {
   type NovaApp,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
+import { createDataTableStore } from '@/model/module/DataTableStore'
 import { NovaDataTableSchema } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
@@ -133,6 +134,62 @@ function mountBenchRoot(rowCount: number, animated = false): { app: NovaApp<Test
   }
 }
 
+function mountLazyBenchRoot(rowCount: number): { app: NovaApp<TestEvents>; root: DataTableRootNode<BenchRow>; rangeCalls: () => number } {
+  const app = createApp()
+  let rangeCalls = 0
+  const store = createDataTableStore<BenchRow>({
+    rowKey: 'id',
+    source: {
+      rowCount,
+      loadRange: range => {
+        rangeCalls += 1
+        return rows(range.end - range.start).map((row, index) => ({
+          ...row,
+          id: `row-${range.start + index}`,
+          name: `Customer ${range.start + index}`,
+          amount: range.start + index,
+        }))
+      },
+    },
+  })
+  const surface = app.createSurface('datatable-render-layer-lazy-bench')
+  const columns = Array.from({ length: 54 }, (_item, index) => ({
+    id: `c-${index}`,
+    title: `C ${index}`,
+    field: index % 3 === 0 ? 'name' : index % 3 === 1 ? 'status' : 'amount',
+    width: 118,
+    pinned: index === 0 ? 'left' as const : index === 53 ? 'right' as const : undefined,
+  }))
+  const uiRoot = app.schema.createNode(surface, {
+    type: NovaUIKit.Root,
+    props: { width: 960, height: 520 },
+    children: [
+      {
+        type: NovaDataTableSchema.Root,
+        props: {
+          store,
+          rowKey: 'id',
+          rowHeight: 24,
+          headerHeight: 32,
+          overscanRows: 4,
+          overscanColumns: 1,
+          interaction: { motion: false },
+          performance: { maxClientRows: 100_000 },
+          columns,
+        },
+        layout: { width: '100%', height: '100%' },
+      },
+    ],
+  })
+  app.raph.run()
+  app.raph.run()
+  return {
+    app,
+    root: uiRoot.children[0] as DataTableRootNode<BenchRow>,
+    rangeCalls: () => rangeCalls,
+  }
+}
+
 describe('NovaDataTable render layer benchmarks', () => {
   bench('100 rows x 54 columns hover 1000 moves without template rebuilds', () => {
     const { app, root, calls } = mountBenchRoot(100)
@@ -168,4 +225,29 @@ describe('NovaDataTable render layer benchmarks', () => {
     if (calls() !== before) throw new Error('Large hover rebuilt cell templates')
     app.destroy()
   }, { iterations: 20 })
+
+  bench('100 rows x 54 columns vertical scroll keeps header and pinned layers cached', () => {
+    const { app, root } = mountBenchRoot(100)
+    ;(root as any).__resetRenderLayerDiagnostics()
+    for (let index = 0; index < 100; index += 1) {
+      root.getApi().scrollTo(0, index * 12)
+      app.raph.run()
+    }
+    const diagnostics = (root as any).__getRenderLayerDiagnostics()
+    if (diagnostics.layerRebuilds.header !== 0) throw new Error('Vertical scroll rebuilt header')
+    if (diagnostics.layerRebuilds.pinned !== 0) throw new Error('Vertical scroll rebuilt pinned rows')
+    app.destroy()
+  }, { iterations: 10 })
+
+  bench('100k lazy rows scroll coalesces ranges and keeps summary sparse', () => {
+    const { app, root, rangeCalls } = mountLazyBenchRoot(100_000)
+    ;(root as any).__resetRenderLayerDiagnostics()
+    const before = rangeCalls()
+    for (let index = 0; index < 100; index += 1) {
+      root.getApi().scrollTo(0, index * 24)
+      app.raph.run()
+    }
+    if (rangeCalls() - before > 4) throw new Error('Scroll issued too many lazy range requests')
+    app.destroy()
+  }, { iterations: 10 })
 })

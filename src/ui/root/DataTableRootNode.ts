@@ -839,12 +839,15 @@ export class DataTableRootNode<
    * Обновляет scroll с clamping.
    */
   setScroll(x: number, y: number): void {
-    const delta = Math.abs(x - this.scrollX) + Math.abs(y - this.scrollY)
+    const previousViewport = this.viewport
+    const previousScrollX = this.scrollX
+    const previousScrollY = this.scrollY
     this.scrollX = x
     this.scrollY = y
     this.viewport = this.createViewport()
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
+    const delta = Math.abs(this.scrollX - previousScrollX) + Math.abs(this.scrollY - previousScrollY)
     if (delta > this.rowHeight * 4) this.suppressCellEnterUntil = performance.now() + 160
     if (delta > 0) {
       this.suppressTextSelectionIndexFor('scroll')
@@ -854,7 +857,29 @@ export class DataTableRootNode<
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
     this.syncEditingRect()
-    this.refresh(['viewport'])
+    this.refresh(this.resolveViewportScrollRefreshKinds(previousViewport, this.viewport))
+  }
+
+  /**
+   * Разделяет scroll invalidation по осям, чтобы вертикальный scroll не пересобирал header/pinned layers.
+   */
+  private resolveViewportScrollRefreshKinds(
+    previous: DataTableViewport,
+    next: DataTableViewport,
+  ): Array<string> {
+    const kinds: Array<string> = []
+    if (previous.scrollX !== next.scrollX
+      || previous.centerColumnOffset !== next.centerColumnOffset
+      || previous.centerColumnRange.start !== next.centerColumnRange.start
+      || previous.centerColumnRange.end !== next.centerColumnRange.end) {
+      kinds.push('viewport-scroll-x')
+    }
+    if (previous.scrollY !== next.scrollY
+      || previous.rowRange.start !== next.rowRange.start
+      || previous.rowRange.end !== next.rowRange.end) {
+      kinds.push('viewport-scroll-y')
+    }
+    return kinds.length > 0 ? kinds : ['scrollbar']
   }
 
   /**
@@ -1969,7 +1994,11 @@ export class DataTableRootNode<
       return
     }
 
-    if (this.store.rowCount > this.props.performance.maxClientRows) return
+    if (this.shouldUseSparseClientSummary()) {
+      this.syncSparseClientSummaryState()
+      return
+    }
+
     const revision = this.store.takeRevision()
     if (this.summaryState.source === 'client'
       && !this.summaryState.loading
@@ -1985,6 +2014,38 @@ export class DataTableRootNode<
     this.summaryState = {
       values: { ...result.values, rowCount: result.rowCount },
       rowCount: result.rowCount,
+      revision,
+      source: 'client',
+      loading: false,
+    }
+    this.props.onSummaryChange?.({ ...this.summaryState, values: { ...this.summaryState.values } })
+  }
+
+  /**
+   * Проверяет, можно ли считать client summary без materialized прохода по строкам.
+   */
+  private shouldUseSparseClientSummary(): boolean {
+    return this.store.rowCount >= this.props.performance.maxClientRows
+      || this.store.loadedRowCount < this.store.rowCount
+  }
+
+  /**
+   * Для lazy/large таблиц summary не должен сканировать viewRows на scroll.
+   */
+  private syncSparseClientSummaryState(): void {
+    const revision = this.store.takeStructureRevision()
+    if (this.summaryState.source === 'client'
+      && !this.summaryState.loading
+      && this.summaryState.revision === revision
+      && this.summaryState.rowCount === this.store.rowCount) {
+      return
+    }
+    this.summaryState = {
+      values: {
+        rowCount: this.store.rowCount,
+        loadedRowCount: this.store.loadedRowCount,
+      },
+      rowCount: this.store.rowCount,
       revision,
       source: 'client',
       loading: false,
@@ -2131,6 +2192,11 @@ export class DataTableRootNode<
       return
     }
 
+    if (kinds.some(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y')) {
+      this.markViewportScrollLayersDirty(kinds)
+      return
+    }
+
     if (kinds.includes('summary')) {
       this.markRenderLayersDirty(['group-summary', 'search', 'selection', 'interaction'])
     }
@@ -2142,6 +2208,27 @@ export class DataTableRootNode<
       }
       this.markRenderLayersDirty(DATA_TABLE_OVERLAY_RENDER_LAYERS)
     }
+  }
+
+  /**
+   * Помечает только слои, которые реально зависят от pixel scroll по соответствующей оси.
+   */
+  private markViewportScrollLayersDirty(kinds: Array<string>): void {
+    const layers = new Set<DataTableRenderLayerId>([
+      'body-static',
+      'body-animated',
+      'search',
+      'selection',
+      'interaction',
+      'drag-menu-tooltip',
+      'scrollbars',
+    ])
+    if (kinds.includes('viewport-scroll-x')) {
+      layers.add('header')
+      layers.add('pinned')
+      layers.add('group-summary')
+    }
+    this.markRenderLayersDirty([...layers])
   }
 
   /**

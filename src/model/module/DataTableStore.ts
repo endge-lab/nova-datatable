@@ -425,8 +425,10 @@ implements DataTableStoreApi<Row> {
   async ensureRange(range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext): Promise<void> {
     if (!this.source?.loadRange) return
 
-    const start = clampInteger(range.start, 0, this.rowCount)
-    const end = clampInteger(range.end, start, this.rowCount)
+    const requestedStart = clampInteger(range.start, 0, this.rowCount)
+    const requestedEnd = clampInteger(range.end, requestedStart, this.rowCount)
+    const { start, end } = this.resolveSourceRange(requestedStart, requestedEnd)
+    if (start === end) return
     if (this.isRangeLoaded(start, end)) return
 
     const key = `${start}:${end}:${JSON.stringify(query ?? {})}`
@@ -450,6 +452,21 @@ implements DataTableStoreApi<Row> {
 
     this.pendingRanges.set(key, promise)
     return promise
+  }
+
+  /**
+   * Расширяет visible range до page-aligned окна для lazy stores.
+   * Это коалесит scroll burst в один запрос страницы вместо exact-range запроса на каждый wheel event.
+   */
+  private resolveSourceRange(start: number, end: number): DataTableRange {
+    if (this.rowCount <= this.pageSize || end <= start) return { start, end }
+
+    const pageStart = Math.floor(start / this.pageSize) * this.pageSize
+    const pageEnd = Math.min(this.rowCount, Math.ceil(end / this.pageSize) * this.pageSize)
+    return {
+      start: pageStart,
+      end: Math.min(this.rowCount, pageEnd + this.pageSize),
+    }
   }
 
   /**

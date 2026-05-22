@@ -220,9 +220,30 @@ describe('DataTableStore', () => {
     await store.ensureRange({ start: 1_000, end: 1_004 })
 
     expect(store.rowCount).toBe(10_000_000)
-    expect(store.loadedRowCount).toBe(4)
+    expect(store.loadedRowCount).toBe(1_024)
     expect(store.getRowAt(1_002)?.id).toBe('row-1002')
-    expect(loadRange).toHaveBeenCalledWith({ start: 1_000, end: 1_004 }, undefined, undefined)
+    expect(loadRange).toHaveBeenCalledWith({ start: 512, end: 1_536 }, undefined, undefined)
+  })
+
+  it('coalesces lazy scroll bursts into page-aligned range requests', async () => {
+    const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 100_000,
+        loadRange,
+      },
+    })
+
+    await Promise.all([
+      store.ensureRange({ start: 542, end: 580 }),
+      store.ensureRange({ start: 550, end: 588 }),
+      store.ensureRange({ start: 560, end: 598 }),
+    ])
+
+    expect(loadRange).toHaveBeenCalledTimes(1)
+    expect(loadRange).toHaveBeenCalledWith({ start: 512, end: 1_536 }, undefined, undefined)
+    expect(store.getRowAt(580)?.id).toBe('row-580')
   })
 
   it('passes query state into lazy range adapters', async () => {
@@ -514,13 +535,15 @@ describe('DataTableServerRowModel', () => {
     })
     await expect(model.search({ text: 'Row 2' })).resolves.toMatchObject({ total: 1 })
 
+    const expectedQuery = { ...query, grouping: undefined }
     expect(loadRange).toHaveBeenCalledWith(
-      { start: 2, end: 4 },
-      query,
-      expect.objectContaining({ revision: 1, requestId: 1, signal: expect.objectContaining({ aborted: false }) }),
+      { start: 0, end: 1_024 },
+      expectedQuery,
+      expect.objectContaining({ revision: 1, requestId: 1, signal: expect.any(Object) }),
     )
-    expect(loadSummary).toHaveBeenCalledWith(query)
-    expect(search).toHaveBeenCalledWith({ text: 'Row 2' }, query, undefined, 'next')
+    expect(loadRange.mock.calls[0]?.[2]?.signal.aborted).toBe(false)
+    expect(loadSummary).toHaveBeenCalledWith(expectedQuery)
+    expect(search).toHaveBeenCalledWith({ text: 'Row 2' }, expectedQuery, undefined, 'next')
     expect(subscribe).toHaveBeenCalledTimes(2)
     expect(subscribe).toHaveBeenLastCalledWith(query, expect.any(Function))
     expect(model.snapshot()).toMatchObject({
@@ -2230,7 +2253,10 @@ describe('DataTable Root runtime', () => {
     ;(root as any).__resetRenderLayerDiagnostics()
     root.getApi().scrollTo(0, 80)
     app.raph.run()
-    expect((root as any).__getRenderLayerDiagnostics().layerRebuilds['body-static']).toBeGreaterThan(0)
+    const verticalScrollDiagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(verticalScrollDiagnostics.layerRebuilds['body-static']).toBeGreaterThan(0)
+    expect(verticalScrollDiagnostics.layerRebuilds.header).toBe(0)
+    expect(verticalScrollDiagnostics.layerRebuilds.pinned).toBe(0)
 
     ;(root as any).__resetRenderLayerDiagnostics()
     root.getApi().setRows(rows(80, 100))
@@ -2244,6 +2270,51 @@ describe('DataTable Root runtime', () => {
     expect(diagnostics.layerRebuilds.header).toBeGreaterThan(0)
     expect(diagnostics.layerRebuilds['body-static']).toBeGreaterThan(0)
 
+    app.destroy()
+  })
+
+  it('keeps lazy summary sparse during viewport scroll', () => {
+    const app = createApp()
+    const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
+    const store = createDataTableStore<Row>({
+      rowKey: 'id',
+      source: {
+        rowCount: 100_000,
+        loadRange,
+      },
+    })
+    const surface = app.createSurface('datatable-sparse-summary-scroll-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 640, height: 240 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            store,
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            performance: { maxClientRows: 100_000 },
+            columns: [
+              { id: 'name', field: 'name', width: 160 },
+              { id: 'status', field: 'status', width: 120 },
+              { id: 'amount', field: 'amount', width: 120 },
+            ],
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+    const getViewRows = vi.spyOn((root as any).viewPipeline, 'getViewRows')
+
+    root.getApi().scrollTo(0, 120)
+    app.raph.run()
+
+    expect(getViewRows).not.toHaveBeenCalled()
     app.destroy()
   })
 
