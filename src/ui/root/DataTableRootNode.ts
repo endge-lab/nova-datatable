@@ -471,6 +471,7 @@ export class DataTableRootNode<
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
   private readonly cellTemplateIds = new WeakMap<(context: DataTableCellContext<Row>) => NovaSchema, number>()
   private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
+  private readonly rectBatchColorCache = new Map<string, [number, number, number, number]>()
   private nextCellTemplateId = 1
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
@@ -3749,15 +3750,15 @@ export class DataTableRootNode<
     const height = new Float32Array(count)
 
     items.forEach((item, index) => {
-      const color = parseNovaColor(item.styles?.background)
+      const color = this.resolveRectBatchColor(item.styles?.background)
       x[index] = item.x
       y[index] = item.y
       width[index] = item.width
       height[index] = item.height
-      colors[index * 4] = color.r
-      colors[index * 4 + 1] = color.g
-      colors[index * 4 + 2] = color.b
-      colors[index * 4 + 3] = color.a
+      colors[index * 4] = color[0]
+      colors[index * 4 + 1] = color[1]
+      colors[index * 4 + 2] = color[2]
+      colors[index * 4 + 3] = color[3]
     })
 
     return {
@@ -3771,6 +3772,20 @@ export class DataTableRootNode<
       revision: this.store.takeDataRevision() + this.invalidation.get('viewport') + this.invalidation.get('zoom') + 1,
       staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + this.invalidation.get('layout') + 1,
     }
+  }
+
+  /**
+   * Возвращает RGBA для solid rect batch с cache по строке цвета.
+   */
+  private resolveRectBatchColor(background: string | undefined): [number, number, number, number] {
+    const key = background ?? 'transparent'
+    const cached = this.rectBatchColorCache.get(key)
+    if (cached) return cached
+
+    const color = parseNovaColor(background)
+    const tuple: [number, number, number, number] = [color.r, color.g, color.b, color.a]
+    this.rectBatchColorCache.set(key, tuple)
+    return tuple
   }
 
   /**
