@@ -2053,7 +2053,7 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('updates hover state flags for row-column mode and emits enter/leave', () => {
+  it('updates hover overlay without rebuilding body templates and emits enter/leave', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
     const onCellEnter = vi.fn()
@@ -2086,6 +2086,8 @@ describe('DataTable Root runtime', () => {
     app.raph.run()
     app.raph.run()
     const root = uiRoot.children[0] as DataTableRootNode<Row>
+    const templateCallsBeforeHover = cellTemplate.mock.calls.length
+    ;(root as any).__resetRenderLayerDiagnostics()
 
     root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 210, clientY: 56 }))
     app.raph.run()
@@ -2093,19 +2095,113 @@ describe('DataTable Root runtime', () => {
     expect(root.getApi().getInteraction().hover?.rowId).toBe('row-1')
     expect(root.getApi().getInteraction().hover?.column.id).toBe('status')
     expect(onCellEnter).toHaveBeenCalledTimes(1)
-    const statusContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'status' && call[0].rowId === 'row-1')?.[0]
-    const nameContext = [...cellTemplate.mock.calls].reverse().find(call => call[0].column.id === 'name' && call[0].rowId === 'row-1')?.[0]
-    expect(statusContext.state.hovered).toBe(true)
-    expect(statusContext.state.cellHovered).toBe(true)
-    expect(statusContext.state.rowHovered).toBe(true)
-    expect(statusContext.state.columnHovered).toBe(true)
-    expect(statusContext.state.hoverAlpha).toBe(1)
-    expect(nameContext.state.rowHovered).toBe(true)
-    expect(nameContext.state.columnHovered).toBe(false)
+    expect(cellTemplate).toHaveBeenCalledTimes(templateCallsBeforeHover)
+    const hoverDiagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(hoverDiagnostics.templateCalls).toBe(0)
+    expect(hoverDiagnostics.interactionRebuilds).toBeGreaterThan(0)
+    expect(hoverDiagnostics.layerRebuilds['body-static']).toBe(0)
+    expect(hoverDiagnostics.layerRebuilds.header).toBe(0)
 
     root.eventHandlers.mouseleave?.(new MouseEvent('mouseleave'))
+    app.raph.run()
     expect(onCellLeave).toHaveBeenCalledTimes(1)
     expect(root.getApi().getInteraction().hover).toBeNull()
+    expect(cellTemplate).toHaveBeenCalledTimes(templateCallsBeforeHover)
+
+    app.destroy()
+  })
+
+  it('updates selection overlay without rebuilding visible cell templates', () => {
+    const app = createApp()
+    const cellTemplate = vi.fn(() => [])
+    const surface = app.createSurface('datatable-selection-layer-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 640, height: 240 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(20),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            interaction: { motion: false },
+            selection: { enabled: true, mode: 'cell', cardinality: 'multiple' },
+            columns: [
+              { id: 'name', field: 'name', width: 160, pinned: 'left', cellTemplate },
+              { id: 'status', field: 'status', width: 120, cellTemplate },
+              { id: 'amount', field: 'amount', width: 120, pinned: 'right', cellTemplate },
+            ],
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+    const templateCallsBeforeSelection = cellTemplate.mock.calls.length
+    ;(root as any).__resetRenderLayerDiagnostics()
+
+    root.getApi().selectCell('row-1', 'status')
+    app.raph.run()
+
+    expect(root.getApi().getSelection()?.activeCell).toMatchObject({ rowId: 'row-1', columnId: 'status' })
+    expect(cellTemplate).toHaveBeenCalledTimes(templateCallsBeforeSelection)
+    const diagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(diagnostics.templateCalls).toBe(0)
+    expect(diagnostics.layerRebuilds.selection).toBeGreaterThan(0)
+    expect(diagnostics.layerRebuilds['body-static']).toBe(0)
+
+    app.destroy()
+  })
+
+  it('rebuilds grid layers for viewport, data and column changes', () => {
+    const app = createApp()
+    const cellTemplate = vi.fn(() => [])
+    const surface = app.createSurface('datatable-grid-layer-dirty-test')
+    const uiRoot = app.schema.createNode(surface, {
+      type: NovaUIKit.Root,
+      props: { width: 640, height: 240 },
+      children: [
+        {
+          type: NovaDataTableSchema.Root,
+          props: {
+            rows: rows(80),
+            rowKey: 'id',
+            rowHeight: 20,
+            headerHeight: 30,
+            columns: [
+              { id: 'name', field: 'name', width: 160, pinned: 'left', resizable: true, cellTemplate },
+              { id: 'status', field: 'status', width: 120, cellTemplate },
+              { id: 'amount', field: 'amount', width: 120, pinned: 'right', resizable: true, cellTemplate },
+            ],
+          },
+          layout: { width: '100%', height: '100%' },
+        },
+      ],
+    })
+    app.raph.run()
+    app.raph.run()
+    const root = uiRoot.children[0] as DataTableRootNode<Row>
+
+    ;(root as any).__resetRenderLayerDiagnostics()
+    root.getApi().scrollTo(0, 80)
+    app.raph.run()
+    expect((root as any).__getRenderLayerDiagnostics().layerRebuilds['body-static']).toBeGreaterThan(0)
+
+    ;(root as any).__resetRenderLayerDiagnostics()
+    root.getApi().setRows(rows(80, 100))
+    app.raph.run()
+    expect((root as any).__getRenderLayerDiagnostics().layerRebuilds['body-static']).toBeGreaterThan(0)
+
+    ;(root as any).__resetRenderLayerDiagnostics()
+    root.getApi().setColumnWidth('status', 180)
+    app.raph.run()
+    const diagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(diagnostics.layerRebuilds.header).toBeGreaterThan(0)
+    expect(diagnostics.layerRebuilds['body-static']).toBeGreaterThan(0)
 
     app.destroy()
   })
@@ -2188,6 +2284,14 @@ describe('DataTable Root runtime', () => {
     await Promise.resolve()
 
     expect(acquireLoop).toHaveBeenCalledWith('nova-datatable:animated-cells')
+    ;(root as any).__resetRenderLayerDiagnostics()
+    ;(root as any).markRenderLayersDirty(['body-animated'])
+    ;(root as any).dirty({ render: true })
+    app.invalidate()
+    app.raph.run()
+    const diagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(diagnostics.layerRebuilds['body-animated']).toBeGreaterThan(0)
+    expect(diagnostics.layerRebuilds['body-static']).toBe(0)
     app.destroy()
     expect(release).toHaveBeenCalledTimes(1)
   })

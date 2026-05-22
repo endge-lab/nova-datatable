@@ -230,6 +230,102 @@ interface RenderedGroupRow<Row extends Record<string, any>> {
 
 type RenderedTableRow<Row extends Record<string, any>> = RenderedRow<Row> | RenderedGroupRow<Row>
 
+type DataTableRenderLayerId =
+  | 'base'
+  | 'header'
+  | 'body-static'
+  | 'body-animated'
+  | 'pinned'
+  | 'group-summary'
+  | 'search'
+  | 'selection'
+  | 'interaction'
+  | 'drag-menu-tooltip'
+  | 'scrollbars'
+
+interface DataTableRenderSegment {
+  schema: NovaSchema
+  clip?: DataTableCellRect
+}
+
+interface DataTableRenderLayerCache {
+  id: DataTableRenderLayerId
+  segments: Array<DataTableRenderSegment>
+  dirty: boolean
+  initialized: boolean
+  rebuilds: number
+}
+
+interface DataTableRenderLayerDiagnostics {
+  layerRebuilds: Record<DataTableRenderLayerId, number>
+  templateCalls: number
+  interactionRebuilds: number
+  animatedLayerRebuilds: number
+}
+
+const DATA_TABLE_RENDER_LAYER_IDS: Array<DataTableRenderLayerId> = [
+  'base',
+  'header',
+  'body-static',
+  'body-animated',
+  'pinned',
+  'group-summary',
+  'search',
+  'selection',
+  'interaction',
+  'drag-menu-tooltip',
+  'scrollbars',
+]
+
+const DATA_TABLE_GRID_RENDER_LAYERS: Array<DataTableRenderLayerId> = [
+  'base',
+  'header',
+  'body-static',
+  'body-animated',
+  'pinned',
+  'group-summary',
+]
+
+const DATA_TABLE_TEXT_SELECTION_SOURCE_LAYERS: Array<DataTableRenderLayerId> = [
+  'header',
+  'body-static',
+  'body-animated',
+  'pinned',
+]
+
+const DATA_TABLE_OVERLAY_RENDER_LAYERS: Array<DataTableRenderLayerId> = [
+  'search',
+  'selection',
+  'interaction',
+  'drag-menu-tooltip',
+  'scrollbars',
+]
+
+/**
+ * Создает внутренний render-layer cache.
+ */
+function createRenderLayerCache(): Map<DataTableRenderLayerId, DataTableRenderLayerCache> {
+  return new Map(DATA_TABLE_RENDER_LAYER_IDS.map(id => [id, {
+    id,
+    segments: [],
+    dirty: true,
+    initialized: false,
+    rebuilds: 0,
+  }]))
+}
+
+/**
+ * Создает диагностику внутренних render layers.
+ */
+function createRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
+  return {
+    layerRebuilds: Object.fromEntries(DATA_TABLE_RENDER_LAYER_IDS.map(id => [id, 0])) as Record<DataTableRenderLayerId, number>,
+    templateCalls: 0,
+    interactionRebuilds: 0,
+    animatedLayerRebuilds: 0,
+  }
+}
+
 /**
  * Корневой Nova-node таблицы, который владеет store, viewport, column widths и render pass.
  */
@@ -282,6 +378,10 @@ export class DataTableRootNode<
   private suppressTextSelectionIndexUntil = 0
   private textRefinementUntil = 0
   private visibleAnimatedCells = false
+  private activeRenderLayerId: DataTableRenderLayerId | null = null
+  private activeRenderClip: DataTableCellRect | null = null
+  private readonly renderLayers = createRenderLayerCache()
+  private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
   private lastPointerPosition: { x: number; y: number } | null = null
@@ -656,10 +756,8 @@ export class DataTableRootNode<
    * Рендерит все видимые зоны таблицы.
    */
   override render(): void {
-    const rootSchema = buildBoxSchema(this.props, this.width, this.height)
-    if (rootSchema.length > 0) this.renderer.schema(rootSchema)
     this.textSelection.configure(resolveCoreTextSelectionOptions(this.props.textSelection))
-    this.textSelection.beginFrame()
+    if (this.shouldRebuildTextSelectionTargets()) this.textSelection.beginFrame()
     this.renderGrid()
     this.continueTextRefinementIfNeeded()
   }
@@ -716,7 +814,7 @@ export class DataTableRootNode<
     if (changedKeys.includes('history')) this.transactionHistory.configure(this.props.history)
     if (changedKeys.includes('editing') && this.props.editing === false) this.cancelEdit()
     if (changedKeys.includes('rows') && this.props.rows && !this.props.store) this.store.setRows(this.props.rows)
-    this.refresh(['layout', 'data'])
+    this.refresh(this.resolveRefreshKindsForProps(changedKeys))
   }
 
   /**
@@ -1949,12 +2047,88 @@ export class DataTableRootNode<
    */
   private refresh(kinds: Array<string> = ['data', 'layout', 'viewport']): void {
     this.invalidation.bumpMany(kinds)
-    this.resolvedColumns = this.resolveColumns()
-    this.syncViewPipeline()
-    this.viewport = this.createViewport()
-    this.syncEditingRect()
-    this.dirty({ update: true, render: true })
+    const requiresRuntimeSync = this.refreshRequiresRuntimeSync(kinds)
+    if (requiresRuntimeSync) {
+      this.resolvedColumns = this.resolveColumns()
+      this.syncViewPipeline()
+      this.viewport = this.createViewport()
+      this.syncEditingRect()
+    }
+    this.markRenderLayersDirtyForRefresh(kinds)
+    this.dirty({ update: requiresRuntimeSync, render: true })
     this.nova.invalidate()
+  }
+
+  /**
+   * Определяет набор dirty-слоев из изменившихся props.
+   */
+  private resolveRefreshKindsForProps(changedKeys: Array<keyof DataTableRootResolvedProps<Row>>): Array<string> {
+    if (changedKeys.length > 0 && changedKeys.every(key => key === 'hoverAlpha' || key === 'selectionAlpha' || key === 'tooltipAlpha')) {
+      return ['interaction']
+    }
+    return ['layout', 'data']
+  }
+
+  /**
+   * Проверяет, нужен ли runtime-sync для текущего refresh.
+   */
+  private refreshRequiresRuntimeSync(kinds: Array<string>): boolean {
+    if (kinds.length === 0) return true
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return true
+    return kinds.some(kind => !['interaction', 'hover', 'selection', 'tooltip', 'scrollbar'].includes(kind))
+  }
+
+  /**
+   * Помечает render layers грязными по типам invalidation.
+   */
+  private markRenderLayersDirtyForRefresh(kinds: Array<string>): void {
+    if (kinds.length === 0 || kinds.some(kind => ['data', 'layout', 'columns', 'viewport', 'view', 'zoom', 'custom'].includes(kind))) {
+      this.markRenderLayersDirty(DATA_TABLE_RENDER_LAYER_IDS)
+      return
+    }
+
+    if (kinds.includes('summary')) {
+      this.markRenderLayersDirty(['group-summary', 'search', 'selection', 'interaction'])
+    }
+
+    if (kinds.some(kind => ['interaction', 'hover', 'selection', 'tooltip', 'scrollbar'].includes(kind))) {
+      if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) {
+        this.markRenderLayersDirty(DATA_TABLE_RENDER_LAYER_IDS)
+        return
+      }
+      this.markRenderLayersDirty(DATA_TABLE_OVERLAY_RENDER_LAYERS)
+    }
+  }
+
+  /**
+   * Помечает конкретные render layers грязными.
+   */
+  private markRenderLayersDirty(layers: Array<DataTableRenderLayerId>): void {
+    for (const id of layers) {
+      const layer = this.renderLayers.get(id)
+      if (layer) layer.dirty = true
+    }
+  }
+
+  /**
+   * Проверяет, будет ли пересобираться индекс выделяемого текста.
+   */
+  private shouldRebuildTextSelectionTargets(): boolean {
+    if (!this.props.textSelection || !this.props.textSelection.enabled) return false
+    return DATA_TABLE_TEXT_SELECTION_SOURCE_LAYERS.some(id => {
+      const layer = this.renderLayers.get(id)
+      return !layer || layer.dirty || !layer.initialized
+    })
+  }
+
+  /**
+   * Проверяет, будут ли пересобраны указанные render layers.
+   */
+  private willRebuildLayers(layers: Array<DataTableRenderLayerId>): boolean {
+    return layers.some(id => {
+      const layer = this.renderLayers.get(id)
+      return !layer || layer.dirty || !layer.initialized
+    })
   }
 
   /**
@@ -3142,28 +3316,165 @@ export class DataTableRootNode<
   }
 
   /**
+   * Возвращает внутреннюю диагностику render layers для unit/bench проверок.
+   */
+  __getRenderLayerDiagnostics(): DataTableRenderLayerDiagnostics {
+    return {
+      layerRebuilds: { ...this.renderLayerDiagnostics.layerRebuilds },
+      templateCalls: this.renderLayerDiagnostics.templateCalls,
+      interactionRebuilds: this.renderLayerDiagnostics.interactionRebuilds,
+      animatedLayerRebuilds: this.renderLayerDiagnostics.animatedLayerRebuilds,
+    }
+  }
+
+  /**
+   * Сбрасывает внутреннюю диагностику render layers.
+   */
+  __resetRenderLayerDiagnostics(): void {
+    const next = createRenderLayerDiagnostics()
+    Object.assign(this.renderLayerDiagnostics.layerRebuilds, next.layerRebuilds)
+    this.renderLayerDiagnostics.templateCalls = 0
+    this.renderLayerDiagnostics.interactionRebuilds = 0
+    this.renderLayerDiagnostics.animatedLayerRebuilds = 0
+  }
+
+  /**
+   * Рендерит слой из cache или пересобирает его при необходимости.
+   */
+  private renderLayer(id: DataTableRenderLayerId, render: () => void): void {
+    const layer = this.renderLayers.get(id)
+    if (!layer) return
+
+    if (layer.dirty || !layer.initialized) {
+      const previousLayer = this.activeRenderLayerId
+      const previousClip = this.activeRenderClip
+      this.activeRenderLayerId = id
+      this.activeRenderClip = null
+      layer.segments = []
+      try {
+        render()
+      } finally {
+        this.activeRenderLayerId = previousLayer
+        this.activeRenderClip = previousClip
+      }
+      layer.initialized = true
+      layer.dirty = false
+      layer.rebuilds += 1
+      this.renderLayerDiagnostics.layerRebuilds[id] += 1
+      if (id === 'interaction') this.renderLayerDiagnostics.interactionRebuilds += 1
+      if (id === 'body-animated') this.renderLayerDiagnostics.animatedLayerRebuilds += 1
+    }
+
+    for (const segment of layer.segments) this.emitRenderSegment(segment)
+    if (id === 'body-animated' && layer.segments.length > 0) this.visibleAnimatedCells = true
+  }
+
+  /**
+   * Добавляет schema в текущий render layer или сразу в renderer.
+   */
+  private emitSchema(schema: NovaSchema): void {
+    if (schema.length === 0) return
+    const segment: DataTableRenderSegment = {
+      schema,
+      clip: this.activeRenderClip ? { ...this.activeRenderClip } : undefined,
+    }
+    const layer = this.activeRenderLayerId ? this.renderLayers.get(this.activeRenderLayerId) : null
+    if (layer) {
+      layer.segments.push(segment)
+      return
+    }
+    this.emitRenderSegment(segment)
+  }
+
+  /**
+   * Выполняет отрисовку render segment.
+   */
+  private emitRenderSegment(segment: DataTableRenderSegment): void {
+    if (segment.clip) {
+      this.renderer.clip(segment.clip.x, segment.clip.y, segment.clip.width, segment.clip.height)
+      this.renderer.schema(segment.schema)
+      this.renderer.clearClip()
+      return
+    }
+    this.renderer.schema(segment.schema)
+  }
+
+  /**
+   * Применяет clip к schema, созданным внутри callback.
+   */
+  private withRenderClip(clip: DataTableCellRect, render: () => void): void {
+    if (clip.width <= 0 || clip.height <= 0) return
+    const previousClip = this.activeRenderClip
+    this.activeRenderClip = clip
+    try {
+      render()
+    } finally {
+      this.activeRenderClip = previousClip
+    }
+  }
+
+  /**
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderGrid(): void {
+    const rebuildsCellLayers = this.willRebuildLayers(DATA_TABLE_TEXT_SELECTION_SOURCE_LAYERS)
+    if (rebuildsCellLayers) {
+      this.nextVisibleCellKeys = new Set()
+      this.cellEnterRenderCount = 0
+    }
+    this.visibleAnimatedCells = false
+
+    this.renderLayer('base', () => this.emitSchema(buildBoxSchema(this.props, this.width, this.height)))
+    this.renderLayer('header', () => this.renderHeaderLayer())
+    this.renderLayer('pinned', () => this.renderPinnedLayer())
+    this.renderLayer('body-static', () => this.renderBodyRows(false))
+    this.renderLayer('body-animated', () => this.renderBodyRows(true))
+    this.renderLayer('group-summary', () => this.renderPinnedBottomGroupPanel())
+    this.renderLayer('search', () => this.renderSearchOverlay())
+    this.renderLayer('selection', () => {
+      this.renderClipboardFeedbackOverlay()
+      this.renderTextSelectionOverlay()
+      this.renderSelectionOverlay()
+    })
+    this.renderLayer('interaction', () => {
+      this.renderHoverOverlay()
+      this.renderInteractionLayer()
+    })
+    this.renderLayer('drag-menu-tooltip', () => {
+      this.renderColumnDragOverlay()
+      this.renderColumnMenu()
+      this.renderTooltipLayer()
+    })
+    this.renderLayer('scrollbars', () => {
+      this.renderScrollbars()
+      this.renderScrollbarLayer()
+    })
+    if (rebuildsCellLayers) this.finalizeVisibleCellKeys()
+    this.queueAnimationLoopSync()
+  }
+
+  /**
+   * Рендерит header слой.
+   */
+  private renderHeaderLayer(): void {
     const headerY = 0
+    const filterRowHeight = this.filterRowHeight
+    const headerMainHeight = this.headerHeight - filterRowHeight
+    this.renderPartitionedRowZone('header', [{} as Row], headerY, headerMainHeight, false)
+    if (filterRowHeight > 0) this.renderFilterRow(headerY + headerMainHeight, filterRowHeight)
+  }
+
+  /**
+   * Рендерит pinned rows слой.
+   */
+  private renderPinnedLayer(): void {
     const pinnedRows = this.resolveEffectivePinnedRows()
     const topRows = pinnedRows.top ?? []
     const bottomRows = pinnedRows.bottom ?? []
-    const filterRowHeight = this.filterRowHeight
-    const headerMainHeight = this.headerHeight - filterRowHeight
-    this.nextVisibleCellKeys = new Set()
-    this.cellEnterRenderCount = 0
-    this.renderPartitionedRowZone('header', [{} as Row], headerY, headerMainHeight, false)
-
-    if (filterRowHeight > 0) {
-      this.renderFilterRow(headerY + headerMainHeight, filterRowHeight)
-    }
 
     if (topRows.length > 0) {
       this.renderPartitionedRowZone('pinned-top', topRows, this.headerHeight, this.rowHeight, false)
     }
-
-    this.renderBodyRows()
 
     if (bottomRows.length > 0) {
       this.renderPartitionedRowZone(
@@ -3174,20 +3485,6 @@ export class DataTableRootNode<
         false,
       )
     }
-
-    this.renderPinnedBottomGroupPanel()
-    this.renderSearchOverlay()
-    this.renderClipboardFeedbackOverlay()
-    this.renderTextSelectionOverlay()
-    this.renderInteractionOverlay()
-    this.renderInteractionLayer()
-    this.renderColumnDragOverlay()
-    this.renderColumnMenu()
-    this.renderTooltipLayer()
-    this.renderScrollbars()
-    this.renderScrollbarLayer()
-    this.finalizeVisibleCellKeys()
-    this.queueAnimationLoopSync()
   }
 
   /**
@@ -3199,6 +3496,8 @@ export class DataTableRootNode<
     yStart: number,
     rowHeight: number,
     useBodyIndex: boolean,
+    columnPredicate?: (column: DataTableResolvedColumn<Row>) => boolean,
+    includeGroupRows = true,
   ): void {
     const clipHeight = zone === 'body'
       ? this.viewport.bodyHeight
@@ -3218,6 +3517,8 @@ export class DataTableRootNode<
       clipY,
       this.viewport.bodyWidth,
       clipHeight,
+      columnPredicate,
+      includeGroupRows,
     )
 
     if (this.viewport.pinnedLeftWidth > 0) {
@@ -3232,6 +3533,8 @@ export class DataTableRootNode<
         clipY,
         this.viewport.pinnedLeftWidth,
         clipHeight,
+        columnPredicate,
+        includeGroupRows,
       )
     }
 
@@ -3247,6 +3550,8 @@ export class DataTableRootNode<
         clipY,
         this.viewport.pinnedRightWidth,
         clipHeight,
+        columnPredicate,
+        includeGroupRows,
       )
     }
   }
@@ -3254,7 +3559,7 @@ export class DataTableRootNode<
   /**
    * Выполняет отрисовку DataTableRootNode.
    */
-  private renderBodyRows(): void {
+  private renderBodyRows(animatedOnly: boolean): void {
     const rows: Array<RenderedTableRow<Row>> = []
     for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
       const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
@@ -3264,7 +3569,15 @@ export class DataTableRootNode<
     }
     if (rows.length === 0) return
 
-    this.renderPartitionedRowZone('body', rows, this.viewport.bodyY, this.rowHeight, true)
+    this.renderPartitionedRowZone(
+      'body',
+      rows,
+      this.viewport.bodyY,
+      this.rowHeight,
+      true,
+      column => animatedOnly ? !!column.animated : !column.animated,
+      !animatedOnly,
+    )
   }
 
   /**
@@ -3406,9 +3719,7 @@ export class DataTableRootNode<
       }
     }
 
-    this.renderer.clip(clipX, y, clipWidth, height)
-    this.renderer.schema(schema)
-    this.renderer.clearClip()
+    this.withRenderClip({ x: clipX, y, width: clipWidth, height }, () => this.emitSchema(schema))
   }
 
   /**
@@ -3490,12 +3801,14 @@ export class DataTableRootNode<
     clipY: number,
     clipWidth: number,
     clipHeight: number,
+    columnPredicate?: (column: DataTableResolvedColumn<Row>) => boolean,
+    includeGroupRows = true,
   ): void {
     if (clipWidth <= 0 || clipHeight <= 0) return
 
-    this.renderer.clip(clipX, clipY, clipWidth, clipHeight)
-    this.renderRowZone(zone, rows, yStart, rowHeight, useBodyIndex, columnRegion)
-    this.renderer.clearClip()
+    this.withRenderClip({ x: clipX, y: clipY, width: clipWidth, height: clipHeight }, () => {
+      this.renderRowZone(zone, rows, yStart, rowHeight, useBodyIndex, columnRegion, columnPredicate, includeGroupRows)
+    })
   }
 
   /**
@@ -3508,9 +3821,11 @@ export class DataTableRootNode<
     rowHeight: number,
     useBodyIndex: boolean,
     columnRegion: VisibleColumnRegion = 'all',
+    columnPredicate?: (column: DataTableResolvedColumn<Row>) => boolean,
+    includeGroupRows = true,
   ): void {
     const schema: NovaSchema = []
-    const columnRects = this.visibleColumnRects(columnRegion)
+    const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
 
     rows.forEach((rowInput, localIndex) => {
       const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
@@ -3520,7 +3835,7 @@ export class DataTableRootNode<
         : yStart + localIndex * rowHeight
 
       if (renderedRow.kind !== 'data') {
-        this.renderGroupLikeRow(schema, renderedRow, y, rowHeight, columnRegion)
+        if (includeGroupRows) this.renderGroupLikeRow(schema, renderedRow, y, rowHeight, columnRegion)
         return
       }
 
@@ -3552,7 +3867,7 @@ export class DataTableRootNode<
       }
     })
 
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -3790,6 +4105,7 @@ export class DataTableRootNode<
     if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
 
     if (template) {
+      this.renderLayerDiagnostics.templateCalls += 1
       schema.push(...template(context))
       this.applyTextPerformanceHints(schema, startIndex)
       this.applyCellEnterOpacity(schema, context, startIndex)
@@ -3941,8 +4257,11 @@ export class DataTableRootNode<
       if (!this.animationLoopLease) {
         this.animationLoopLease = this.nova.raph.acquireLoop('nova-datatable:animated-cells')
       }
+      if (this.visibleAnimatedCells) this.markRenderLayersDirty(['body-animated'])
+      if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) this.markRenderLayersDirty(DATA_TABLE_RENDER_LAYER_IDS)
       this.visibleAnimatedCells = false
       this.dirty({ render: true })
+      this.nova.invalidate()
       return
     }
 
@@ -4173,7 +4492,7 @@ export class DataTableRootNode<
         },
       }]
     })
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4461,7 +4780,7 @@ export class DataTableRootNode<
       }
     }
 
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4530,7 +4849,7 @@ export class DataTableRootNode<
       )
     }
 
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4602,9 +4921,7 @@ export class DataTableRootNode<
     const schema = template(this.createGroupTemplateContext(rendered, rect, true))
     if (schema.length === 0) return
 
-    this.renderer.clip(rect.x, rect.y, rect.width, rect.height)
-    this.renderer.schema(schema)
-    this.renderer.clearClip()
+    this.withRenderClip(rect, () => this.emitSchema(schema))
   }
 
   /**
@@ -4619,7 +4936,7 @@ export class DataTableRootNode<
     const schema: NovaSchema = []
     if (isGroupInteractionZone(hover.zone)) {
       schema.push(...this.createRowOverlayRects(hover, options.rowColor, alpha, options.pinned))
-      if (schema.length > 0) this.renderer.schema(schema)
+      this.emitSchema(schema)
       return
     }
 
@@ -4633,7 +4950,7 @@ export class DataTableRootNode<
       const cellRect = this.clipRectToColumnRegion(hover.rect, hover.column, hover.zone)
       if (cellRect) schema.push(this.createOverlayRect(cellRect, options.cellColor, alpha))
     }
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4655,7 +4972,7 @@ export class DataTableRootNode<
       const rect = this.resolveSelectionCellRect(activeCell.rowIndex, activeCell.columnId)
       if (rect) schema.push(this.createOverlayRect(rect, 'rgba(37, 99, 235, 0.03)', 1, this.props.selection.visuals.activeCellBorderColor))
     }
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4682,7 +4999,7 @@ export class DataTableRootNode<
       rects: hoverRects,
       state,
     })
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4758,7 +5075,7 @@ export class DataTableRootNode<
       })
     }
 
-    this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4820,7 +5137,7 @@ export class DataTableRootNode<
       )
     })
 
-    this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -4872,7 +5189,7 @@ export class DataTableRootNode<
       opacity: alpha,
     } satisfies TooltipProps)
     this.applyTooltipMotion(schema, alpha)
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -7185,7 +7502,7 @@ export class DataTableRootNode<
       schema.push(...createNovaScrollbarSchema(geometry.horizontal, state))
     }
 
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
@@ -7196,7 +7513,7 @@ export class DataTableRootNode<
     if (!template || this.props.scrollbars === false) return
 
     const schema = template(this.createScrollbarLayerContext())
-    if (schema.length > 0) this.renderer.schema(schema)
+    this.emitSchema(schema)
   }
 
   /**
