@@ -504,6 +504,8 @@ export class DataTableRootNode<
   private gestureActive = false
   private pendingWheelScroll: { x: number; y: number } | null = null
   private wheelScrollFrame = 0
+  private scrollLodUntil = 0
+  private scrollLodTimer: ReturnType<typeof setTimeout> | null = null
   private deltaFlushQueued = false
   private readonly handleEditingKeydown = (event: KeyboardEvent) => this.handleEditingKeydownEvent(event)
   private readonly handleKeyboardNavigationKeydown = (event: KeyboardEvent) => this.handleKeyboardNavigationKeydownEvent(event)
@@ -561,6 +563,7 @@ export class DataTableRootNode<
     this.setupEditingKeyboardEvents()
     this.addDisposer(() => {
       this.cancelPendingWheelScroll()
+      this.clearScrollLodTimer()
       this.releaseAnimationLoop()
       this.serverRowModel.dispose()
       this.teardownTrackpadGestureEvents()
@@ -924,6 +927,8 @@ export class DataTableRootNode<
     const previousScrollY = this.scrollY
     this.scrollX = x
     this.scrollY = y
+    const requestedDelta = Math.abs(x - previousScrollX) + Math.abs(y - previousScrollY)
+    if (requestedDelta > 0) this.activateScrollLod(requestedDelta)
     this.viewport = this.createViewport()
     this.scrollX = this.viewport.scrollX
     this.scrollY = this.viewport.scrollY
@@ -999,6 +1004,65 @@ export class DataTableRootNode<
     }
     this.wheelScrollFrame = 0
     this.pendingWheelScroll = null
+  }
+
+  /**
+   * Временно уменьшает overscan на активной прокрутке, чтобы scroll frame не
+   * строил offscreen ячейки, которые пользователь не видит.
+   */
+  private activateScrollLod(delta: number): void {
+    if (!this.canUseScrollLod()) return
+
+    const text = this.props.performance.text
+    const baseDuration = text ? text.refineAfterScrollMs : 120
+    const duration = Math.max(90, Math.min(220, baseDuration + (delta > this.rowHeight * 4 ? 60 : 0)))
+    this.scrollLodUntil = Math.max(this.scrollLodUntil, performance.now() + duration)
+    this.scheduleScrollLodExit(duration)
+  }
+
+  /**
+   * Проверяет, можно ли включать scroll LOD для текущего performance profile.
+   */
+  private canUseScrollLod(): boolean {
+    const text = this.props.performance.text
+    return !text || text.mode !== 'quality'
+  }
+
+  /**
+   * Возвращает true, пока таблица находится в активной scroll/pan фазе.
+   */
+  private isScrollLodActive(): boolean {
+    return this.canUseScrollLod() && performance.now() < this.scrollLodUntil
+  }
+
+  /**
+   * Планирует восстановление нормального overscan после завершения scroll burst.
+   */
+  private scheduleScrollLodExit(delay: number): void {
+    this.clearScrollLodTimer()
+    this.scrollLodTimer = setTimeout(() => this.finishScrollLodIfIdle(), Math.max(16, delay))
+  }
+
+  /**
+   * Восстанавливает обычный overscan, если scroll burst действительно завершился.
+   */
+  private finishScrollLodIfIdle(): void {
+    this.scrollLodTimer = null
+    const remaining = this.scrollLodUntil - performance.now()
+    if (remaining > 0) {
+      this.scheduleScrollLodExit(remaining)
+      return
+    }
+    this.refresh(['viewport'])
+  }
+
+  /**
+   * Очищает timer scroll LOD.
+   */
+  private clearScrollLodTimer(): void {
+    if (!this.scrollLodTimer) return
+    clearTimeout(this.scrollLodTimer)
+    this.scrollLodTimer = null
   }
 
   /**
@@ -2643,8 +2707,8 @@ export class DataTableRootNode<
       height: this.height || this.props.height,
       rowHeight: this.rowHeight,
       headerHeight: this.headerHeight,
-      overscanRows: this.props.overscanRows,
-      overscanColumns: this.props.overscanColumns,
+      overscanRows: this.resolveEffectiveOverscanRows(),
+      overscanColumns: this.resolveEffectiveOverscanColumns(),
       rowCount: this.viewPipeline.rowCount,
       columns: this.resolvedColumns,
       pinnedTopCount: pinnedRows.top?.length ?? 0,
@@ -2652,6 +2716,22 @@ export class DataTableRootNode<
       scrollX: this.scrollX,
       scrollY: this.scrollY,
     })
+  }
+
+  /**
+   * Возвращает overscan строк с учетом активной scroll/pan LOD-фазы.
+   */
+  private resolveEffectiveOverscanRows(): number {
+    if (!this.isScrollLodActive()) return this.props.overscanRows
+    return Math.min(this.props.overscanRows, 2)
+  }
+
+  /**
+   * Возвращает overscan колонок с учетом активной scroll/pan LOD-фазы.
+   */
+  private resolveEffectiveOverscanColumns(): number {
+    if (!this.isScrollLodActive()) return this.props.overscanColumns
+    return Math.min(this.props.overscanColumns, 1)
   }
 
   /**

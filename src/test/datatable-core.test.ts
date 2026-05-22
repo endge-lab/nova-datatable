@@ -2370,6 +2370,42 @@ describe('DataTable Root runtime', () => {
     }
   })
 
+  it('uses reduced overscan during active scroll and restores it after idle', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      rows: rows(1_000),
+      rowHeight: 20,
+      headerHeight: 30,
+      overscanRows: 12,
+      overscanColumns: 3,
+      performance: {
+        text: {
+          visible: true,
+          mode: 'fast',
+          renderMode: 'run-atlas',
+          refineAfterScrollMs: 120,
+        },
+      },
+    } as never)
+    app.raph.run()
+
+    root.getApi().scrollTo(0, 220)
+    app.raph.run()
+    const activeViewport = root.getApi().getViewport()
+
+    expect(activeViewport.rowRange.start).toBe(9)
+
+    ;(root as any).scrollLodUntil = 0
+    ;(root as any).finishScrollLodIfIdle()
+    app.raph.run()
+    const idleViewport = root.getApi().getViewport()
+
+    expect(idleViewport.rowRange.start).toBe(0)
+
+    app.destroy()
+  })
+
   it('keeps lazy summary sparse during viewport scroll', () => {
     const app = createApp()
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
