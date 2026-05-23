@@ -470,6 +470,7 @@ export class DataTableRootNode<
   private activeRenderClip: DataTableCellRect | null = null
   private renderViewState: DataTableViewState | null = null
   private renderColumnPartitions: DataTableRenderColumnPartitions<Row> | null = null
+  private readonly renderCellTemplateByColumnZone = new Map<string, ((context: DataTableCellContext<Row>) => NovaSchema) | false>()
   private readonly renderVisibleColumnRects = new Map<string, Array<VisibleColumnRect<Row>>>()
   private readonly renderSortIndexByColumn = new Map<string, number>()
   private readonly renderFilteredColumnIds = new Set<string>()
@@ -4014,6 +4015,7 @@ export class DataTableRootNode<
    */
   private prepareRenderPassIndexes(viewState: DataTableViewState): void {
     this.renderVisibleColumnRects.clear()
+    this.renderCellTemplateByColumnZone.clear()
     this.renderSortIndexByColumn.clear()
     this.renderFilteredColumnIds.clear()
     this.renderColumnPartitions = this.createColumnPartitions(this.resolvedColumns)
@@ -4029,6 +4031,7 @@ export class DataTableRootNode<
    */
   private clearRenderPassIndexes(): void {
     this.renderVisibleColumnRects.clear()
+    this.renderCellTemplateByColumnZone.clear()
     this.renderSortIndexByColumn.clear()
     this.renderFilteredColumnIds.clear()
     this.renderColumnPartitions = null
@@ -5044,9 +5047,21 @@ export class DataTableRootNode<
    * Возвращает template для ячейки с учетом header/body precedence.
    */
   private resolveCellTemplate(context: DataTableCellContext<Row>): ((context: DataTableCellContext<Row>) => NovaSchema) | undefined {
-    return context.zone === 'header'
+    if (!this.renderViewState) {
+      return context.zone === 'header'
+        ? context.column.headerTemplate ?? this.props.headerTemplate
+        : context.column.cellTemplate ?? this.props.cellTemplate
+    }
+
+    const key = `${context.zone}:${context.column.id}`
+    const cached = this.renderCellTemplateByColumnZone.get(key)
+    if (cached !== undefined) return cached || undefined
+
+    const template = context.zone === 'header'
       ? context.column.headerTemplate ?? this.props.headerTemplate
       : context.column.cellTemplate ?? this.props.cellTemplate
+    this.renderCellTemplateByColumnZone.set(key, template ?? false)
+    return template
   }
 
   /**
