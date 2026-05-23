@@ -239,6 +239,7 @@ type DataTableRenderLayerId =
   | 'header'
   | 'body-static'
   | 'body-animated'
+  | 'body-strip'
   | 'pinned'
   | 'group-summary'
   | 'search'
@@ -333,6 +334,11 @@ interface DataTableRowBandCacheEntry {
   createdAt: number
 }
 
+interface DataTableBodyStripRange {
+  start: number
+  end: number
+}
+
 interface DataTableRenderLayerCache {
   id: DataTableRenderLayerId
   segments: Array<DataTableRenderSegment>
@@ -356,6 +362,7 @@ const DATA_TABLE_RENDER_LAYER_IDS: Array<DataTableRenderLayerId> = [
   'header',
   'body-static',
   'body-animated',
+  'body-strip',
   'pinned',
   'group-summary',
   'search',
@@ -378,6 +385,7 @@ const DATA_TABLE_TEXT_SELECTION_SOURCE_LAYERS: Array<DataTableRenderLayerId> = [
   'header',
   'body-static',
   'body-animated',
+  'body-strip',
   'pinned',
 ]
 
@@ -517,6 +525,7 @@ export class DataTableRootNode<
   private readonly renderFilteredColumnIds = new Set<string>()
   private readonly renderLayers = createRenderLayerCache()
   private readonly renderLayerDiagnostics = createRenderLayerDiagnostics()
+  private retainedBodyStripRanges: Array<DataTableBodyStripRange> = []
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
   private readonly cellTemplateIds = new WeakMap<(context: DataTableCellContext<Row>) => NovaSchema, number>()
   private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
@@ -1036,7 +1045,6 @@ export class DataTableRootNode<
     kinds: Array<string>,
   ): boolean {
     if (kinds.length !== 1 || kinds[0] !== 'viewport-scroll-y') return false
-    if (previous.rowRange.start !== next.rowRange.start || previous.rowRange.end !== next.rowRange.end) return false
     if (previous.scrollX !== next.scrollX) return false
     if (previous.centerColumnOffset !== next.centerColumnOffset) return false
     if (previous.centerColumnRange.start !== next.centerColumnRange.start || previous.centerColumnRange.end !== next.centerColumnRange.end) return false
@@ -1048,12 +1056,84 @@ export class DataTableRootNode<
     const bodyStatic = this.renderLayers.get('body-static')
     if (!bodyStatic || !bodyStatic.initialized || bodyStatic.dirty) return false
 
+    const stripRanges = this.resolveBodyStripRanges(previous, next)
+    const stripRowCount = stripRanges.reduce((sum, range) => sum + Math.max(0, range.end - range.start), 0)
+    if (stripRowCount > 0 && !bodyStatic.targetInitialized) return false
+    if (stripRowCount > Math.max(2, this.props.overscanRows)) return false
+
     this.retainRenderLayerForVerticalScroll(bodyStatic, dy)
     const bodyAnimated = this.renderLayers.get('body-animated')
     if (bodyAnimated && bodyAnimated.initialized && !bodyAnimated.dirty) {
       this.retainRenderLayerForVerticalScroll(bodyAnimated, dy)
     }
+    if (stripRanges.length > 0) {
+      this.addRetainedBodyStripRanges(stripRanges)
+      const stripLayer = this.renderLayers.get('body-strip')
+      if (stripLayer) stripLayer.dirty = true
+    } else {
+      const stripLayer = this.renderLayers.get('body-strip')
+      if (stripLayer && stripLayer.initialized && !stripLayer.dirty) this.translateRenderLayerSegments(stripLayer, 0, dy)
+    }
     return true
+  }
+
+  /**
+   * Возвращает строки, которые надо дорисовать поверх retained body target.
+   */
+  private resolveBodyStripRanges(previous: DataTableViewport, next: DataTableViewport): Array<DataTableBodyStripRange> {
+    const ranges: Array<DataTableBodyStripRange> = []
+    if (next.rowRange.start < previous.rowRange.start) {
+      ranges.push({
+        start: next.rowRange.start,
+        end: Math.min(previous.rowRange.start, next.rowRange.end),
+      })
+    }
+    if (next.rowRange.end > previous.rowRange.end) {
+      ranges.push({
+        start: Math.max(previous.rowRange.end, next.rowRange.start),
+        end: next.rowRange.end,
+      })
+    }
+    return ranges.filter(range => range.end > range.start)
+  }
+
+  /**
+   * Добавляет pending strip ranges и объединяет пересечения.
+   */
+  private addRetainedBodyStripRanges(ranges: Array<DataTableBodyStripRange>): void {
+    this.retainedBodyStripRanges = this.normalizeBodyStripRanges([
+      ...this.retainedBodyStripRanges,
+      ...ranges,
+    ])
+  }
+
+  /**
+   * Сбрасывает transient body strips после полного repaint body target.
+   */
+  private clearRetainedBodyStrips(): void {
+    if (this.retainedBodyStripRanges.length === 0) return
+    this.retainedBodyStripRanges = []
+    const stripLayer = this.renderLayers.get('body-strip')
+    if (stripLayer) stripLayer.dirty = true
+  }
+
+  /**
+   * Нормализует absolute row-index ranges.
+   */
+  private normalizeBodyStripRanges(ranges: Array<DataTableBodyStripRange>): Array<DataTableBodyStripRange> {
+    const sorted = ranges
+      .filter(range => range.end > range.start)
+      .sort((a, b) => a.start - b.start || a.end - b.end)
+    const normalized: Array<DataTableBodyStripRange> = []
+    for (const range of sorted) {
+      const previous = normalized[normalized.length - 1]
+      if (previous && range.start <= previous.end) {
+        previous.end = Math.max(previous.end, range.end)
+        continue
+      }
+      normalized.push({ ...range })
+    }
+    return normalized
   }
 
   /**
@@ -2524,11 +2604,13 @@ export class DataTableRootNode<
    */
   private markRenderLayersDirtyForRefresh(kinds: Array<string>): void {
     if (kinds.length === 0 || kinds.some(kind => ['data', 'layout', 'columns', 'viewport', 'view', 'zoom', 'custom'].includes(kind))) {
+      this.clearRetainedBodyStrips()
       this.markRenderLayersDirty(DATA_TABLE_RENDER_LAYER_IDS)
       return
     }
 
     if (kinds.some(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y' || kind === 'viewport-scroll-y-retained')) {
+      if (kinds.some(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y')) this.clearRetainedBodyStrips()
       this.markViewportScrollLayersDirty(kinds)
       return
     }
@@ -4203,6 +4285,7 @@ export class DataTableRootNode<
       this.renderLayer('pinned', () => this.renderPinnedLayer())
       this.renderLayer('body-static', () => this.renderBodyRows(false))
       this.renderLayer('body-animated', () => this.renderBodyRows(true))
+      this.renderLayer('body-strip', () => this.renderBodyStripLayer())
       this.renderLayer('group-summary', () => this.renderPinnedBottomGroupPanel())
       this.renderLayer('search', () => this.renderSearchOverlay())
       this.renderLayer('selection', () => {
@@ -4366,8 +4449,26 @@ export class DataTableRootNode<
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderBodyRows(animatedOnly: boolean): void {
+    this.renderBodyRowsForRange(animatedOnly, this.viewport.rowRange.start, this.viewport.rowRange.end)
+  }
+
+  /**
+   * Рендерит transient strip rows, которых еще нет в retained body target.
+   */
+  private renderBodyStripLayer(): void {
+    if (this.retainedBodyStripRanges.length === 0) return
+    for (const range of this.retainedBodyStripRanges) {
+      this.renderBodyRowsForRange(false, range.start, range.end)
+      this.renderBodyRowsForRange(true, range.start, range.end)
+    }
+  }
+
+  /**
+   * Выполняет отрисовку body rows для absolute view-index range.
+   */
+  private renderBodyRowsForRange(animatedOnly: boolean, start: number, end: number): void {
     const rows: Array<RenderedTableRow<Row>> = []
-    for (let rowIndex = this.viewport.rowRange.start; rowIndex < this.viewport.rowRange.end; rowIndex += 1) {
+    for (let rowIndex = start; rowIndex < end; rowIndex += 1) {
       const viewRow = this.viewPipeline.getViewRowAt(rowIndex)
       if (!viewRow) continue
       const renderedRow = this.createRenderedBodyRow(viewRow, rowIndex)

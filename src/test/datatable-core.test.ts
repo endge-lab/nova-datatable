@@ -2271,6 +2271,13 @@ describe('DataTable Root runtime', () => {
     }
 
     ;(root as any).__resetRenderLayerDiagnostics()
+    root.getApi().scrollTo(0, 20)
+    app.raph.run()
+    const stripScrollDiagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(stripScrollDiagnostics.layerRebuilds['body-static']).toBe(0)
+    expect(stripScrollDiagnostics.layerRebuilds['body-strip']).toBeGreaterThan(0)
+
+    ;(root as any).__resetRenderLayerDiagnostics()
     root.getApi().scrollTo(0, 420)
     app.raph.run()
     expect((root as any).__getRenderLayerDiagnostics().layerRebuilds['body-static']).toBeGreaterThan(0)
