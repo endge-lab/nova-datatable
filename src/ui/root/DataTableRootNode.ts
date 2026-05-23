@@ -298,6 +298,12 @@ interface DataTableCellTemplateFragment {
   createdAt: number
 }
 
+interface DataTableRenderColumnPartitions<Row extends Record<string, any>> {
+  left: Array<DataTableResolvedColumn<Row>>
+  center: Array<DataTableResolvedColumn<Row>>
+  right: Array<DataTableResolvedColumn<Row>>
+}
+
 interface DataTableRenderLayerCache {
   id: DataTableRenderLayerId
   segments: Array<DataTableRenderSegment>
@@ -463,6 +469,7 @@ export class DataTableRootNode<
   private activeRenderLayerId: DataTableRenderLayerId | null = null
   private activeRenderClip: DataTableCellRect | null = null
   private renderViewState: DataTableViewState | null = null
+  private renderColumnPartitions: DataTableRenderColumnPartitions<Row> | null = null
   private readonly renderVisibleColumnRects = new Map<string, Array<VisibleColumnRect<Row>>>()
   private readonly renderSortIndexByColumn = new Map<string, number>()
   private readonly renderFilteredColumnIds = new Set<string>()
@@ -4009,6 +4016,7 @@ export class DataTableRootNode<
     this.renderVisibleColumnRects.clear()
     this.renderSortIndexByColumn.clear()
     this.renderFilteredColumnIds.clear()
+    this.renderColumnPartitions = this.createColumnPartitions(this.resolvedColumns)
 
     viewState.sort.forEach((rule, index) => {
       this.renderSortIndexByColumn.set(rule.columnId, index)
@@ -4023,6 +4031,7 @@ export class DataTableRootNode<
     this.renderVisibleColumnRects.clear()
     this.renderSortIndexByColumn.clear()
     this.renderFilteredColumnIds.clear()
+    this.renderColumnPartitions = null
   }
 
   /**
@@ -5833,9 +5842,7 @@ export class DataTableRootNode<
       return dragRects
     }
 
-    const left = this.resolvedColumns.filter(column => column.pinned === 'left')
-    const center = this.resolvedColumns.filter(column => !column.pinned)
-    const right = this.resolvedColumns.filter(column => column.pinned === 'right')
+    const { left, center, right } = this.renderColumnPartitions ?? this.createColumnPartitions(this.resolvedColumns)
     const rects: Array<VisibleColumnRect<Row>> = []
 
     if (region === 'all' || region === 'left') {
@@ -5871,6 +5878,25 @@ export class DataTableRootNode<
 
     if (cacheKey) this.renderVisibleColumnRects.set(cacheKey, rects)
     return rects
+  }
+
+  /**
+   * Делит колонки на pinned/center один раз для render pass.
+   */
+  private createColumnPartitions(
+    columns: Array<DataTableResolvedColumn<Row>>,
+  ): DataTableRenderColumnPartitions<Row> {
+    const partitions: DataTableRenderColumnPartitions<Row> = {
+      left: [],
+      center: [],
+      right: [],
+    }
+    for (const column of columns) {
+      if (column.pinned === 'left') partitions.left.push(column)
+      else if (column.pinned === 'right') partitions.right.push(column)
+      else partitions.center.push(column)
+    }
+    return partitions
   }
 
   /**
