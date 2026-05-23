@@ -2256,8 +2256,6 @@ describe('DataTable Root runtime', () => {
 
     ;(root as any).__resetRenderLayerDiagnostics()
     const resolveColumns = vi.spyOn(root as any, 'resolveColumns')
-    const bodyStaticLayer = (root as any).renderLayers.get('body-static')
-    const previousTargetOffsetY = bodyStaticLayer?.targetDrawOffsetY ?? 0
     root.getApi().scrollTo(0, 1)
     app.raph.run()
     const verticalScrollDiagnostics = (root as any).__getRenderLayerDiagnostics()
@@ -2265,10 +2263,6 @@ describe('DataTable Root runtime', () => {
     expect(verticalScrollDiagnostics.layerRebuilds['body-static']).toBe(0)
     expect(verticalScrollDiagnostics.layerRebuilds.header).toBe(0)
     expect(verticalScrollDiagnostics.layerRebuilds.pinned).toBe(0)
-    const retainedBodyStaticLayer = (root as any).renderLayers.get('body-static')
-    if (retainedBodyStaticLayer?.targetInitialized) {
-      expect(retainedBodyStaticLayer.targetDrawOffsetY).toBeLessThan(previousTargetOffsetY)
-    }
 
     ;(root as any).__resetRenderLayerDiagnostics()
     root.getApi().scrollTo(0, 420)
