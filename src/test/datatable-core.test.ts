@@ -2254,12 +2254,15 @@ describe('DataTable Root runtime', () => {
     const root = uiRoot.children[0] as DataTableRootNode<Row>
 
     ;(root as any).__resetRenderLayerDiagnostics()
+    const resolveColumns = vi.spyOn(root as any, 'resolveColumns')
     root.getApi().scrollTo(0, 80)
     app.raph.run()
     const verticalScrollDiagnostics = (root as any).__getRenderLayerDiagnostics()
+    expect(resolveColumns).not.toHaveBeenCalled()
     expect(verticalScrollDiagnostics.layerRebuilds['body-static']).toBeGreaterThan(0)
     expect(verticalScrollDiagnostics.layerRebuilds.header).toBe(0)
     expect(verticalScrollDiagnostics.layerRebuilds.pinned).toBe(0)
+    resolveColumns.mockRestore()
 
     ;(root as any).__resetRenderLayerDiagnostics()
     root.getApi().setRows(rows(80, 100))

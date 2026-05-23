@@ -2364,6 +2364,7 @@ export class DataTableRootNode<
   private refreshRequiresRuntimeSync(kinds: Array<string>): boolean {
     if (kinds.length === 0) return true
     if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return true
+    if (kinds.every(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y' || kind === 'scrollbar')) return false
     return kinds.some(kind => !['interaction', 'hover', 'selection', 'tooltip', 'scrollbar'].includes(kind))
   }
 
