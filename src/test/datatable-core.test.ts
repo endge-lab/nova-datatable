@@ -2346,6 +2346,13 @@ describe('DataTable Root runtime', () => {
     expect(bodySchema.some(item => item.type === 'rect' && ((item as any).styles?.border?.width ?? 0) > 0)).toBe(false)
     expect(backgroundCount).toBeLessThan(textCount)
 
+    const cachedGridBatches = [...(root as any).retainedGridBatchCache.values()].map((entry: { batch: unknown }) => entry.batch)
+    expect(cachedGridBatches.length).toBeGreaterThan(0)
+    root.getApi().scrollTo(0, 420)
+    app.raph.run()
+    const reusedGridBatches = [...(root as any).retainedGridBatchCache.values()].map((entry: { batch: unknown }) => entry.batch)
+    expect(reusedGridBatches.some(batch => cachedGridBatches.includes(batch))).toBe(true)
+
     app.destroy()
   })
 

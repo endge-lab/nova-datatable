@@ -308,6 +308,12 @@ interface DataTableRetainedTextBatchEntry {
   createdAt: number
 }
 
+interface DataTableRetainedGridBatchEntry {
+  batch: NovaRectBatch
+  capacity: number
+  createdAt: number
+}
+
 type DataTableBatchableRect = Extract<NovaSchema[number], { type: 'rect' }>
 
 interface DataTableCellTemplateFragment {
@@ -531,6 +537,7 @@ export class DataTableRootNode<
   private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
   private readonly rowBandBackgroundCache = new Map<string, DataTableRowBandCacheEntry>()
   private readonly retainedTextBatchCache = new Map<string, DataTableRetainedTextBatchEntry>()
+  private readonly retainedGridBatchCache = new Map<string, DataTableRetainedGridBatchEntry>()
   private readonly rectBatchColorCache = new Map<string, [number, number, number, number]>()
   private nextCellTemplateId = 1
   private activeTextBatchScope = 'root'
@@ -2649,6 +2656,7 @@ export class DataTableRootNode<
       this.cellTemplateFragmentCache.clear()
       this.rowBandBackgroundCache.clear()
       this.retainedTextBatchCache.clear()
+      this.retainedGridBatchCache.clear()
     }
   }
 
@@ -4863,7 +4871,7 @@ export class DataTableRootNode<
     const horizontalCount = rowTops.length + 1
     const verticalCount = columnRects.length + 1
     const count = horizontalCount + verticalCount
-    const batch = this.createEmptyRectBatch(count)
+    const batch = this.resolveRetainedGridRectBatch(this.createRowZoneGridBatchKey(columnRects, rowTops.length, rowHeight), count)
     const color = this.resolveRectBatchColor('#d8e0ea')
     const rowWidth = Math.max(0, x2 - x1)
     const columnHeight = Math.max(0, y2 - y1)
@@ -4887,6 +4895,55 @@ export class DataTableRootNode<
     for (const columnRect of columnRects) write(columnRect.x + columnRect.width, y1, 1, columnHeight)
 
     this.emitRectBatch(batch)
+  }
+
+  /**
+   * Создает stable key для retained grid batch.
+   */
+  private createRowZoneGridBatchKey(
+    columnRects: Array<VisibleColumnRect<Row>>,
+    rowCount: number,
+    rowHeight: number,
+  ): string {
+    const first = columnRects[0]
+    const last = columnRects[columnRects.length - 1]
+    const clip = this.activeRenderClip
+    return [
+      this.activeRenderLayerId ?? 'direct',
+      clip ? Math.round(clip.x) : 0,
+      clip ? Math.round(clip.y) : 0,
+      clip ? Math.round(clip.width) : 0,
+      clip ? Math.round(clip.height) : 0,
+      first?.column.id ?? '',
+      last?.column.id ?? '',
+      columnRects.length,
+      Math.round((first?.x ?? 0) * 10) / 10,
+      Math.round(((last?.x ?? 0) + (last?.width ?? 0)) * 10) / 10,
+      rowCount,
+      Math.round(rowHeight * 10) / 10,
+    ].join(':')
+  }
+
+  /**
+   * Возвращает retained rect batch для плотной сетки.
+   */
+  private resolveRetainedGridRectBatch(key: string, count: number): NovaRectBatch {
+    const cached = this.retainedGridBatchCache.get(key)
+    if (cached && cached.capacity >= count) {
+      cached.createdAt = performance.now()
+      cached.batch.count = count
+      cached.batch.revision += 1
+      return cached.batch
+    }
+
+    const batch = this.createEmptyRectBatch(count)
+    this.retainedGridBatchCache.set(key, {
+      batch,
+      capacity: count,
+      createdAt: performance.now(),
+    })
+    this.trimRetainedGridBatchCache()
+    return batch
   }
 
   /**
@@ -6003,6 +6060,24 @@ export class DataTableRootNode<
       const first = this.cellTemplateFragmentCache.keys().next().value as string | undefined
       if (!first) return
       this.cellTemplateFragmentCache.delete(first)
+    }
+  }
+
+  /**
+   * Ограничивает retained grid batch cache.
+   */
+  private trimRetainedGridBatchCache(): void {
+    const limit = 256
+    while (this.retainedGridBatchCache.size > limit) {
+      let oldestKey: string | undefined
+      let oldestAt = Number.POSITIVE_INFINITY
+      for (const [key, entry] of this.retainedGridBatchCache) {
+        if (entry.createdAt >= oldestAt) continue
+        oldestAt = entry.createdAt
+        oldestKey = key
+      }
+      if (!oldestKey) return
+      this.retainedGridBatchCache.delete(oldestKey)
     }
   }
 
