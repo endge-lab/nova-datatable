@@ -270,6 +270,8 @@ interface DataTableTextBatchRenderSegment {
 type DataTableRenderSegment = DataTableSchemaRenderSegment | DataTableRectBatchRenderSegment | DataTableTextBatchRenderSegment
 
 interface DataTableTextBatchBuilder {
+  key: string
+  retainedKey: string
   align?: NovaTextBatch['align']
   font?: NovaTextBatch['font']
   lineHeight?: number
@@ -287,6 +289,22 @@ interface DataTableTextBatchBuilder {
   clipWidth: Array<number>
   clipHeight: Array<number>
   color: Array<string>
+}
+
+interface DataTableRetainedTextBatchEntry {
+  batch: NovaTextBatch
+  capacity: number
+  text: Array<string>
+  color: Array<string>
+  x: Float32Array
+  y: Float32Array
+  width: Float32Array
+  height: Float32Array
+  clipX: Float32Array
+  clipY: Float32Array
+  clipWidth: Float32Array
+  clipHeight: Float32Array
+  createdAt: number
 }
 
 type DataTableBatchableRect = Extract<NovaSchema[number], { type: 'rect' }>
@@ -491,8 +509,10 @@ export class DataTableRootNode<
   private readonly cellTemplateIds = new WeakMap<(context: DataTableCellContext<Row>) => NovaSchema, number>()
   private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
   private readonly rowBandBackgroundCache = new Map<string, DataTableRowBandCacheEntry>()
+  private readonly retainedTextBatchCache = new Map<string, DataTableRetainedTextBatchEntry>()
   private readonly rectBatchColorCache = new Map<string, [number, number, number, number]>()
   private nextCellTemplateId = 1
+  private activeTextBatchScope = 'root'
   private animationLoopLease: { release: () => void } | null = null
   private animationLoopSyncQueued = false
   private lastPointerPosition: { x: number; y: number } | null = null
@@ -2430,6 +2450,7 @@ export class DataTableRootNode<
     ].includes(kind))) {
       this.cellTemplateFragmentCache.clear()
       this.rowBandBackgroundCache.clear()
+      this.retainedTextBatchCache.clear()
     }
   }
 
@@ -4426,99 +4447,105 @@ export class DataTableRootNode<
     const textBatchBuilders = new Map<string, DataTableTextBatchBuilder>()
     const columnRects = this.visibleColumnRects(columnRegion).filter(rect => !columnPredicate || columnPredicate(rect.column))
     const gridRowTops: Array<number> = []
+    const previousTextBatchScope = this.activeTextBatchScope
+    this.activeTextBatchScope = this.createTextBatchScopeKey(zone, columnRegion)
 
-    rows.forEach((rowInput, localIndex) => {
-      const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
-      const { rowIndex, storeIndex } = renderedRow
-      const y = zone === 'body'
-        ? this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
-        : yStart + localIndex * rowHeight
+    try {
+      rows.forEach((rowInput, localIndex) => {
+        const renderedRow = this.normalizeRenderedRow(zone, rowInput, localIndex, useBodyIndex)
+        const { rowIndex, storeIndex } = renderedRow
+        const y = zone === 'body'
+          ? this.viewport.bodyY + rowIndex * this.rowHeight - this.scrollY
+          : yStart + localIndex * rowHeight
 
-      if (renderedRow.kind !== 'data') {
-        if (includeGroupRows) this.renderGroupLikeRow(contentSchema, renderedRow, y, rowHeight, columnRegion)
-        return
-      }
-
-      const { row, rowId } = renderedRow
-      gridRowTops.push(y)
-      const cachedBackgroundBand = this.resolveRowBackgroundBand(columnRects, zone, rowIndex, rowHeight)
-      if (cachedBackgroundBand) this.appendRowBackgroundBand(backgroundSchema, cachedBackgroundBand, columnRects[0]?.x ?? 0, y, rowHeight)
-      let activeBackground: { x: number; y: number; width: number; height: number; background: string } | null = null
-      const flushBackground = () => {
-        if (cachedBackgroundBand) return
-        if (!activeBackground) return
-        backgroundSchema.push({
-          type: 'rect',
-          x: activeBackground.x,
-          y: activeBackground.y,
-          width: activeBackground.width,
-          height: activeBackground.height,
-          styles: { background: activeBackground.background },
-        })
-        activeBackground = null
-      }
-
-      for (const columnRect of columnRects) {
-        const rect: DataTableCellRect = {
-          x: columnRect.x,
-          y,
-          width: columnRect.width,
-          height: rowHeight,
+        if (renderedRow.kind !== 'data') {
+          if (includeGroupRows) this.renderGroupLikeRow(contentSchema, renderedRow, y, rowHeight, columnRegion)
+          return
         }
-        const context: DataTableCellContext<Row> = {
-          row,
-          rowId,
-          rowIndex,
-          viewRowIndex: rowIndex,
-          storeIndex,
-          column: columnRect.column,
-          columnIndex: columnRect.columnIndex,
-          value: zone === 'header'
-            ? columnRect.column.title ?? columnRect.column.id
-            : resolveDataTableValue(row, storeIndex ?? rowIndex, columnRect.column),
-          rect,
-          state: this.createCellState(rect, rowId, rowIndex, storeIndex, columnRect, zone),
-          zone,
-          store: this.store,
-          api: this.api,
+
+        const { row, rowId } = renderedRow
+        gridRowTops.push(y)
+        const cachedBackgroundBand = this.resolveRowBackgroundBand(columnRects, zone, rowIndex, rowHeight)
+        if (cachedBackgroundBand) this.appendRowBackgroundBand(backgroundSchema, cachedBackgroundBand, columnRects[0]?.x ?? 0, y, rowHeight)
+        let activeBackground: { x: number; y: number; width: number; height: number; background: string } | null = null
+        const flushBackground = () => {
+          if (cachedBackgroundBand) return
+          if (!activeBackground) return
+          backgroundSchema.push({
+            type: 'rect',
+            x: activeBackground.x,
+            y: activeBackground.y,
+            width: activeBackground.width,
+            height: activeBackground.height,
+            styles: { background: activeBackground.background },
+          })
+          activeBackground = null
         }
-        const template = this.resolveCellTemplate(context)
-        const backgroundPainted = !template
-        if (!cachedBackgroundBand && backgroundPainted) {
-          const background = this.resolveDefaultCellVisualBackground(context)
-          if (activeBackground
-            && activeBackground.background === background
-            && Math.abs(activeBackground.y - rect.y) < 0.5
-            && Math.abs(activeBackground.height - rect.height) < 0.5
-            && Math.abs(activeBackground.x + activeBackground.width - rect.x) < 0.5) {
-            activeBackground.width += rect.width
-          } else {
-            flushBackground()
-            activeBackground = {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height,
-              background,
-            }
+
+        for (const columnRect of columnRects) {
+          const rect: DataTableCellRect = {
+            x: columnRect.x,
+            y,
+            width: columnRect.width,
+            height: rowHeight,
           }
-        } else if (!cachedBackgroundBand) {
-          flushBackground()
+          const context: DataTableCellContext<Row> = {
+            row,
+            rowId,
+            rowIndex,
+            viewRowIndex: rowIndex,
+            storeIndex,
+            column: columnRect.column,
+            columnIndex: columnRect.columnIndex,
+            value: zone === 'header'
+              ? columnRect.column.title ?? columnRect.column.id
+              : resolveDataTableValue(row, storeIndex ?? rowIndex, columnRect.column),
+            rect,
+            state: this.createCellState(rect, rowId, rowIndex, storeIndex, columnRect, zone),
+            zone,
+            store: this.store,
+            api: this.api,
+          }
+          const template = this.resolveCellTemplate(context)
+          const backgroundPainted = !template
+          if (!cachedBackgroundBand && backgroundPainted) {
+            const background = this.resolveDefaultCellVisualBackground(context)
+            if (activeBackground
+              && activeBackground.background === background
+              && Math.abs(activeBackground.y - rect.y) < 0.5
+              && Math.abs(activeBackground.height - rect.height) < 0.5
+              && Math.abs(activeBackground.x + activeBackground.width - rect.x) < 0.5) {
+              activeBackground.width += rect.width
+            } else {
+              flushBackground()
+              activeBackground = {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                background,
+              }
+            }
+          } else if (!cachedBackgroundBand) {
+            flushBackground()
+          }
+          if (this.canRenderDefaultCellAsTextBatch(context, template)) {
+            this.appendDefaultCellTextBatch(textBatchBuilders, context)
+            this.registerDefaultCellTextSelectionTarget(context)
+            continue
+          }
+          this.renderCell(contentSchema, context, backgroundPainted, textBatchBuilders, template)
         }
-        if (this.canRenderDefaultCellAsTextBatch(context, template)) {
-          this.appendDefaultCellTextBatch(textBatchBuilders, context)
-          this.registerDefaultCellTextSelectionTarget(context)
-          continue
-        }
-        this.renderCell(contentSchema, context, backgroundPainted, textBatchBuilders, template)
-      }
-      flushBackground()
-    })
+        flushBackground()
+      })
 
-    this.emitSchema(backgroundSchema)
-    this.emitSchema(contentSchema)
-    this.emitRowZoneGridBatch(columnRects, gridRowTops, rowHeight)
-    this.emitDefaultCellTextBatches(textBatchBuilders)
+      this.emitSchema(backgroundSchema)
+      this.emitSchema(contentSchema)
+      this.emitRowZoneGridBatch(columnRects, gridRowTops, rowHeight)
+      this.emitDefaultCellTextBatches(textBatchBuilders)
+    } finally {
+      this.activeTextBatchScope = previousTextBatchScope
+    }
   }
 
   /**
@@ -4839,6 +4866,8 @@ export class DataTableRootNode<
     if (current) return current
 
     const next: DataTableTextBatchBuilder = {
+      key,
+      retainedKey: `${this.activeTextBatchScope}:${key}`,
       align: {
         horizontal: horizontalAlign,
         vertical: 'middle',
@@ -4884,6 +4913,8 @@ export class DataTableRootNode<
     if (current) return current
 
     const next: DataTableTextBatchBuilder = {
+      key,
+      retainedKey: `${this.activeTextBatchScope}:${key}`,
       align: options.align,
       font: options.font,
       lineHeight: options.lineHeight,
@@ -4924,35 +4955,157 @@ export class DataTableRootNode<
   }
 
   /**
+   * Создает scope для retained text batch cache.
+   * Scope различает одновременные render segments, но не включает scroll offset,
+   * чтобы один и тот же batch storage переиспользовался между scroll кадрами.
+   */
+  private createTextBatchScopeKey(
+    zone: DataTableCellContext<Row>['zone'],
+    columnRegion: VisibleColumnRegion,
+  ): string {
+    const clip = this.activeRenderClip
+    const layer = this.activeRenderLayerId ?? 'direct'
+    return [
+      layer,
+      zone,
+      columnRegion,
+      clip ? Math.round(clip.x) : 0,
+      clip ? Math.round(clip.y) : 0,
+      clip ? Math.round(clip.width) : 0,
+      clip ? Math.round(clip.height) : 0,
+    ].join(':')
+  }
+
+  /**
    * Отправляет retained text batches после сборки row zone.
    */
   private emitDefaultCellTextBatches(builders: Map<string, DataTableTextBatchBuilder>): void {
     for (const builder of builders.values()) {
       if (builder.text.length === 0) continue
-      const batch: NovaTextBatch = {
-        count: builder.text.length,
-        text: builder.text,
-        x: Float32Array.from(builder.x),
-        y: Float32Array.from(builder.y),
-        width: Float32Array.from(builder.width),
-        height: Float32Array.from(builder.height),
-        color: builder.color,
-        font: builder.font,
-        lineHeight: builder.lineHeight,
-        padding: builder.padding,
-        align: builder.align,
-        ellipsis: builder.ellipsis,
-        meta: builder.meta,
-        revision: this.store.takeDataRevision() + this.invalidation.get('zoom') + 1,
-        staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + 1,
-      }
+      this.emitTextBatch(this.resolveRetainedTextBatch(builder))
+    }
+  }
+
+  /**
+   * Возвращает переиспользуемый NovaTextBatch для стабильного zone/style scope.
+   */
+  private resolveRetainedTextBatch(builder: DataTableTextBatchBuilder): NovaTextBatch {
+    const count = builder.text.length
+    const retainedKey = builder.retainedKey
+    let entry = this.retainedTextBatchCache.get(retainedKey)
+    if (!entry || entry.capacity < count) {
+      entry = this.createRetainedTextBatchEntry(Math.max(count, this.nextPowerOfTwo(count)))
+      this.retainedTextBatchCache.set(retainedKey, entry)
+    }
+
+    entry.text.length = count
+    entry.color.length = count
+    for (let index = 0; index < count; index += 1) {
+      entry.text[index] = builder.text[index] ?? ''
+      entry.color[index] = builder.color[index] ?? '#263142'
+      entry.x[index] = builder.x[index] ?? 0
+      entry.y[index] = builder.y[index] ?? 0
+      entry.width[index] = builder.width[index] ?? 0
+      entry.height[index] = builder.height[index] ?? 0
       if (builder.clip) {
-        batch.clipX = Float32Array.from(builder.clipX)
-        batch.clipY = Float32Array.from(builder.clipY)
-        batch.clipWidth = Float32Array.from(builder.clipWidth)
-        batch.clipHeight = Float32Array.from(builder.clipHeight)
+        entry.clipX[index] = builder.clipX[index] ?? 0
+        entry.clipY[index] = builder.clipY[index] ?? 0
+        entry.clipWidth[index] = builder.clipWidth[index] ?? 0
+        entry.clipHeight[index] = builder.clipHeight[index] ?? 0
       }
-      this.emitTextBatch(batch)
+    }
+
+    const batch = entry.batch
+    batch.count = count
+    batch.text = entry.text
+    batch.x = entry.x
+    batch.y = entry.y
+    batch.width = entry.width
+    batch.height = entry.height
+    batch.color = entry.color
+    batch.font = builder.font
+    batch.lineHeight = builder.lineHeight
+    batch.padding = builder.padding
+    batch.align = builder.align
+    batch.ellipsis = builder.ellipsis
+    batch.meta = builder.meta
+    batch.revision = this.store.takeDataRevision() + this.invalidation.get('zoom') + 1
+    batch.staticRevision = this.store.takeStructureRevision() + this.invalidation.get('columns') + 1
+
+    if (builder.clip) {
+      batch.clipX = entry.clipX
+      batch.clipY = entry.clipY
+      batch.clipWidth = entry.clipWidth
+      batch.clipHeight = entry.clipHeight
+    } else {
+      batch.clipX = undefined
+      batch.clipY = undefined
+      batch.clipWidth = undefined
+      batch.clipHeight = undefined
+    }
+
+    entry.createdAt = performance.now()
+    this.trimRetainedTextBatchCache()
+    return batch
+  }
+
+  /**
+   * Создает storage для retained text batch.
+   */
+  private createRetainedTextBatchEntry(capacity: number): DataTableRetainedTextBatchEntry {
+    const text: Array<string> = []
+    const color: Array<string> = []
+    const x = new Float32Array(capacity)
+    const y = new Float32Array(capacity)
+    const width = new Float32Array(capacity)
+    const height = new Float32Array(capacity)
+    const clipX = new Float32Array(capacity)
+    const clipY = new Float32Array(capacity)
+    const clipWidth = new Float32Array(capacity)
+    const clipHeight = new Float32Array(capacity)
+    return {
+      batch: {
+        count: 0,
+        text,
+        x,
+        y,
+        width,
+        height,
+        color,
+      },
+      capacity,
+      text,
+      color,
+      x,
+      y,
+      width,
+      height,
+      clipX,
+      clipY,
+      clipWidth,
+      clipHeight,
+      createdAt: performance.now(),
+    }
+  }
+
+  /**
+   * Возвращает ближайшую степень двойки для capacity retained arrays.
+   */
+  private nextPowerOfTwo(value: number): number {
+    let next = 1
+    while (next < value) next *= 2
+    return next
+  }
+
+  /**
+   * Ограничивает retained text batch cache.
+   */
+  private trimRetainedTextBatchCache(): void {
+    const limit = 256
+    while (this.retainedTextBatchCache.size > limit) {
+      const first = this.retainedTextBatchCache.keys().next().value as string | undefined
+      if (!first) return
+      this.retainedTextBatchCache.delete(first)
     }
   }
 
