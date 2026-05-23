@@ -339,6 +339,10 @@ interface DataTableRenderLayerCache {
   dirty: boolean
   initialized: boolean
   rebuilds: number
+  targetInitialized: boolean
+  targetWidth: number
+  targetHeight: number
+  targetDpr: number
 }
 
 interface DataTableRenderLayerDiagnostics extends DataTableRenderDiagnostics {
@@ -406,6 +410,10 @@ function createRenderLayerCache(): Map<DataTableRenderLayerId, DataTableRenderLa
     dirty: true,
     initialized: false,
     rebuilds: 0,
+    targetInitialized: false,
+    targetWidth: 0,
+    targetHeight: 0,
+    targetDpr: 0,
   }]))
 }
 
@@ -3851,7 +3859,8 @@ export class DataTableRootNode<
     const layer = this.renderLayers.get(id)
     if (!layer) return
 
-    if (layer.dirty || !layer.initialized) {
+    const needsRebuild = layer.dirty || !layer.initialized
+    if (needsRebuild) {
       const previousLayer = this.activeRenderLayerId
       const previousClip = this.activeRenderClip
       this.activeRenderLayerId = id
@@ -3871,8 +3880,69 @@ export class DataTableRootNode<
       if (id === 'body-animated') this.renderLayerDiagnostics.animatedLayerRebuilds += 1
     }
 
+    if (this.canRenderLayerViaOffscreenTarget(id)) {
+      this.emitRenderLayerTarget(layer, needsRebuild)
+      if (id === 'body-animated' && layer.segments.length > 0) this.visibleAnimatedCells = true
+      return
+    }
+
     for (const segment of layer.segments) this.emitRenderSegment(segment)
     if (id === 'body-animated' && layer.segments.length > 0) this.visibleAnimatedCells = true
+  }
+
+  /**
+   * Проверяет, можно ли этот слой держать как offscreen target.
+   */
+  private canRenderLayerViaOffscreenTarget(id: DataTableRenderLayerId): boolean {
+    if (id !== 'body-static' && id !== 'body-animated') return false
+    const renderer = this.renderer as {
+      beginRenderTarget?: unknown
+      endRenderTarget?: unknown
+      drawRenderTarget?: unknown
+    }
+    return typeof renderer.beginRenderTarget === 'function'
+      && typeof renderer.endRenderTarget === 'function'
+      && typeof renderer.drawRenderTarget === 'function'
+      && this.width > 0
+      && this.height > 0
+  }
+
+  /**
+   * Рисует слой через offscreen target: repaint только когда layer dirty,
+   * обычные кадры получают один texture quad вместо replay всех body commands.
+   */
+  private emitRenderLayerTarget(layer: DataTableRenderLayerCache, rebuiltThisFrame: boolean): void {
+    const targetId = this.createRenderLayerTargetId(layer.id)
+    const renderer = this.renderer as {
+      beginRenderTarget: (id: string, width: number, height: number, options?: { dpr?: number; kind?: 'cache' }) => void
+      endRenderTarget: () => void
+      drawRenderTarget: (id: string, x: number, y: number, width: number, height: number) => void
+    }
+    const dpr = (this.nova as { dpr?: number }).dpr ?? 1
+    const needsTargetPaint = rebuiltThisFrame
+      || !layer.targetInitialized
+      || Math.abs(layer.targetWidth - this.width) > 0.5
+      || Math.abs(layer.targetHeight - this.height) > 0.5
+      || Math.abs(layer.targetDpr - dpr) > 0.001
+
+    if (needsTargetPaint) {
+      renderer.beginRenderTarget(targetId, this.width, this.height, { dpr, kind: 'cache' })
+      for (const segment of layer.segments) this.emitRenderSegment(segment)
+      renderer.endRenderTarget()
+      layer.targetInitialized = true
+      layer.targetWidth = this.width
+      layer.targetHeight = this.height
+      layer.targetDpr = dpr
+    }
+
+    renderer.drawRenderTarget(targetId, 0, 0, this.width, this.height)
+  }
+
+  /**
+   * Создает stable id для offscreen target слоя.
+   */
+  private createRenderLayerTargetId(id: DataTableRenderLayerId): string {
+    return `${this.renderNodeId}:${id}`
   }
 
   /**
