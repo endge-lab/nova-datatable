@@ -343,6 +343,8 @@ interface DataTableRenderLayerCache {
   targetWidth: number
   targetHeight: number
   targetDpr: number
+  targetDrawOffsetX: number
+  targetDrawOffsetY: number
 }
 
 interface DataTableRenderLayerDiagnostics extends DataTableRenderDiagnostics {
@@ -414,6 +416,8 @@ function createRenderLayerCache(): Map<DataTableRenderLayerId, DataTableRenderLa
     targetWidth: 0,
     targetHeight: 0,
     targetDpr: 0,
+    targetDrawOffsetX: 0,
+    targetDrawOffsetY: 0,
   }]))
 }
 
@@ -1044,12 +1048,24 @@ export class DataTableRootNode<
     const bodyStatic = this.renderLayers.get('body-static')
     if (!bodyStatic || !bodyStatic.initialized || bodyStatic.dirty) return false
 
-    this.translateRenderLayerSegments(bodyStatic, 0, dy)
+    this.retainRenderLayerForVerticalScroll(bodyStatic, dy)
     const bodyAnimated = this.renderLayers.get('body-animated')
     if (bodyAnimated && bodyAnimated.initialized && !bodyAnimated.dirty) {
-      this.translateRenderLayerSegments(bodyAnimated, 0, dy)
+      this.retainRenderLayerForVerticalScroll(bodyAnimated, dy)
     }
     return true
+  }
+
+  /**
+   * Retain path различается для обычных segments и offscreen body texture.
+   */
+  private retainRenderLayerForVerticalScroll(layer: DataTableRenderLayerCache, dy: number): void {
+    if (layer.targetInitialized) {
+      layer.targetDrawOffsetY += dy
+      return
+    }
+
+    this.translateRenderLayerSegments(layer, 0, dy)
   }
 
   /**
@@ -3872,6 +3888,8 @@ export class DataTableRootNode<
         this.activeRenderLayerId = previousLayer
         this.activeRenderClip = previousClip
       }
+      layer.targetDrawOffsetX = 0
+      layer.targetDrawOffsetY = 0
       layer.initialized = true
       layer.dirty = false
       layer.rebuilds += 1
@@ -3935,7 +3953,18 @@ export class DataTableRootNode<
       layer.targetDpr = dpr
     }
 
-    renderer.drawRenderTarget(targetId, 0, 0, this.width, this.height)
+    const drawTarget = () => {
+      renderer.drawRenderTarget(targetId, layer.targetDrawOffsetX, layer.targetDrawOffsetY, this.width, this.height)
+    }
+
+    if (layer.id === 'body-static' || layer.id === 'body-animated') {
+      this.renderer.clip(0, this.viewport.bodyY, this.width, this.viewport.bodyHeight)
+      drawTarget()
+      this.renderer.clearClip()
+      return
+    }
+
+    drawTarget()
   }
 
   /**
