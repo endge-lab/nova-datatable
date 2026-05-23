@@ -4428,7 +4428,20 @@ export class DataTableRootNode<
 
       const { row, rowId } = renderedRow
       gridRowTops.push(y)
-      const contexts: Array<DataTableCellContext<Row>> = []
+      let activeBackground: { x: number; y: number; width: number; height: number; background: string } | null = null
+      const flushBackground = () => {
+        if (!activeBackground) return
+        backgroundSchema.push({
+          type: 'rect',
+          x: activeBackground.x,
+          y: activeBackground.y,
+          width: activeBackground.width,
+          height: activeBackground.height,
+          styles: { background: activeBackground.background },
+        })
+        activeBackground = null
+      }
+
       for (const columnRect of columnRects) {
         const rect: DataTableCellRect = {
           x: columnRect.x,
@@ -4436,7 +4449,7 @@ export class DataTableRootNode<
           width: columnRect.width,
           height: rowHeight,
         }
-        contexts.push({
+        const context: DataTableCellContext<Row> = {
           row,
           rowId,
           rowIndex,
@@ -4452,17 +4465,37 @@ export class DataTableRootNode<
           zone,
           store: this.store,
           api: this.api,
-        })
-      }
-      this.renderDefaultCellBackgroundSpans(backgroundSchema, contexts)
-      for (const context of contexts) {
+        }
+        const backgroundPainted = this.canBatchDefaultCellBackground(context)
+        if (backgroundPainted) {
+          const background = this.resolveDefaultCellVisualBackground(context)
+          if (activeBackground
+            && activeBackground.background === background
+            && Math.abs(activeBackground.y - rect.y) < 0.5
+            && Math.abs(activeBackground.height - rect.height) < 0.5
+            && Math.abs(activeBackground.x + activeBackground.width - rect.x) < 0.5) {
+            activeBackground.width += rect.width
+          } else {
+            flushBackground()
+            activeBackground = {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              background,
+            }
+          }
+        } else {
+          flushBackground()
+        }
         if (this.canRenderDefaultCellAsTextBatch(context)) {
           this.appendDefaultCellTextBatch(textBatchBuilders, context)
           this.registerDefaultCellTextSelectionTarget(context)
           continue
         }
-        this.renderCell(contentSchema, context, this.canBatchDefaultCellBackground(context), textBatchBuilders)
+        this.renderCell(contentSchema, context, backgroundPainted, textBatchBuilders)
       }
+      flushBackground()
     })
 
     this.emitSchema(backgroundSchema)
