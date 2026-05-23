@@ -4452,17 +4452,16 @@ export class DataTableRootNode<
       }
     })
 
-    this.renderRowZoneGrid(contentSchema, columnRects, gridRowTops, rowHeight)
     this.emitSchema(backgroundSchema)
     this.emitSchema(contentSchema)
+    this.emitRowZoneGridBatch(columnRects, gridRowTops, rowHeight)
     this.emitDefaultCellTextBatches(textBatchBuilders)
   }
 
   /**
    * Рисует плотную сетку отдельными line-batches вместо border на каждой ячейке.
    */
-  private renderRowZoneGrid(
-    schema: NovaSchema,
+  private emitRowZoneGridBatch(
     columnRects: Array<VisibleColumnRect<Row>>,
     rowTops: Array<number>,
     rowHeight: number,
@@ -4475,20 +4474,51 @@ export class DataTableRootNode<
 
     const x1 = firstColumn.x
     const x2 = lastColumn.x + lastColumn.width
-    const y1 = Math.min(...rowTops)
-    const y2 = Math.max(...rowTops) + rowHeight
-    const color = '#d8e0ea'
+    const y1 = rowTops[0] ?? 0
+    const y2 = (rowTops[rowTops.length - 1] ?? y1) + rowHeight
+    const horizontalCount = rowTops.length + 1
+    const verticalCount = columnRects.length + 1
+    const count = horizontalCount + verticalCount
+    const batch = this.createEmptyRectBatch(count)
+    const color = this.resolveRectBatchColor('#d8e0ea')
+    const rowWidth = Math.max(0, x2 - x1)
+    const columnHeight = Math.max(0, y2 - y1)
 
-    schema.push({ type: 'rect', x: x1, y: y1, width: Math.max(0, x2 - x1), height: 1, styles: { background: color } })
-    for (const y of rowTops) {
-      const bottom = y + rowHeight
-      schema.push({ type: 'rect', x: x1, y: bottom, width: Math.max(0, x2 - x1), height: 1, styles: { background: color } })
+    let index = 0
+    const write = (x: number, y: number, width: number, height: number) => {
+      batch.x[index] = x
+      batch.y[index] = y
+      batch.width[index] = width
+      batch.height[index] = height
+      batch.colors[index * 4] = color[0]
+      batch.colors[index * 4 + 1] = color[1]
+      batch.colors[index * 4 + 2] = color[2]
+      batch.colors[index * 4 + 3] = color[3]
+      index += 1
     }
 
-    schema.push({ type: 'rect', x: x1, y: y1, width: 1, height: Math.max(0, y2 - y1), styles: { background: color } })
-    for (const columnRect of columnRects) {
-      const x = columnRect.x + columnRect.width
-      schema.push({ type: 'rect', x, y: y1, width: 1, height: Math.max(0, y2 - y1), styles: { background: color } })
+    write(x1, y1, rowWidth, 1)
+    for (const y of rowTops) write(x1, y + rowHeight, rowWidth, 1)
+    write(x1, y1, 1, columnHeight)
+    for (const columnRect of columnRects) write(columnRect.x + columnRect.width, y1, 1, columnHeight)
+
+    this.emitRectBatch(batch)
+  }
+
+  /**
+   * Создает пустой rect batch заданного размера.
+   */
+  private createEmptyRectBatch(count: number): NovaRectBatch {
+    return {
+      count,
+      x: new Float32Array(count),
+      y: new Float32Array(count),
+      width: new Float32Array(count),
+      height: new Float32Array(count),
+      colors: new Float32Array(count * 4),
+      states: new Float32Array(count),
+      revision: this.store.takeDataRevision() + this.invalidation.get('viewport') + this.invalidation.get('zoom') + 1,
+      staticRevision: this.store.takeStructureRevision() + this.invalidation.get('columns') + this.invalidation.get('layout') + 1,
     }
   }
 
