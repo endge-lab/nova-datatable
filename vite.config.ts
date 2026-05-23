@@ -2,7 +2,7 @@ import path from 'path'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import dts from 'vite-plugin-dts'
-import { novaVitePlugin } from '@endge/nova-compiler'
+import { novaVitePlugin } from '../@endge-nova-compiler/src/index'
 
 const publicTypesEntry = `import 'reflect-metadata'
 import NovaDataTableComponent from './vue/NovaDataTable.vue'
