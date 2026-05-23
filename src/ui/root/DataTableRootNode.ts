@@ -4466,7 +4466,8 @@ export class DataTableRootNode<
           store: this.store,
           api: this.api,
         }
-        const backgroundPainted = this.canBatchDefaultCellBackground(context)
+        const template = this.resolveCellTemplate(context)
+        const backgroundPainted = !template
         if (backgroundPainted) {
           const background = this.resolveDefaultCellVisualBackground(context)
           if (activeBackground
@@ -4488,12 +4489,12 @@ export class DataTableRootNode<
         } else {
           flushBackground()
         }
-        if (this.canRenderDefaultCellAsTextBatch(context)) {
+        if (this.canRenderDefaultCellAsTextBatch(context, template)) {
           this.appendDefaultCellTextBatch(textBatchBuilders, context)
           this.registerDefaultCellTextSelectionTarget(context)
           continue
         }
-        this.renderCell(contentSchema, context, backgroundPainted, textBatchBuilders)
+        this.renderCell(contentSchema, context, backgroundPainted, textBatchBuilders, template)
       }
       flushBackground()
     })
@@ -4628,11 +4629,14 @@ export class DataTableRootNode<
   /**
    * Проверяет, можно ли вывести default text cell через retained text batch.
    */
-  private canRenderDefaultCellAsTextBatch(context: DataTableCellContext<Row>): boolean {
+  private canRenderDefaultCellAsTextBatch(
+    context: DataTableCellContext<Row>,
+    template: ((context: DataTableCellContext<Row>) => NovaSchema) | undefined = this.resolveCellTemplate(context),
+  ): boolean {
     const textOptions = this.props.performance.text
     if (!textOptions || !textOptions.batchDefaultCells) return false
     if (!textOptions.visible) return false
-    if (this.resolveCellTemplate(context)) return false
+    if (template) return false
     if (context.zone === 'header') return false
     if (context.column.animated) return false
     if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return false
@@ -5054,9 +5058,10 @@ export class DataTableRootNode<
     context: DataTableCellContext<Row>,
     defaultBackgroundPainted = false,
     textBatchBuilders?: Map<string, DataTableTextBatchBuilder>,
+    resolvedTemplate?: ((context: DataTableCellContext<Row>) => NovaSchema),
   ): void {
     const startIndex = schema.length
-    const template = this.resolveCellTemplate(context)
+    const template = resolvedTemplate ?? this.resolveCellTemplate(context)
     if (context.zone !== 'header' && context.column.animated) this.visibleAnimatedCells = true
 
     if (template) {
