@@ -4626,29 +4626,7 @@ export class DataTableRootNode<
     }
     const x = textOptions?.skipSubpixelText ? Math.round(textRect.x) : textRect.x
     const y = textOptions?.skipSubpixelText ? Math.round(textRect.y) : textRect.y
-    const align = {
-      horizontal: column.align,
-      vertical: 'middle' as const,
-    }
-    const font = {
-      family: this.props.fontFamily ?? 'Inter, Arial, sans-serif',
-      size: this.fontSize,
-      weight: '500' as const,
-      style: 'normal' as const,
-    }
-    const meta = {
-      textMode: textOptions?.renderMode ?? 'run-atlas',
-      textRole: 'ui-label' as const,
-      textLod: 'always' as const,
-    }
-    const builder = this.resolveTextBatchBuilder(builders, {
-      align,
-      font,
-      lineHeight: this.lineHeight,
-      ellipsis: textOptions?.truncate !== 'clip',
-      clip: true,
-      meta,
-    })
+    const builder = this.resolveDefaultCellTextBatchBuilder(builders, column.align)
 
     builder.text.push(String(value ?? ''))
     builder.x.push(x)
@@ -4660,6 +4638,55 @@ export class DataTableRootNode<
     builder.clipWidth.push(textRect.width)
     builder.clipHeight.push(textRect.height)
     builder.color.push('#263142')
+  }
+
+  /**
+   * Возвращает builder для default text cells без JSON.stringify на каждую ячейку.
+   */
+  private resolveDefaultCellTextBatchBuilder(
+    builders: Map<string, DataTableTextBatchBuilder>,
+    horizontalAlign: DataTableResolvedColumn<Row>['align'],
+  ): DataTableTextBatchBuilder {
+    const textOptions = this.props.performance.text
+    const fontFamily = this.props.fontFamily ?? 'Inter, Arial, sans-serif'
+    const renderMode = textOptions && textOptions.renderMode ? textOptions.renderMode : 'run-atlas'
+    const ellipsis = textOptions?.truncate !== 'clip'
+    const key = `default:${horizontalAlign}:${fontFamily}:${this.fontSize}:${this.lineHeight}:${ellipsis ? 1 : 0}:${renderMode}`
+    const current = builders.get(key)
+    if (current) return current
+
+    const next: DataTableTextBatchBuilder = {
+      align: {
+        horizontal: horizontalAlign,
+        vertical: 'middle',
+      },
+      font: {
+        family: fontFamily,
+        size: this.fontSize,
+        weight: '500',
+        style: 'normal',
+      },
+      lineHeight: this.lineHeight,
+      ellipsis,
+      clip: true,
+      meta: {
+        textMode: renderMode,
+        textRole: 'ui-label',
+        textLod: 'always',
+      },
+      text: [],
+      x: [],
+      y: [],
+      width: [],
+      height: [],
+      clipX: [],
+      clipY: [],
+      clipWidth: [],
+      clipHeight: [],
+      color: [],
+    }
+    builders.set(key, next)
+    return next
   }
 
   /**
