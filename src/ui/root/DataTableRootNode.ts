@@ -304,6 +304,17 @@ interface DataTableRenderColumnPartitions<Row extends Record<string, any>> {
   right: Array<DataTableResolvedColumn<Row>>
 }
 
+interface DataTableRowBackgroundBand {
+  offsetX: number
+  width: number
+  background: string
+}
+
+interface DataTableRowBandCacheEntry {
+  spans: Array<DataTableRowBackgroundBand>
+  createdAt: number
+}
+
 interface DataTableRenderLayerCache {
   id: DataTableRenderLayerId
   segments: Array<DataTableRenderSegment>
@@ -479,6 +490,7 @@ export class DataTableRootNode<
   private readonly hoverOverlayBatch = createEmptyOverlayRectBatch(DATA_TABLE_HOVER_OVERLAY_BATCH_CAPACITY)
   private readonly cellTemplateIds = new WeakMap<(context: DataTableCellContext<Row>) => NovaSchema, number>()
   private readonly cellTemplateFragmentCache = new Map<string, DataTableCellTemplateFragment>()
+  private readonly rowBandBackgroundCache = new Map<string, DataTableRowBandCacheEntry>()
   private readonly rectBatchColorCache = new Map<string, [number, number, number, number]>()
   private nextCellTemplateId = 1
   private animationLoopLease: { release: () => void } | null = null
@@ -2417,6 +2429,7 @@ export class DataTableRootNode<
       'custom',
     ].includes(kind))) {
       this.cellTemplateFragmentCache.clear()
+      this.rowBandBackgroundCache.clear()
     }
   }
 
@@ -4428,8 +4441,11 @@ export class DataTableRootNode<
 
       const { row, rowId } = renderedRow
       gridRowTops.push(y)
+      const cachedBackgroundBand = this.resolveRowBackgroundBand(columnRects, zone, rowIndex, rowHeight)
+      if (cachedBackgroundBand) this.appendRowBackgroundBand(backgroundSchema, cachedBackgroundBand, columnRects[0]?.x ?? 0, y, rowHeight)
       let activeBackground: { x: number; y: number; width: number; height: number; background: string } | null = null
       const flushBackground = () => {
+        if (cachedBackgroundBand) return
         if (!activeBackground) return
         backgroundSchema.push({
           type: 'rect',
@@ -4468,7 +4484,7 @@ export class DataTableRootNode<
         }
         const template = this.resolveCellTemplate(context)
         const backgroundPainted = !template
-        if (backgroundPainted) {
+        if (!cachedBackgroundBand && backgroundPainted) {
           const background = this.resolveDefaultCellVisualBackground(context)
           if (activeBackground
             && activeBackground.background === background
@@ -4486,7 +4502,7 @@ export class DataTableRootNode<
               background,
             }
           }
-        } else {
+        } else if (!cachedBackgroundBand) {
           flushBackground()
         }
         if (this.canRenderDefaultCellAsTextBatch(context, template)) {
@@ -4624,6 +4640,133 @@ export class DataTableRootNode<
    */
   private canBatchDefaultCellBackground(context: DataTableCellContext<Row>): boolean {
     return !this.resolveCellTemplate(context)
+  }
+
+  /**
+   * Возвращает кэшированную фоновую полосу строки для default cells.
+   */
+  private resolveRowBackgroundBand(
+    columnRects: Array<VisibleColumnRect<Row>>,
+    zone: DataTableCellContext<Row>['zone'],
+    rowIndex: number,
+    rowHeight: number,
+  ): DataTableRowBandCacheEntry | null {
+    if (!this.canUseRowBackgroundBandCache(zone)) return null
+    if (columnRects.length === 0) return null
+
+    const key = this.createRowBackgroundBandCacheKey(columnRects, zone, rowIndex, rowHeight)
+    const cached = this.rowBandBackgroundCache.get(key)
+    if (cached) {
+      cached.createdAt = performance.now()
+      return cached
+    }
+
+    const baseX = columnRects[0]?.x ?? 0
+    const spans: Array<DataTableRowBackgroundBand> = []
+    let active: DataTableRowBackgroundBand | null = null
+
+    const flush = () => {
+      if (!active) return
+      spans.push(active)
+      active = null
+    }
+
+    for (const columnRect of columnRects) {
+      if (this.resolveCellTemplateForColumn(zone, columnRect.column)) {
+        flush()
+        continue
+      }
+      const background = this.resolveDefaultCellBackgroundForColumn(zone, columnRect.column, rowIndex)
+      const offsetX = columnRect.x - baseX
+      if (active
+        && active.background === background
+        && Math.abs(active.offsetX + active.width - offsetX) < 0.5) {
+        active.width += columnRect.width
+        continue
+      }
+      flush()
+      active = {
+        offsetX,
+        width: columnRect.width,
+        background,
+      }
+    }
+    flush()
+
+    const entry = {
+      spans,
+      createdAt: performance.now(),
+    }
+    this.rowBandBackgroundCache.set(key, entry)
+    this.trimRowBandBackgroundCache()
+    return entry
+  }
+
+  /**
+   * Проверяет, можно ли использовать row band cache без изменения визуального поведения.
+   */
+  private canUseRowBackgroundBandCache(zone: DataTableCellContext<Row>['zone']): boolean {
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return false
+    const searchState = this.getRenderViewState().search
+    const searchHighlight = searchState.query.highlight ?? 'cell-text'
+    if (!this.isHeaderZone(zone) && searchState.query.text && searchHighlightHasCell(searchHighlight)) return false
+    return true
+  }
+
+  /**
+   * Создает ключ row band cache.
+   */
+  private createRowBackgroundBandCacheKey(
+    columnRects: Array<VisibleColumnRect<Row>>,
+    zone: DataTableCellContext<Row>['zone'],
+    rowIndex: number,
+    rowHeight: number,
+  ): string {
+    const isHeader = this.isHeaderZone(zone)
+    const parity = isHeader ? 0 : rowIndex % 2
+    return [
+      zone,
+      parity,
+      Math.round(rowHeight * 10) / 10,
+      columnRects.map(rect => {
+        const template = this.resolveCellTemplateForColumn(zone, rect.column) ? 1 : 0
+        return `${rect.column.id}:${Math.round(rect.width * 10) / 10}:${rect.column.pinned ?? 'center'}:${template}`
+      }).join(','),
+    ].join('|')
+  }
+
+  /**
+   * Добавляет кэшированную фоновую полосу строки в schema.
+   */
+  private appendRowBackgroundBand(
+    schema: NovaSchema,
+    band: DataTableRowBandCacheEntry,
+    baseX: number,
+    y: number,
+    rowHeight: number,
+  ): void {
+    for (const span of band.spans) {
+      schema.push({
+        type: 'rect',
+        x: baseX + span.offsetX,
+        y,
+        width: span.width,
+        height: rowHeight,
+        styles: { background: span.background },
+      })
+    }
+  }
+
+  /**
+   * Ограничивает row band cache.
+   */
+  private trimRowBandBackgroundCache(): void {
+    const limit = 512
+    while (this.rowBandBackgroundCache.size > limit) {
+      const first = this.rowBandBackgroundCache.keys().next().value as string | undefined
+      if (!first) return
+      this.rowBandBackgroundCache.delete(first)
+    }
   }
 
   /**
@@ -5085,19 +5228,29 @@ export class DataTableRootNode<
    * Возвращает template для ячейки с учетом header/body precedence.
    */
   private resolveCellTemplate(context: DataTableCellContext<Row>): ((context: DataTableCellContext<Row>) => NovaSchema) | undefined {
+    return this.resolveCellTemplateForColumn(context.zone, context.column)
+  }
+
+  /**
+   * Возвращает template для пары zone/column с cache на render pass.
+   */
+  private resolveCellTemplateForColumn(
+    zone: DataTableCellContext<Row>['zone'],
+    column: DataTableResolvedColumn<Row>,
+  ): ((context: DataTableCellContext<Row>) => NovaSchema) | undefined {
     if (!this.renderViewState) {
-      return context.zone === 'header'
-        ? context.column.headerTemplate ?? this.props.headerTemplate
-        : context.column.cellTemplate ?? this.props.cellTemplate
+      return zone === 'header'
+        ? column.headerTemplate ?? this.props.headerTemplate
+        : column.cellTemplate ?? this.props.cellTemplate
     }
 
-    const key = `${context.zone}:${context.column.id}`
+    const key = `${zone}:${column.id}`
     const cached = this.renderCellTemplateByColumnZone.get(key)
     if (cached !== undefined) return cached || undefined
 
-    const template = context.zone === 'header'
-      ? context.column.headerTemplate ?? this.props.headerTemplate
-      : context.column.cellTemplate ?? this.props.cellTemplate
+    const template = zone === 'header'
+      ? column.headerTemplate ?? this.props.headerTemplate
+      : column.cellTemplate ?? this.props.cellTemplate
     this.renderCellTemplateByColumnZone.set(key, template ?? false)
     return template
   }
@@ -5878,13 +6031,33 @@ export class DataTableRootNode<
     isPinnedRow: boolean,
     rowIndex: number,
   ): string {
-    const pinnedColumn = !!context.state.pinnedColumn
+    return this.resolveDefaultCellBackgroundForColumn(context.zone, context.column, rowIndex)
+  }
+
+  /**
+   * Возвращает базовый фон default cell без создания полного cell context.
+   */
+  private resolveDefaultCellBackgroundForColumn(
+    zone: DataTableCellContext<Row>['zone'],
+    column: DataTableResolvedColumn<Row>,
+    rowIndex: number,
+  ): string {
+    const isHeader = this.isHeaderZone(zone)
+    const isPinnedRow = zone === 'pinned-top' || zone === 'pinned-bottom'
+    const pinnedColumn = !!column.pinned
     if (pinnedColumn && isPinnedRow) return '#fff2c4'
     if (pinnedColumn && isHeader) return '#fff6d8'
     if (pinnedColumn) return '#fffbea'
     if (isPinnedRow) return '#fff8df'
     if (isHeader) return '#eef3f8'
     return rowIndex % 2 === 0 ? '#ffffff' : '#fbfcfe'
+  }
+
+  /**
+   * Проверяет header zone.
+   */
+  private isHeaderZone(zone: DataTableCellContext<Row>['zone']): boolean {
+    return zone === 'header'
   }
 
   /**
