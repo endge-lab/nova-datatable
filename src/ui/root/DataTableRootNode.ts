@@ -982,7 +982,11 @@ export class DataTableRootNode<
     if (delta > 0) this.revealScrollbars('scroll')
     this.syncHoverAfterViewportChange()
     this.syncEditingRect()
-    this.refresh(this.resolveViewportScrollRefreshKinds(previousViewport, this.viewport))
+    const scrollKinds = this.resolveViewportScrollRefreshKinds(previousViewport, this.viewport)
+    const refreshKinds = this.tryRetainBodyLayersForVerticalScroll(previousViewport, this.viewport, scrollKinds)
+      ? scrollKinds.map(kind => kind === 'viewport-scroll-y' ? 'viewport-scroll-y-retained' : kind)
+      : scrollKinds
+    this.refresh(refreshKinds)
   }
 
   /**
@@ -1005,6 +1009,89 @@ export class DataTableRootNode<
       kinds.push('viewport-scroll-y')
     }
     return kinds.length > 0 ? kinds : ['scrollbar']
+  }
+
+  /**
+   * Сдвигает retained body layers при pixel-scroll без смены visible row range.
+   *
+   * Полная strip-дорисовка новых строк требует offscreen/render target в core.
+   * Здесь мы закрываем самый частый случай trackpad/pan кадра: тот же набор строк,
+   * но другой scrollY. В этом случае body geometry можно сдвинуть без template calls.
+   */
+  private tryRetainBodyLayersForVerticalScroll(
+    previous: DataTableViewport,
+    next: DataTableViewport,
+    kinds: Array<string>,
+  ): boolean {
+    if (kinds.length !== 1 || kinds[0] !== 'viewport-scroll-y') return false
+    if (previous.rowRange.start !== next.rowRange.start || previous.rowRange.end !== next.rowRange.end) return false
+    if (previous.scrollX !== next.scrollX) return false
+    if (previous.centerColumnOffset !== next.centerColumnOffset) return false
+    if (previous.centerColumnRange.start !== next.centerColumnRange.start || previous.centerColumnRange.end !== next.centerColumnRange.end) return false
+    if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return false
+
+    const dy = previous.scrollY - next.scrollY
+    if (!Number.isFinite(dy) || Math.abs(dy) < 0.001) return false
+
+    const bodyStatic = this.renderLayers.get('body-static')
+    if (!bodyStatic || !bodyStatic.initialized || bodyStatic.dirty) return false
+
+    this.translateRenderLayerSegments(bodyStatic, 0, dy)
+    const bodyAnimated = this.renderLayers.get('body-animated')
+    if (bodyAnimated && bodyAnimated.initialized && !bodyAnimated.dirty) {
+      this.translateRenderLayerSegments(bodyAnimated, 0, dy)
+    }
+    return true
+  }
+
+  /**
+   * Сдвигает cached render segments без пересборки schema/templates.
+   */
+  private translateRenderLayerSegments(layer: DataTableRenderLayerCache, dx: number, dy: number): void {
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return
+
+    for (const segment of layer.segments) {
+      if (segment.kind === 'schema') {
+        this.translateSchemaItems(segment.schema, dx, dy)
+        continue
+      }
+      if (segment.kind === 'rect-batch') {
+        this.translateNumberData(segment.rectBatch.x, dx)
+        this.translateNumberData(segment.rectBatch.y, dy)
+        continue
+      }
+      this.translateNumberData(segment.textBatch.x, dx)
+      this.translateNumberData(segment.textBatch.y, dy)
+      if (segment.textBatch.clipX) this.translateNumberData(segment.textBatch.clipX, dx)
+      if (segment.textBatch.clipY) this.translateNumberData(segment.textBatch.clipY, dy)
+    }
+  }
+
+  /**
+   * Сдвигает positional schema items внутри retained layer cache.
+   */
+  private translateSchemaItems(schema: NovaSchema, dx: number, dy: number): void {
+    for (const item of schema) {
+      const positional = item as { x?: unknown; y?: unknown; clip?: unknown }
+      if (typeof positional.x === 'number') positional.x += dx
+      if (typeof positional.y === 'number') positional.y += dy
+      const clip = positional.clip
+      if (clip && typeof clip === 'object') {
+        const clipRect = clip as { x?: unknown; y?: unknown }
+        if (typeof clipRect.x === 'number') clipRect.x += dx
+        if (typeof clipRect.y === 'number') clipRect.y += dy
+      }
+    }
+  }
+
+  /**
+   * Сдвигает number data только для mutable typed/array storage.
+   */
+  private translateNumberData(data: NovaTextBatch['x'] | NovaRectBatch['x'], delta: number): void {
+    if (Math.abs(delta) < 0.001) return
+    for (let index = 0; index < data.length; index += 1) {
+      data[index] = (data[index] ?? 0) + delta
+    }
   }
 
   /**
@@ -2404,7 +2491,7 @@ export class DataTableRootNode<
   private refreshRequiresRuntimeSync(kinds: Array<string>): boolean {
     if (kinds.length === 0) return true
     if (this.columnDragState?.active || this.columnDragLayoutMotion.size > 0) return true
-    if (kinds.every(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y' || kind === 'scrollbar')) return false
+    if (kinds.every(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y' || kind === 'viewport-scroll-y-retained' || kind === 'scrollbar')) return false
     return kinds.some(kind => !['interaction', 'hover', 'selection', 'tooltip', 'scrollbar'].includes(kind))
   }
 
@@ -2417,7 +2504,7 @@ export class DataTableRootNode<
       return
     }
 
-    if (kinds.some(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y')) {
+    if (kinds.some(kind => kind === 'viewport-scroll-x' || kind === 'viewport-scroll-y' || kind === 'viewport-scroll-y-retained')) {
       this.markViewportScrollLayersDirty(kinds)
       return
     }
@@ -2459,14 +2546,16 @@ export class DataTableRootNode<
    */
   private markViewportScrollLayersDirty(kinds: Array<string>): void {
     const layers = new Set<DataTableRenderLayerId>([
-      'body-static',
-      'body-animated',
       'search',
       'selection',
       'interaction',
       'drag-menu-tooltip',
       'scrollbars',
     ])
+    if (!kinds.includes('viewport-scroll-y-retained')) {
+      layers.add('body-static')
+      layers.add('body-animated')
+    }
     if (kinds.includes('viewport-scroll-x')) {
       layers.add('header')
       layers.add('pinned')
