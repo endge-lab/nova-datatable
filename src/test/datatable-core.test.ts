@@ -2406,6 +2406,44 @@ describe('DataTable Root runtime', () => {
     app.destroy()
   })
 
+  it('suppresses heavy overlay layers during active scroll LOD', () => {
+    const app = createApp()
+    const root = mountRoot(app)
+    root.setProps({
+      rows: rows(1_000),
+      rowHeight: 20,
+      headerHeight: 30,
+      view: {
+        search: { mode: 'client' },
+      },
+      performance: {
+        text: {
+          visible: true,
+          mode: 'fast',
+          renderMode: 'run-atlas',
+          refineAfterScrollMs: 120,
+        },
+      },
+    } as never)
+    app.raph.run()
+
+    root.getApi().setSearch({ text: 'Row 10', scope: 'cells', highlight: 'row-cell' })
+    app.raph.run()
+    const searchLayer = (root as any).renderLayers.get('search')
+    expect(searchLayer.segments.length).toBeGreaterThan(0)
+
+    root.getApi().scrollTo(0, 120)
+    app.raph.run()
+    expect(searchLayer.segments.length).toBe(0)
+
+    ;(root as any).scrollLodUntil = 0
+    ;(root as any).finishScrollLodIfIdle()
+    app.raph.run()
+    expect(searchLayer.segments.length).toBeGreaterThan(0)
+
+    app.destroy()
+  })
+
   it('keeps lazy summary sparse during viewport scroll', () => {
     const app = createApp()
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))

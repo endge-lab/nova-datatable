@@ -5665,6 +5665,7 @@ export class DataTableRootNode<
    */
   private renderTextSelectionOverlay(): void {
     if (!this.props.textSelection || !this.props.textSelection.enabled) return
+    if (this.isScrollLodActive() && !this.textSelectionActive) return
     const ranges = this.textSelection.getRanges()
     if (ranges.length === 0) return
 
@@ -5965,6 +5966,7 @@ export class DataTableRootNode<
    * Выполняет отрисовку DataTableRootNode.
    */
   private renderSearchOverlay(): void {
+    if (this.isScrollLodActive()) return
     const searchState = this.getRenderViewState().search
     const highlight = searchState.query.highlight ?? 'cell-text'
     if (!searchState.query.text || !searchHighlightHasRow(highlight)) return
@@ -6247,6 +6249,7 @@ export class DataTableRootNode<
   private renderInteractionLayer(): void {
     const template = this.props.interactionLayerTemplate
     if (!template) return
+    if (this.isScrollLodActive()) return
 
     const state = this.getInteractionState()
     const hoverTarget = this.resizeState ? null : this.hoverTarget
@@ -6414,6 +6417,7 @@ export class DataTableRootNode<
     const target = this.tooltipTarget
     const alpha = this.props.tooltipAlpha
     if (!options || !target || alpha <= 0) return
+    if (this.isScrollLodActive()) return
 
     const cell = this.createCellContext(target)
     if (!cell || cell.zone === 'header') return
