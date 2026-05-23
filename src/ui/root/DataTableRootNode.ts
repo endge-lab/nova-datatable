@@ -1059,7 +1059,12 @@ export class DataTableRootNode<
     const stripRanges = this.resolveBodyStripRanges(previous, next)
     const stripRowCount = stripRanges.reduce((sum, range) => sum + Math.max(0, range.end - range.start), 0)
     if (stripRowCount > 0 && !bodyStatic.targetInitialized) return false
-    if (stripRowCount > Math.max(2, this.props.overscanRows)) return false
+    const maxStripRows = 2
+    if (stripRowCount > maxStripRows) return false
+    if (stripRowCount > 0 && Math.abs(dy) > this.rowHeight * maxStripRows) return false
+    const nextStripRowCount = this.normalizeBodyStripRanges([...this.retainedBodyStripRanges, ...stripRanges])
+      .reduce((sum, range) => sum + Math.max(0, range.end - range.start), 0)
+    if (nextStripRowCount > maxStripRows) return false
 
     this.retainRenderLayerForVerticalScroll(bodyStatic, dy)
     const bodyAnimated = this.renderLayers.get('body-animated')
