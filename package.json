@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "private": false,
-  "version": "0.16.0",
+  "version": "0.16.1",
   "type": "module",
   "module": "./dist/nova-datatable.js",
   "types": "./dist/main.d.ts",
@@ -24,15 +24,15 @@
     "bench": "vitest bench --run src/test/*.bench.ts --config vite.config.ts"
   },
   "dependencies": {
-    "@endge/nova": "^0.5.1",
-    "@endge/nova-ui-kit": "^0.6.0",
-    "@endge/nova-vue": "^0.2.0",
-    "@endge/utils": "^0.23.0",
+    "@endge/nova": "^0.13.4",
+    "@endge/nova-ui-kit": "^0.10.7",
+    "@endge/nova-vue": "^0.3.1",
+    "@endge/utils": "^0.24.3",
     "reflect-metadata": "^0.2.2",
     "vue": "^3.5.25"
   },
   "devDependencies": {
-    "@endge/nova-compiler": "^0.2.0",
+    "@endge/nova-compiler": "^0.6.2",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/tsconfig": "^0.8.1",
     "jsdom": "^26.1.0",
