@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "private": false,
-  "version": "0.16.5",
+  "version": "0.16.6",
   "type": "module",
   "module": "./dist/nova-datatable.js",
   "types": "./dist/main.d.ts",
@@ -21,7 +21,9 @@
     "dev:watch": "vite build --watch",
     "build": "vue-tsc --noCheck && vite build",
     "test": "vitest run --config vite.config.ts",
-    "bench": "vitest bench --run src/test/*.bench.ts --config vite.config.ts"
+    "bench": "vitest bench --run src/test/*.bench.ts --config vite.config.ts",
+    "lint-check": "eslint . --cache",
+    "lint-fix": "eslint . --fix --cache"
   },
   "dependencies": {
     "@endge/nova": "^0.13.6",
@@ -32,10 +34,12 @@
     "vue": "^3.5.25"
   },
   "devDependencies": {
+    "@antfu/eslint-config": "9.3.0",
     "@endge/nova-compiler": "^0.6.2",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/language-core": "^3.3.11",
     "@vue/tsconfig": "^0.9.1",
+    "eslint": "10.9.1",
     "jsdom": "^26.1.0",
     "rimraf": "^6.0.1",
     "typescript": "~6.0.3",
