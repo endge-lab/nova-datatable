@@ -1,7 +1,7 @@
 import path from 'path'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
-import dts from 'vite-plugin-dts'
+import dts from 'unplugin-dts/vite'
 import { novaVitePlugin } from '../@endge-nova-compiler/src/index'
 
 const publicTypesEntry = `import 'reflect-metadata'
@@ -88,7 +88,6 @@ export default defineConfig({
           return { content: publicTypesEntry }
         }
       },
-      logLevel: 'silent',
     }),
   ],
   resolve: {

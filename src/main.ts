@@ -3,7 +3,9 @@ import 'reflect-metadata'
 import NovaDataTableComponent from '@/vue/NovaDataTable.vue'
 import { NovaDataTableSchema } from '@/model/types/datatable.types'
 
-export const NovaDataTable = Object.assign(NovaDataTableComponent, {
+export const NovaDataTable: typeof NovaDataTableComponent & {
+  Root: typeof NovaDataTableSchema.Root
+} = Object.assign(NovaDataTableComponent, {
   Root: NovaDataTableSchema.Root,
 })
 
