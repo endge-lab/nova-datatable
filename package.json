@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "private": false,
-  "version": "0.16.4",
+  "version": "0.16.5",
   "type": "module",
   "module": "./dist/nova-datatable.js",
   "types": "./dist/main.d.ts",
@@ -27,7 +27,7 @@
     "@endge/nova": "^0.13.6",
     "@endge/nova-ui-kit": "^0.10.9",
     "@endge/nova-vue": "^0.3.3",
-    "@endge/utils": "^0.24.5",
+    "@endge/utils": "^0.25.0",
     "reflect-metadata": "^0.2.2",
     "vue": "^3.5.25"
   },
