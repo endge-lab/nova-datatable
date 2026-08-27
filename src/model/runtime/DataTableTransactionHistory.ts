@@ -194,27 +194,6 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
   }
 }
 
-/**
- * Строит обратные deltas до применения исходных изменений.
- */
-export function createInverseDataTableDeltas<Row extends Record<string, any>>(
-  store: DataTableStoreApi<Row>,
-  deltas: Array<DataTableDelta<Row>>,
-): Array<DataTableDelta<Row>> {
-  const model = new DataTableInverseModel(store)
-  const inverseGroups: Array<Array<DataTableDelta<Row>>> = []
-  for (const delta of deltas) {
-    inverseGroups.push(createInverseDeltaGroup(delta, model))
-    model.apply(delta)
-  }
-
-  const inverse: Array<DataTableDelta<Row>> = []
-  for (let index = inverseGroups.length - 1; index >= 0; index -= 1) {
-    inverse.push(...cloneDeltas(inverseGroups[index] ?? []))
-  }
-  return inverse
-}
-
 class DataTableInverseModel<Row extends Record<string, any>> {
   private _order: Array<DataTableRowId> = []
   private readonly _rowsById = new Map<DataTableRowId, Row>()
@@ -366,6 +345,26 @@ class DataTableInverseModel<Row extends Record<string, any>> {
   }
 }
 
+/**
+ * Строит обратные deltas до применения исходных изменений.
+ */
+export function createInverseDataTableDeltas<Row extends Record<string, any>>(
+  store: DataTableStoreApi<Row>,
+  deltas: Array<DataTableDelta<Row>>,
+): Array<DataTableDelta<Row>> {
+  const model = new DataTableInverseModel(store)
+  const inverseGroups: Array<Array<DataTableDelta<Row>>> = []
+  for (const delta of deltas) {
+    inverseGroups.push(createInverseDeltaGroup(delta, model))
+    model.apply(delta)
+  }
+
+  const inverse: Array<DataTableDelta<Row>> = []
+  for (let index = inverseGroups.length - 1; index >= 0; index -= 1) {
+    inverse.push(...cloneDeltas(inverseGroups[index] ?? []))
+  }
+  return inverse
+}
 function createInverseDeltaGroup<Row extends Record<string, any>>(
   delta: DataTableDelta<Row>,
   model: DataTableInverseModel<Row>,

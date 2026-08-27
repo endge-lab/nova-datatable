@@ -562,7 +562,7 @@ function readBooleanProp(node: VNode, key: string): boolean {
   return false
 }
 
-function readFunctionProp(node: VNode, key: string): Function | undefined {
+function readFunctionProp(node: VNode, key: string): ((...args: Array<any>) => unknown) | undefined {
   const value = readProp(node, key)
   return typeof value === 'function' ? value : undefined
 }
