@@ -40,42 +40,42 @@ interface DataTableViewPipelineInput<Row extends Record<string, any>> {
  * Строит текущий view поверх store: sort/filter/manual order/grouping/column order.
  */
 export class DataTableViewPipeline<Row extends Record<string, any> = Record<string, any>> {
-  private columns: Array<DataTableResolvedColumn<Row>> = []
-  private view: DataTableResolvedViewOptions
-  private initialized = false
-  private sort: DataTableSortState = []
-  private filters: DataTableFilterState | DataTableFilterExpression = []
-  private search: DataTableSearchQuery = { text: '' }
-  private searchMatches: Array<DataTableSearchMatch> = []
-  private searchActiveIndex = -1
-  private searchTotalOverride: number | undefined
-  private searchLoading = false
-  private searchCursor: string | undefined
-  private searchPreviousCursor: string | undefined
-  private searchHasMore = false
-  private readonly searchMatchByCell = new Map<string, { match: DataTableSearchMatch, index: number }>()
-  private readonly searchMatchByRow = new Map<string, { match: DataTableSearchMatch, index: number }>()
-  private rowOrder: Array<DataTableRowId> = []
-  private columnOrder: Array<string> = []
-  private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
-  private rows: Array<DataTableViewRow<Row>> = []
-  private groupNodes = new Map<string, DataTableGroupNode<Row>>()
-  private groupingGroupsOverride: Array<DataTableGroupRule<Row>> | null = null
-  private revision = -1
-  private viewSignature = ''
-  private maxClientRows = 100_000
-  private expandedInputSignature = ''
-  private passthrough = false
-  private localSort = false
-  private localFilter = false
-  private localSearch = false
-  private localGrouping = false
+  private _columns: Array<DataTableResolvedColumn<Row>> = []
+  private _view: DataTableResolvedViewOptions
+  private _initialized = false
+  private _sort: DataTableSortState = []
+  private _filters: DataTableFilterState | DataTableFilterExpression = []
+  private _search: DataTableSearchQuery = { text: '' }
+  private _searchMatches: Array<DataTableSearchMatch> = []
+  private _searchActiveIndex = -1
+  private _searchTotalOverride: number | undefined
+  private _searchLoading = false
+  private _searchCursor: string | undefined
+  private _searchPreviousCursor: string | undefined
+  private _searchHasMore = false
+  private readonly _searchMatchByCell = new Map<string, { match: DataTableSearchMatch, index: number }>()
+  private readonly _searchMatchByRow = new Map<string, { match: DataTableSearchMatch, index: number }>()
+  private _rowOrder: Array<DataTableRowId> = []
+  private _columnOrder: Array<string> = []
+  private _groupingExpanded: 'all' | 'none' | Array<string> = 'all'
+  private _rows: Array<DataTableViewRow<Row>> = []
+  private _groupNodes = new Map<string, DataTableGroupNode<Row>>()
+  private _groupingGroupsOverride: Array<DataTableGroupRule<Row>> | null = null
+  private _revision = -1
+  private _viewSignature = ''
+  private _maxClientRows = 100_000
+  private _expandedInputSignature = ''
+  private _passthrough = false
+  private _localSort = false
+  private _localFilter = false
+  private _localSearch = false
+  private _localGrouping = false
 
   /**
    * Создает экземпляр DataTableViewPipeline и подготавливает базовое состояние.
    */
-  constructor(private readonly store: DataTableStoreApi<Row>) {
-    this.view = {
+  constructor(private readonly _store: DataTableStoreApi<Row>) {
+    this._view = {
       sorting: false,
       filtering: false,
       search: false,
@@ -92,46 +92,46 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Синхронизирует options и пересчитывает view при изменении store или state.
    */
   sync(input: DataTableViewPipelineInput<Row>): void {
-    this.columns = input.columns
-    this.view = input.view
-    this.maxClientRows = input.performance.maxClientRows
-    if (this.groupingGroupsOverride && this.view.grouping) {
-      this.view = {
-        ...this.view,
+    this._columns = input.columns
+    this._view = input.view
+    this._maxClientRows = input.performance.maxClientRows
+    if (this._groupingGroupsOverride && this._view.grouping) {
+      this._view = {
+        ...this._view,
         grouping: {
-          ...this.view.grouping,
-          enabled: this.groupingGroupsOverride.length > 0,
-          groups: [...this.groupingGroupsOverride],
+          ...this._view.grouping,
+          enabled: this._groupingGroupsOverride.length > 0,
+          groups: [...this._groupingGroupsOverride],
         },
       }
     }
-    const view = this.view
-    if (!this.initialized) {
-      this.sort = view.sorting ? [...view.sorting.initial] : []
-      this.filters = view.filtering ? cloneFilters(view.filtering.initial) : []
-      this.search = this.createSearchQuery('')
-      this.columnOrder = view.columnOrdering ? [...view.columnOrdering.order] : []
-      this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
-      this.expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
-      this.initialized = true
+    const view = this._view
+    if (!this._initialized) {
+      this._sort = view.sorting ? [...view.sorting.initial] : []
+      this._filters = view.filtering ? cloneFilters(view.filtering.initial) : []
+      this._search = this._createSearchQuery('')
+      this._columnOrder = view.columnOrdering ? [...view.columnOrdering.order] : []
+      this._groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
+      this._expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
+      this._initialized = true
     }
     else {
-      if (view.columnOrdering && view.columnOrdering.order.length > 0 && this.columnOrder.length === 0) {
-        this.columnOrder = [...view.columnOrdering.order]
+      if (view.columnOrdering && view.columnOrdering.order.length > 0 && this._columnOrder.length === 0) {
+        this._columnOrder = [...view.columnOrdering.order]
       }
       const expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
-      if (expandedInputSignature !== this.expandedInputSignature) {
-        this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
-        this.expandedInputSignature = expandedInputSignature
+      if (expandedInputSignature !== this._expandedInputSignature) {
+        this._groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
+        this._expandedInputSignature = expandedInputSignature
       }
     }
 
-    const revision = this.store.takeRevision()
-    const viewSignature = createViewSignature(view, this.groupingExpanded)
-    if (revision !== this.revision || viewSignature !== this.viewSignature) {
-      this.revision = revision
-      this.viewSignature = viewSignature
-      this.rebuild()
+    const revision = this._store.takeRevision()
+    const viewSignature = createViewSignature(view, this._groupingExpanded)
+    if (revision !== this._revision || viewSignature !== this._viewSignature) {
+      this._revision = revision
+      this._viewSignature = viewSignature
+      this._rebuild()
     }
   }
 
@@ -139,16 +139,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Возвращает row Count для DataTableViewPipeline.
    */
   get rowCount(): number {
-    return this.passthrough ? this.store.rowCount : this.rows.length
+    return this._passthrough ? this._store.rowCount : this._rows.length
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getRowAt(viewIndex: number): Row | undefined {
-    const row = this.rows[viewIndex]
+    const row = this._rows[viewIndex]
     if (!row) {
-      return this.store.getRowAt(viewIndex)
+      return this._store.getRowAt(viewIndex)
     }
     return row.kind === 'data' ? row.row : undefined
   }
@@ -157,55 +157,55 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getRowIdAt(viewIndex: number): DataTableRowId | undefined {
-    return this.rows[viewIndex]?.rowId ?? this.store.getRowIdAt(viewIndex)
+    return this._rows[viewIndex]?.rowId ?? this._store.getRowIdAt(viewIndex)
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getStoreIndexAt(viewIndex: number): number | undefined {
-    return this.rows[viewIndex]?.storeIndex ?? viewIndex
+    return this._rows[viewIndex]?.storeIndex ?? viewIndex
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getViewRowAt(viewIndex: number): DataTableViewRow<Row> | undefined {
-    if (this.passthrough) {
-      if (viewIndex < 0 || viewIndex >= this.store.rowCount) {
+    if (this._passthrough) {
+      if (viewIndex < 0 || viewIndex >= this._store.rowCount) {
         return undefined
       }
-      const row = this.store.getRowAt(viewIndex)
+      const row = this._store.getRowAt(viewIndex)
       return {
         kind: 'data',
         row,
-        rowId: this.store.getRowIdAt(viewIndex),
+        rowId: this._store.getRowIdAt(viewIndex),
         storeIndex: viewIndex,
         viewIndex,
         depth: 0,
       }
     }
-    return this.rows[viewIndex]
+    return this._rows[viewIndex]
   }
 
   /**
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findViewIndexByRowId(rowId: DataTableRowId): number | undefined {
-    if (this.passthrough) {
-      return this.store.getRowIndex(rowId)
+    if (this._passthrough) {
+      return this._store.getRowIndex(rowId)
     }
-    return this.rows.find(row => row.kind === 'data' && row.rowId === rowId)?.viewIndex
+    return this._rows.find(row => row.kind === 'data' && row.rowId === rowId)?.viewIndex
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getViewRows(): Array<DataTableViewRow<Row>> {
-    if (this.passthrough) {
-      return Array.from({ length: this.store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
+    if (this._passthrough) {
+      return Array.from({ length: this._store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
     }
-    return [...this.rows]
+    return [...this._rows]
   }
 
   /**
@@ -213,17 +213,17 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   getQuery(): DataTableQueryState {
     return {
-      sort: [...this.sort],
-      filters: cloneFilters(this.filters),
-      search: this.search.text ? { ...this.search, columns: [...(this.search.columns ?? [])] } : undefined,
-      rowOrder: [...this.rowOrder],
-      columnOrder: [...this.columnOrder],
-      grouping: this.view.grouping
+      sort: [...this._sort],
+      filters: cloneFilters(this._filters),
+      search: this._search.text ? { ...this._search, columns: [...(this._search.columns ?? [])] } : undefined,
+      rowOrder: [...this._rowOrder],
+      columnOrder: [...this._columnOrder],
+      grouping: this._view.grouping
         ? {
-            enabled: this.view.grouping.enabled,
-            groups: [...this.view.grouping.groups],
-            expanded: cloneExpanded(this.groupingExpanded),
-            footerPlacement: this.view.grouping.footerPlacement,
+            enabled: this._view.grouping.enabled,
+            groups: [...this._view.grouping.groups],
+            expanded: cloneExpanded(this._groupingExpanded),
+            footerPlacement: this._view.grouping.footerPlacement,
           }
         : undefined,
     }
@@ -234,19 +234,19 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   getState(): DataTableViewState {
     return {
-      sort: [...this.sort],
-      filters: cloneFilters(this.filters),
+      sort: [...this._sort],
+      filters: cloneFilters(this._filters),
       search: this.getSearchState(),
-      rowOrder: [...this.rowOrder],
-      columnOrder: [...this.columnOrder],
+      rowOrder: [...this._rowOrder],
+      columnOrder: [...this._columnOrder],
       grouping: this.getGroupingState(),
       query: this.getQuery(),
       rowCount: this.rowCount,
       mode: {
-        sorting: this.view.sorting ? this.view.sorting.mode : 'off',
-        filtering: this.view.filtering ? this.view.filtering.mode : 'off',
-        search: this.view.search ? this.view.search.mode : 'off',
-        grouping: this.view.grouping ? this.view.grouping.mode : 'off',
+        sorting: this._view.sorting ? this._view.sorting.mode : 'off',
+        filtering: this._view.filtering ? this._view.filtering.mode : 'off',
+        search: this._view.search ? this._view.search.mode : 'off',
+        grouping: this._view.grouping ? this._view.grouping.mode : 'off',
       },
     }
   }
@@ -255,16 +255,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getGroupingState(): DataTableGroupingState<Row> {
-    const expandedGroups = [...this.groupNodes.values()]
+    const expandedGroups = [...this._groupNodes.values()]
       .filter(group => group.expanded)
       .map(group => group.groupId)
     return {
-      enabled: !!(this.view.grouping && this.view.grouping.enabled),
-      mode: this.view.grouping ? this.view.grouping.mode : 'off',
-      groups: this.view.grouping ? [...this.view.grouping.groups as Array<DataTableGroupRule<Row>>] : [],
-      expanded: cloneExpanded(this.groupingExpanded),
+      enabled: !!(this._view.grouping && this._view.grouping.enabled),
+      mode: this._view.grouping ? this._view.grouping.mode : 'off',
+      groups: this._view.grouping ? [...this._view.grouping.groups as Array<DataTableGroupRule<Row>>] : [],
+      expanded: cloneExpanded(this._groupingExpanded),
       expandedGroups,
-      footerPlacement: this.view.grouping ? this.view.grouping.footerPlacement : 'scroll',
+      footerPlacement: this._view.grouping ? this._view.grouping.footerPlacement : 'scroll',
     }
   }
 
@@ -272,35 +272,35 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setSort(sort: DataTableSortState | DataTableSortRule): void {
-    this.sort = normalizeSort(Array.isArray(sort) ? sort : [sort])
-    this.rebuild()
+    this._sort = normalizeSort(Array.isArray(sort) ? sort : [sort])
+    this._rebuild()
   }
 
   /**
    * Выполняет действие cycleSort в рамках ответственности DataTableViewPipeline.
    */
   cycleSort(columnId: string, additive: boolean): void {
-    if (!this.view.sorting) {
+    if (!this._view.sorting) {
       return
     }
-    const current = this.sort.find(rule => rule.columnId === columnId)
+    const current = this._sort.find(rule => rule.columnId === columnId)
     const nextDirection = current?.direction === 'asc'
       ? 'desc'
       : current?.direction === 'desc'
         ? undefined
         : 'asc'
-    const shouldAppend = this.view.sorting.multi && (additive || this.view.sorting.headerClick === 'append')
-    const base = shouldAppend ? this.sort.filter(rule => rule.columnId !== columnId) : []
-    this.sort = normalizeSort(nextDirection ? [...base, { columnId, direction: nextDirection }] : base)
-    this.rebuild()
+    const shouldAppend = this._view.sorting.multi && (additive || this._view.sorting.headerClick === 'append')
+    const base = shouldAppend ? this._sort.filter(rule => rule.columnId !== columnId) : []
+    this._sort = normalizeSort(nextDirection ? [...base, { columnId, direction: nextDirection }] : base)
+    this._rebuild()
   }
 
   /**
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearSort(columnId?: string): void {
-    this.sort = normalizeSort(columnId ? this.sort.filter(rule => rule.columnId !== columnId) : [])
-    this.rebuild()
+    this._sort = normalizeSort(columnId ? this._sort.filter(rule => rule.columnId !== columnId) : [])
+    this._rebuild()
   }
 
   /**
@@ -308,65 +308,65 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   setFilter(columnId: string, filter: Omit<DataTableFilterRule, 'columnId'> | DataTableFilterRule): void {
     const next = { ...filter, columnId } as DataTableFilterRule
-    this.filters = setFilterRule(this.filters, columnId, next)
-    this.rebuild()
+    this._filters = setFilterRule(this._filters, columnId, next)
+    this._rebuild()
   }
 
   /**
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setFilters(filters: DataTableFilterState | DataTableFilterExpression): void {
-    this.filters = cloneFilters(filters)
-    this.rebuild()
+    this._filters = cloneFilters(filters)
+    this._rebuild()
   }
 
   /**
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearFilter(columnId?: string): void {
-    this.filters = columnId ? removeFilterRule(this.filters, columnId) : []
-    this.rebuild()
+    this._filters = columnId ? removeFilterRule(this._filters, columnId) : []
+    this._rebuild()
   }
 
   /**
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setSearch(query: string | DataTableSearchQuery): void {
-    this.search = this.createSearchQuery(query)
-    this.searchTotalOverride = undefined
-    this.searchLoading = false
-    this.searchCursor = undefined
-    this.searchPreviousCursor = undefined
-    this.searchHasMore = false
-    this.rebuild()
+    this._search = this._createSearchQuery(query)
+    this._searchTotalOverride = undefined
+    this._searchLoading = false
+    this._searchCursor = undefined
+    this._searchPreviousCursor = undefined
+    this._searchHasMore = false
+    this._rebuild()
   }
 
   /**
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearSearch(): void {
-    this.search = this.createSearchQuery('')
-    this.searchMatches = []
-    this.reindexSearchMatches()
-    this.searchActiveIndex = -1
-    this.searchTotalOverride = undefined
-    this.searchLoading = false
-    this.searchCursor = undefined
-    this.searchPreviousCursor = undefined
-    this.searchHasMore = false
-    this.rebuild()
+    this._search = this._createSearchQuery('')
+    this._searchMatches = []
+    this._reindexSearchMatches()
+    this._searchActiveIndex = -1
+    this._searchTotalOverride = undefined
+    this._searchLoading = false
+    this._searchCursor = undefined
+    this._searchPreviousCursor = undefined
+    this._searchHasMore = false
+    this._rebuild()
   }
 
   /**
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findNext(): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) {
+    if (this._searchMatches.length === 0) {
       return null
     }
-    const nextIndex = this.searchActiveIndex < 0
+    const nextIndex = this._searchActiveIndex < 0
       ? 0
-      : (this.searchActiveIndex + 1) % this.searchMatches.length
+      : (this._searchActiveIndex + 1) % this._searchMatches.length
     return this.focusSearchMatch(nextIndex)
   }
 
@@ -374,12 +374,12 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findPrevious(): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) {
+    if (this._searchMatches.length === 0) {
       return null
     }
-    const nextIndex = this.searchActiveIndex < 0
-      ? this.searchMatches.length - 1
-      : (this.searchActiveIndex - 1 + this.searchMatches.length) % this.searchMatches.length
+    const nextIndex = this._searchActiveIndex < 0
+      ? this._searchMatches.length - 1
+      : (this._searchActiveIndex - 1 + this._searchMatches.length) % this._searchMatches.length
     return this.focusSearchMatch(nextIndex)
   }
 
@@ -387,32 +387,32 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Переводит focus в целевое состояние DataTableViewPipeline.
    */
   focusSearchMatch(index: number): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) {
+    if (this._searchMatches.length === 0) {
       return null
     }
-    this.searchActiveIndex = clampInteger(index, 0, this.searchMatches.length - 1)
-    return this.searchMatches[this.searchActiveIndex] ?? null
+    this._searchActiveIndex = clampInteger(index, 0, this._searchMatches.length - 1)
+    return this._searchMatches[this._searchActiveIndex] ?? null
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchState(): DataTableSearchState {
-    const activeMatch = this.searchActiveIndex >= 0
-      ? this.searchMatches[this.searchActiveIndex] ?? null
+    const activeMatch = this._searchActiveIndex >= 0
+      ? this._searchMatches[this._searchActiveIndex] ?? null
       : null
     return {
-      query: { ...this.search, columns: [...(this.search.columns ?? [])] },
-      matches: [...this.searchMatches],
-      activeIndex: this.searchActiveIndex,
+      query: { ...this._search, columns: [...(this._search.columns ?? [])] },
+      matches: [...this._searchMatches],
+      activeIndex: this._searchActiveIndex,
       activeMatch,
-      total: this.searchTotalOverride ?? this.searchMatches.length,
-      loading: this.searchLoading,
-      cursor: this.searchCursor,
-      previousCursor: this.searchPreviousCursor,
-      hasMore: this.searchHasMore,
-      mode: this.view.search ? this.view.search.mode : 'off',
-      local: this.localSearch,
+      total: this._searchTotalOverride ?? this._searchMatches.length,
+      loading: this._searchLoading,
+      cursor: this._searchCursor,
+      previousCursor: this._searchPreviousCursor,
+      hasMore: this._searchHasMore,
+      mode: this._view.search ? this._view.search.mode : 'off',
+      local: this._localSearch,
     }
   }
 
@@ -420,7 +420,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Обновляет loading state server-side поиска.
    */
   setServerSearchLoading(loading: boolean): void {
-    this.searchLoading = loading
+    this._searchLoading = loading
   }
 
   /**
@@ -436,16 +436,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     },
     activeIndex = 0,
   ): void {
-    this.searchMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
-    this.reindexSearchMatches()
-    this.searchTotalOverride = result.total
-    this.searchCursor = result.cursor
-    this.searchPreviousCursor = result.previousCursor
-    this.searchHasMore = result.hasMore ?? !!result.cursor
-    this.searchLoading = false
-    this.searchActiveIndex = this.searchMatches.length === 0
+    this._searchMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
+    this._reindexSearchMatches()
+    this._searchTotalOverride = result.total
+    this._searchCursor = result.cursor
+    this._searchPreviousCursor = result.previousCursor
+    this._searchHasMore = result.hasMore ?? !!result.cursor
+    this._searchLoading = false
+    this._searchActiveIndex = this._searchMatches.length === 0
       ? -1
-      : clampInteger(activeIndex, 0, this.searchMatches.length - 1)
+      : clampInteger(activeIndex, 0, this._searchMatches.length - 1)
   }
 
   /**
@@ -462,22 +462,22 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     activeIndex?: number,
   ): void {
     const nextMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
-    this.searchMatches = [...this.searchMatches, ...nextMatches]
-    this.reindexSearchMatches()
-    this.searchTotalOverride = result.total ?? this.searchTotalOverride
-    this.searchCursor = result.cursor
-    this.searchPreviousCursor = result.previousCursor ?? this.searchPreviousCursor
-    this.searchHasMore = result.hasMore ?? !!result.cursor
-    this.searchLoading = false
-    if (this.searchMatches.length === 0) {
-      this.searchActiveIndex = -1
+    this._searchMatches = [...this._searchMatches, ...nextMatches]
+    this._reindexSearchMatches()
+    this._searchTotalOverride = result.total ?? this._searchTotalOverride
+    this._searchCursor = result.cursor
+    this._searchPreviousCursor = result.previousCursor ?? this._searchPreviousCursor
+    this._searchHasMore = result.hasMore ?? !!result.cursor
+    this._searchLoading = false
+    if (this._searchMatches.length === 0) {
+      this._searchActiveIndex = -1
       return
     }
     if (typeof activeIndex === 'number') {
-      this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
+      this._searchActiveIndex = clampInteger(activeIndex, 0, this._searchMatches.length - 1)
     }
-    else if (this.searchActiveIndex < 0) {
-      this.searchActiveIndex = 0
+    else if (this._searchActiveIndex < 0) {
+      this._searchActiveIndex = 0
     }
   }
 
@@ -495,24 +495,24 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     activeIndex?: number,
   ): void {
     const previousMatches = result.matches.map(match => ({ ...match, ranges: match.ranges.map(range => ({ ...range })) }))
-    this.searchMatches = [...previousMatches, ...this.searchMatches]
-    this.reindexSearchMatches()
-    this.searchTotalOverride = result.total ?? this.searchTotalOverride
-    this.searchCursor = result.cursor ?? this.searchCursor
-    this.searchPreviousCursor = result.previousCursor
-    this.searchHasMore = this.searchHasMore || !!this.searchCursor
-    this.searchLoading = false
-    if (this.searchMatches.length === 0) {
-      this.searchActiveIndex = -1
+    this._searchMatches = [...previousMatches, ...this._searchMatches]
+    this._reindexSearchMatches()
+    this._searchTotalOverride = result.total ?? this._searchTotalOverride
+    this._searchCursor = result.cursor ?? this._searchCursor
+    this._searchPreviousCursor = result.previousCursor
+    this._searchHasMore = this._searchHasMore || !!this._searchCursor
+    this._searchLoading = false
+    if (this._searchMatches.length === 0) {
+      this._searchActiveIndex = -1
       return
     }
     if (typeof activeIndex === 'number') {
-      this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
+      this._searchActiveIndex = clampInteger(activeIndex, 0, this._searchMatches.length - 1)
     }
     else {
-      this.searchActiveIndex = previousMatches.length > 0
+      this._searchActiveIndex = previousMatches.length > 0
         ? previousMatches.length - 1
-        : Math.max(0, this.searchActiveIndex)
+        : Math.max(0, this._searchActiveIndex)
     }
   }
 
@@ -520,63 +520,63 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch, index: number } | null {
-    return this.search.scope === 'rows'
-      ? this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
-      : this.searchMatchByCell.get(createSearchCellKey(rowId, columnId)) ?? null
+    return this._search.scope === 'rows'
+      ? this._searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
+      : this._searchMatchByCell.get(createSearchCellKey(rowId, columnId)) ?? null
   }
 
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
   getSearchMatchForRow(rowId: DataTableRowId): { match: DataTableSearchMatch, index: number } | null {
-    return this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
+    return this._searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
   }
 
   /**
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setGrouping(groups: Array<DataTableGroupRule<Row>>): void {
-    if (!this.view.grouping) {
+    if (!this._view.grouping) {
       return
     }
-    this.groupingGroupsOverride = [...groups]
-    this.view = {
-      ...this.view,
+    this._groupingGroupsOverride = [...groups]
+    this._view = {
+      ...this._view,
       grouping: {
-        ...this.view.grouping,
+        ...this._view.grouping,
         enabled: groups.length > 0,
         groups,
       },
     }
-    this.groupingExpanded = this.view.grouping.expanded === 'none' ? 'none' : 'all'
-    this.rebuild()
+    this._groupingExpanded = this._view.grouping.expanded === 'none' ? 'none' : 'all'
+    this._rebuild()
   }
 
   /**
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearGrouping(): void {
-    if (!this.view.grouping) {
+    if (!this._view.grouping) {
       return
     }
-    this.groupingGroupsOverride = []
-    this.view = {
-      ...this.view,
+    this._groupingGroupsOverride = []
+    this._view = {
+      ...this._view,
       grouping: {
-        ...this.view.grouping,
+        ...this._view.grouping,
         enabled: false,
         groups: [],
       },
     }
-    this.groupingExpanded = 'all'
-    this.rebuild()
+    this._groupingExpanded = 'all'
+    this._rebuild()
   }
 
   /**
    * Переключает флаг состояния DataTableViewPipeline.
    */
   toggleGroup(groupId: string): DataTableGroupNode<Row> | undefined {
-    const group = this.groupNodes.get(groupId)
+    const group = this._groupNodes.get(groupId)
     if (!group) {
       return undefined
     }
@@ -585,52 +585,52 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       this.collapseGroup(groupId)
     }
     else { this.expandGroup(groupId) }
-    return this.groupNodes.get(groupId) ?? group
+    return this._groupNodes.get(groupId) ?? group
   }
 
   /**
    * Выполняет действие expandGroup в рамках ответственности DataTableViewPipeline.
    */
   expandGroup(groupId: string): void {
-    this.setGroupExpanded(groupId, true)
+    this._setGroupExpanded(groupId, true)
   }
 
   /**
    * Выполняет действие collapseGroup в рамках ответственности DataTableViewPipeline.
    */
   collapseGroup(groupId: string): void {
-    this.setGroupExpanded(groupId, false)
+    this._setGroupExpanded(groupId, false)
   }
 
   /**
    * Выполняет действие expandAllGroups в рамках ответственности DataTableViewPipeline.
    */
   expandAllGroups(): void {
-    this.groupingExpanded = 'all'
-    this.rebuild()
+    this._groupingExpanded = 'all'
+    this._rebuild()
   }
 
   /**
    * Выполняет действие collapseAllGroups в рамках ответственности DataTableViewPipeline.
    */
   collapseAllGroups(): void {
-    this.groupingExpanded = 'none'
-    this.rebuild()
+    this._groupingExpanded = 'none'
+    this._rebuild()
   }
 
   /**
    * Восстанавливает сохраненное состояние expand/collapse для grouping.
    */
   setGroupingExpanded(expanded: 'all' | 'none' | Array<string>): void {
-    this.groupingExpanded = cloneExpanded(expanded)
-    this.rebuild()
+    this._groupingExpanded = cloneExpanded(expanded)
+    this._rebuild()
   }
 
   /**
    * Выполняет действие reorderRows в рамках ответственности DataTableViewPipeline.
    */
   reorderRows(payload: DataTableRowReorderPayload): DataTableRowReorderPayload {
-    const ids = this.rows
+    const ids = this._rows
       .filter((row): row is DataTableDataViewRow<Row> => row.kind === 'data')
       .map(row => row.rowId)
       .filter((id): id is DataTableRowId => id !== undefined)
@@ -640,14 +640,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     if (id !== undefined) {
       ids.splice(toIndex, 0, id)
     }
-    this.rowOrder = ids
-    this.rebuild()
+    this._rowOrder = ids
+    this._rebuild()
     return {
       ...payload,
       rowId: payload.rowId ?? id,
       fromIndex,
       toIndex,
-      mode: payload.mode ?? ((this.view.rowOrdering && this.view.rowOrdering.mode) || 'view'),
+      mode: payload.mode ?? ((this._view.rowOrdering && this._view.rowOrdering.mode) || 'view'),
     }
   }
 
@@ -655,20 +655,20 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет действие reorderColumns в рамках ответственности DataTableViewPipeline.
    */
   reorderColumns(payload: DataTableColumnReorderPayload, columns: Array<DataTableColumnInput<Row>>): DataTableColumnReorderPayload {
-    const ids = this.columnOrder.length > 0 ? [...this.columnOrder] : columns.map(column => column.id)
+    const ids = this._columnOrder.length > 0 ? [...this._columnOrder] : columns.map(column => column.id)
     const fromIndex = clampInteger(payload.fromIndex, 0, Math.max(0, ids.length - 1))
     const toIndex = clampInteger(payload.toIndex, 0, Math.max(0, ids.length - 1))
     const [id] = ids.splice(fromIndex, 1)
     if (id !== undefined) {
       ids.splice(toIndex, 0, id)
     }
-    this.columnOrder = payload.order ? normalizeColumnOrder(payload.order, columns) : ids
+    this._columnOrder = payload.order ? normalizeColumnOrder(payload.order, columns) : ids
     return {
       ...payload,
       columnId: payload.columnId || id || '',
       fromIndex,
       toIndex,
-      order: [...this.columnOrder],
+      order: [...this._columnOrder],
     }
   }
 
@@ -676,44 +676,44 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setColumnOrder(order: Array<string>, columns: Array<DataTableColumnInput<Row>>): Array<string> {
-    this.columnOrder = normalizeColumnOrder(order, columns)
-    return [...this.columnOrder]
+    this._columnOrder = normalizeColumnOrder(order, columns)
+    return [...this._columnOrder]
   }
 
   /**
    * Сбрасывает состояние к базовым значениям DataTableViewPipeline.
    */
   resetColumnOrder(): void {
-    this.columnOrder = []
+    this._columnOrder = []
   }
 
   /**
    * Сбрасывает состояние к базовым значениям DataTableViewPipeline.
    */
   reset(): void {
-    this.sort = this.view.sorting ? [...this.view.sorting.initial] : []
-    this.filters = this.view.filtering ? cloneFilters(this.view.filtering.initial) : []
-    this.search = this.createSearchQuery('')
-    this.searchMatches = []
-    this.reindexSearchMatches()
-    this.searchActiveIndex = -1
-    this.searchTotalOverride = undefined
-    this.searchLoading = false
-    this.searchCursor = undefined
-    this.searchPreviousCursor = undefined
-    this.searchHasMore = false
-    this.rowOrder = []
-    this.columnOrder = this.view.columnOrdering ? [...this.view.columnOrdering.order] : []
-    this.groupingGroupsOverride = null
-    this.groupingExpanded = this.view.grouping ? cloneExpanded(this.view.grouping.expanded) : 'all'
-    this.rebuild()
+    this._sort = this._view.sorting ? [...this._view.sorting.initial] : []
+    this._filters = this._view.filtering ? cloneFilters(this._view.filtering.initial) : []
+    this._search = this._createSearchQuery('')
+    this._searchMatches = []
+    this._reindexSearchMatches()
+    this._searchActiveIndex = -1
+    this._searchTotalOverride = undefined
+    this._searchLoading = false
+    this._searchCursor = undefined
+    this._searchPreviousCursor = undefined
+    this._searchHasMore = false
+    this._rowOrder = []
+    this._columnOrder = this._view.columnOrdering ? [...this._view.columnOrdering.order] : []
+    this._groupingGroupsOverride = null
+    this._groupingExpanded = this._view.grouping ? cloneExpanded(this._view.grouping.expanded) : 'all'
+    this._rebuild()
   }
 
   /**
    * Выполняет действие orderColumns в рамках ответственности DataTableViewPipeline.
    */
   orderColumns(columns: Array<DataTableColumnInput<Row>>): Array<DataTableColumnInput<Row>> {
-    const order = this.columnOrder.length > 0 ? this.columnOrder : this.view.columnOrdering && this.view.columnOrdering.order
+    const order = this._columnOrder.length > 0 ? this._columnOrder : this._view.columnOrdering && this._view.columnOrdering.order
     if (!order || order.length === 0) {
       return columns
     }
@@ -732,70 +732,70 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет действие isServerControlled в рамках ответственности DataTableViewPipeline.
    */
   isServerControlled(): boolean {
-    return !!(this.view.sorting && this.view.sorting.controlled)
-      || !!(this.view.filtering && this.view.filtering.controlled)
-      || !!(this.view.search && this.view.search.controlled)
-      || !!(this.view.grouping && this.view.grouping.controlled)
+    return !!(this._view.sorting && this._view.sorting.controlled)
+      || !!(this._view.filtering && this._view.filtering.controlled)
+      || !!(this._view.search && this._view.search.controlled)
+      || !!(this._view.grouping && this._view.grouping.controlled)
   }
 
   /**
    * Выполняет внутренний шаг rebuild для DataTableViewPipeline.
    */
-  private rebuild(): void {
-    this.localSort = this.shouldApplyLocal(this.view.sorting ? this.view.sorting.mode : 'server')
-    this.localFilter = this.shouldApplyLocal(this.view.filtering ? this.view.filtering.mode : 'server')
-    this.localSearch = this.isSearchActive() && this.shouldApplyLocal(this.view.search ? this.view.search.mode : 'server')
-    this.localGrouping = !!(this.view.grouping && this.view.grouping.enabled && this.view.grouping.groups.length > 0)
-      && this.shouldApplyLocal(this.view.grouping.mode)
+  private _rebuild(): void {
+    this._localSort = this._shouldApplyLocal(this._view.sorting ? this._view.sorting.mode : 'server')
+    this._localFilter = this._shouldApplyLocal(this._view.filtering ? this._view.filtering.mode : 'server')
+    this._localSearch = this._isSearchActive() && this._shouldApplyLocal(this._view.search ? this._view.search.mode : 'server')
+    this._localGrouping = !!(this._view.grouping && this._view.grouping.enabled && this._view.grouping.groups.length > 0)
+      && this._shouldApplyLocal(this._view.grouping.mode)
 
-    const needsMaterializedRows = (this.localSort && this.sort.length > 0)
-      || (this.localFilter && hasFilters(this.filters))
-      || this.localSearch
-      || this.localGrouping
-      || this.rowOrder.length > 0
+    const needsMaterializedRows = (this._localSort && this._sort.length > 0)
+      || (this._localFilter && hasFilters(this._filters))
+      || this._localSearch
+      || this._localGrouping
+      || this._rowOrder.length > 0
     if (!needsMaterializedRows) {
-      this.passthrough = true
-      this.groupNodes.clear()
-      this.rows = []
-      this.rebuildSearchMatches()
+      this._passthrough = true
+      this._groupNodes.clear()
+      this._rows = []
+      this._rebuildSearchMatches()
       return
     }
 
-    this.passthrough = false
+    this._passthrough = false
     const rows: Array<DataTableDataViewRow<Row>> = []
-    for (let storeIndex = 0; storeIndex < this.store.rowCount; storeIndex += 1) {
-      const row = this.store.getRowAt(storeIndex)
+    for (let storeIndex = 0; storeIndex < this._store.rowCount; storeIndex += 1) {
+      const row = this._store.getRowAt(storeIndex)
       if (!row) {
         continue
       }
-      const rowId = this.store.getRowIdAt(storeIndex)
+      const rowId = this._store.getRowIdAt(storeIndex)
       rows.push({ kind: 'data', row, rowId, storeIndex, viewIndex: rows.length, depth: 0 })
     }
 
-    const filtered = this.localFilter ? rows.filter(item => this.matchesFilters(item)) : rows
-    const sorted = this.localSort && this.sort.length > 0 ? [...filtered].sort((a, b) => this.compareRows(a, b)) : filtered
-    const ordered = this.applyManualOrder(sorted)
-    const searched = this.localSearch && this.search.filter
-      ? ordered.filter(item => this.matchSearchRow(item).length > 0)
+    const filtered = this._localFilter ? rows.filter(item => this._matchesFilters(item)) : rows
+    const sorted = this._localSort && this._sort.length > 0 ? [...filtered].sort((a, b) => this._compareRows(a, b)) : filtered
+    const ordered = this._applyManualOrder(sorted)
+    const searched = this._localSearch && this._search.filter
+      ? ordered.filter(item => this._matchSearchRow(item).length > 0)
       : ordered
-    const grouped = this.localGrouping && this.view.grouping
-      ? this.flattenGroupedRows(searched, this.view.grouping.groups as Array<DataTableGroupRule<Row>>)
+    const grouped = this._localGrouping && this._view.grouping
+      ? this._flattenGroupedRows(searched, this._view.grouping.groups as Array<DataTableGroupRule<Row>>)
       : searched
-    this.rows = grouped.map((item, viewIndex) => ({ ...item, viewIndex }))
-    this.rebuildSearchMatches()
+    this._rows = grouped.map((item, viewIndex) => ({ ...item, viewIndex }))
+    this._rebuildSearchMatches()
   }
 
   /**
    * Выполняет внутренний шаг shouldApplyLocal для DataTableViewPipeline.
    */
-  private shouldApplyLocal(mode: DataTableViewMode): boolean {
-    if (this.view.serverRowModel && this.view.serverRowModel.enabled && this.view.serverRowModel.authoritative) {
+  private _shouldApplyLocal(mode: DataTableViewMode): boolean {
+    if (this._view.serverRowModel && this._view.serverRowModel.enabled && this._view.serverRowModel.authoritative) {
       return false
     }
-    if (this.store.rowCount > this.maxClientRows) {
+    if (this._store.rowCount > this._maxClientRows) {
       return false
     }
-    if (this.store.loadedRowCount < this.store.rowCount) {
+    if (this._store.loadedRowCount < this._store.rowCount) {
       return false
     }
     if (mode === 'client') {
@@ -804,45 +804,45 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     if (mode === 'server') {
       return false
     }
-    return this.store.loadedRowCount >= this.store.rowCount
+    return this._store.loadedRowCount >= this._store.rowCount
   }
 
   /**
    * Выполняет внутренний шаг matchesFilters для DataTableViewPipeline.
    */
-  private matchesFilters(item: DataTableDataViewRow<Row>): boolean {
+  private _matchesFilters(item: DataTableDataViewRow<Row>): boolean {
     if (!item.row || item.rowId === undefined) {
       return false
     }
-    return this.matchesFilterNode(this.filters, item)
+    return this._matchesFilterNode(this._filters, item)
   }
 
   /**
    * Выполняет внутренний шаг matchesFilterNode для DataTableViewPipeline.
    */
-  private matchesFilterNode(
+  private _matchesFilterNode(
     node: DataTableFilterState | DataTableFilterExpression | DataTableFilterRule,
     item: DataTableDataViewRow<Row>,
   ): boolean {
     if (Array.isArray(node)) {
-      return node.every(rule => this.matchesFilterRule(rule, item))
+      return node.every(rule => this._matchesFilterRule(rule, item))
     }
     if ('logic' in node) {
       return node.logic === 'or'
-        ? node.rules.some(rule => this.matchesFilterNode(rule, item))
-        : node.rules.every(rule => this.matchesFilterNode(rule, item))
+        ? node.rules.some(rule => this._matchesFilterNode(rule, item))
+        : node.rules.every(rule => this._matchesFilterNode(rule, item))
     }
-    return this.matchesFilterRule(node, item)
+    return this._matchesFilterRule(node, item)
   }
 
   /**
    * Выполняет внутренний шаг matchesFilterRule для DataTableViewPipeline.
    */
-  private matchesFilterRule(rule: DataTableFilterRule, item: DataTableDataViewRow<Row>): boolean {
+  private _matchesFilterRule(rule: DataTableFilterRule, item: DataTableDataViewRow<Row>): boolean {
     if (!item.row || item.rowId === undefined) {
       return false
     }
-    const column = this.columns.find(candidate => candidate.id === rule.columnId)
+    const column = this._columns.find(candidate => candidate.id === rule.columnId)
     if (!column) {
       return true
     }
@@ -866,10 +866,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг compareRows для DataTableViewPipeline.
    */
-  private compareRows(a: DataTableDataViewRow<Row>, b: DataTableDataViewRow<Row>): number {
-    for (let index = 0; index < this.sort.length; index += 1) {
-      const rule = this.sort[index]!
-      const column = this.columns.find(item => item.id === rule.columnId)
+  private _compareRows(a: DataTableDataViewRow<Row>, b: DataTableDataViewRow<Row>): number {
+    for (let index = 0; index < this._sort.length; index += 1) {
+      const rule = this._sort[index]!
+      const column = this._columns.find(item => item.id === rule.columnId)
       if (!column || !a.row || !b.row) {
         continue
       }
@@ -893,16 +893,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг isSearchActive для DataTableViewPipeline.
    */
-  private isSearchActive(): boolean {
-    return this.search.text.trim().length > 0
+  private _isSearchActive(): boolean {
+    return this._search.text.trim().length > 0
   }
 
   /**
    * Создает runtime-сущность DataTableViewPipeline.
    */
-  private createSearchQuery(query: string | DataTableSearchQuery): DataTableSearchQuery {
+  private _createSearchQuery(query: string | DataTableSearchQuery): DataTableSearchQuery {
     const raw = typeof query === 'string' ? { text: query } : query
-    const options = this.view.search
+    const options = this._view.search
     return {
       text: raw.text ?? '',
       scope: raw.scope ?? options?.scope ?? 'cells',
@@ -919,65 +919,65 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг rebuildSearchMatches для DataTableViewPipeline.
    */
-  private rebuildSearchMatches(): void {
-    if (!this.localSearch || !this.isSearchActive()) {
-      this.searchMatches = []
-      this.reindexSearchMatches()
-      this.searchActiveIndex = -1
-      this.searchTotalOverride = undefined
-      this.searchLoading = false
-      this.searchCursor = undefined
-      this.searchPreviousCursor = undefined
-      this.searchHasMore = false
+  private _rebuildSearchMatches(): void {
+    if (!this._localSearch || !this._isSearchActive()) {
+      this._searchMatches = []
+      this._reindexSearchMatches()
+      this._searchActiveIndex = -1
+      this._searchTotalOverride = undefined
+      this._searchLoading = false
+      this._searchCursor = undefined
+      this._searchPreviousCursor = undefined
+      this._searchHasMore = false
       return
     }
 
-    const sourceRows = this.passthrough
-      ? Array.from({ length: this.store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
-      : this.rows
+    const sourceRows = this._passthrough
+      ? Array.from({ length: this._store.rowCount }, (_item, viewIndex) => this.getViewRowAt(viewIndex)!)
+      : this._rows
     const matches: Array<DataTableSearchMatch> = []
     for (const viewRow of sourceRows) {
       if (!viewRow || viewRow.kind !== 'data' || !viewRow.row) {
         continue
       }
-      matches.push(...this.matchSearchRow(viewRow))
+      matches.push(...this._matchSearchRow(viewRow))
     }
-    this.searchMatches = matches
-    this.reindexSearchMatches()
-    this.searchTotalOverride = undefined
-    this.searchLoading = false
-    this.searchCursor = undefined
-    this.searchPreviousCursor = undefined
-    this.searchHasMore = false
+    this._searchMatches = matches
+    this._reindexSearchMatches()
+    this._searchTotalOverride = undefined
+    this._searchLoading = false
+    this._searchCursor = undefined
+    this._searchPreviousCursor = undefined
+    this._searchHasMore = false
     if (matches.length === 0) {
-      this.searchActiveIndex = -1
+      this._searchActiveIndex = -1
     }
-    else if (this.searchActiveIndex < 0) {
-      this.searchActiveIndex = 0
+    else if (this._searchActiveIndex < 0) {
+      this._searchActiveIndex = 0
     }
-    else { this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1) }
+    else { this._searchActiveIndex = Math.min(this._searchActiveIndex, matches.length - 1) }
   }
 
   /**
    * Rebuilds compact lookup maps for render-time search highlight checks.
    */
-  private reindexSearchMatches(): void {
-    this.searchMatchByCell.clear()
-    this.searchMatchByRow.clear()
+  private _reindexSearchMatches(): void {
+    this._searchMatchByCell.clear()
+    this._searchMatchByRow.clear()
 
-    for (let index = 0; index < this.searchMatches.length; index += 1) {
-      const match = this.searchMatches[index]!
+    for (let index = 0; index < this._searchMatches.length; index += 1) {
+      const match = this._searchMatches[index]!
       const entry = { match, index }
       const rowKey = createSearchRowKey(match.rowId)
-      if (!this.searchMatchByRow.has(rowKey)) {
-        this.searchMatchByRow.set(rowKey, entry)
+      if (!this._searchMatchByRow.has(rowKey)) {
+        this._searchMatchByRow.set(rowKey, entry)
       }
       if (match.columnId === undefined) {
         continue
       }
       const cellKey = createSearchCellKey(match.rowId, match.columnId)
-      if (!this.searchMatchByCell.has(cellKey)) {
-        this.searchMatchByCell.set(cellKey, entry)
+      if (!this._searchMatchByCell.has(cellKey)) {
+        this._searchMatchByCell.set(cellKey, entry)
       }
     }
   }
@@ -985,18 +985,18 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг matchSearchRow для DataTableViewPipeline.
    */
-  private matchSearchRow(viewRow: DataTableDataViewRow<Row>): Array<DataTableSearchMatch> {
+  private _matchSearchRow(viewRow: DataTableDataViewRow<Row>): Array<DataTableSearchMatch> {
     const row = viewRow.row
     if (!row) {
       return []
     }
-    const searchableColumns = this.resolveSearchableColumns()
+    const searchableColumns = this._resolveSearchableColumns()
     const matches: Array<DataTableSearchMatch> = []
-    if (this.search.scope === 'rows') {
+    if (this._search.scope === 'rows') {
       const value = searchableColumns
         .map(column => String(resolveDataTableValue(row, viewRow.storeIndex, column) ?? ''))
         .join(' ')
-      const ranges = findSearchRanges(value, this.search)
+      const ranges = findSearchRanges(value, this._search)
       if (ranges.length > 0) {
         matches.push({
           rowId: viewRow.rowId,
@@ -1011,7 +1011,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 
     for (const column of searchableColumns) {
       const value = String(resolveDataTableValue(row, viewRow.storeIndex, column) ?? '')
-      const ranges = findSearchRanges(value, this.search)
+      const ranges = findSearchRanges(value, this._search)
       if (ranges.length === 0) {
         continue
       }
@@ -1020,7 +1020,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         rowIndex: viewRow.viewIndex,
         storeIndex: viewRow.storeIndex,
         columnId: column.id,
-        columnIndex: this.columns.indexOf(column),
+        columnIndex: this._columns.indexOf(column),
         value,
         ranges,
       })
@@ -1031,26 +1031,26 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Нормализует и возвращает итоговое значение DataTableViewPipeline.
    */
-  private resolveSearchableColumns(): Array<DataTableResolvedColumn<Row>> {
-    const ids = this.search.columns ?? []
+  private _resolveSearchableColumns(): Array<DataTableResolvedColumn<Row>> {
+    const ids = this._search.columns ?? []
     if (ids.length === 0) {
-      return this.columns
+      return this._columns
     }
     const allowed = new Set(ids)
-    return this.columns.filter(column => allowed.has(column.id))
+    return this._columns.filter(column => allowed.has(column.id))
   }
 
   /**
    * Применяет подготовленное состояние DataTableViewPipeline.
    */
-  private applyManualOrder(rows: Array<DataTableDataViewRow<Row>>): Array<DataTableDataViewRow<Row>> {
-    if (this.rowOrder.length === 0) {
+  private _applyManualOrder(rows: Array<DataTableDataViewRow<Row>>): Array<DataTableDataViewRow<Row>> {
+    if (this._rowOrder.length === 0) {
       return rows
     }
     const byId = new Map(rows.map(row => [row.rowId, row]))
     const ordered: Array<DataTableDataViewRow<Row>> = []
     const used = new Set<DataTableRowId>()
-    for (const id of this.rowOrder) {
+    for (const id of this._rowOrder) {
       const row = byId.get(id)
       if (!row) {
         continue
@@ -1069,22 +1069,22 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг flattenGroupedRows для DataTableViewPipeline.
    */
-  private flattenGroupedRows(
+  private _flattenGroupedRows(
     rows: Array<DataTableDataViewRow<Row>>,
     rules: Array<DataTableGroupRule<Row>>,
   ): Array<DataTableViewRow<Row>> {
-    this.groupNodes.clear()
-    const grouped = this.buildGroupNodes(rows, rules, 0, undefined)
+    this._groupNodes.clear()
+    const grouped = this._buildGroupNodes(rows, rules, 0, undefined)
     const flattened: Array<DataTableViewRow<Row>> = []
-    const showGroupRows = this.view.grouping ? this.view.grouping.showGroupRows : true
-    const showGroupFooters = this.view.grouping ? this.view.grouping.showGroupFooters : false
+    const showGroupRows = this._view.grouping ? this._view.grouping.showGroupRows : true
+    const showGroupFooters = this._view.grouping ? this._view.grouping.showGroupFooters : false
     for (const group of grouped) {
-      this.appendGroupRows(group, flattened, showGroupRows, showGroupFooters)
+      this._appendGroupRows(group, flattened, showGroupRows, showGroupFooters)
     }
 
-    const showGrandFooter = this.view.grouping
-      && this.view.grouping.showGrandFooter
-      && (this.view.grouping.footerPlacement === 'scroll' || this.view.grouping.footerPlacement === 'both')
+    const showGrandFooter = this._view.grouping
+      && this._view.grouping.showGrandFooter
+      && (this._view.grouping.footerPlacement === 'scroll' || this._view.grouping.footerPlacement === 'both')
     if (showGrandFooter) {
       const materializedRows = rows.map(item => item.row).filter((row): row is Row => !!row)
       flattened.push({
@@ -1093,7 +1093,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         storeIndex: -1,
         viewIndex: flattened.length,
         depth: 0,
-        aggregate: this.computeAggregate(materializedRows, rules),
+        aggregate: this._computeAggregate(materializedRows, rules),
         rows: materializedRows,
       })
     }
@@ -1103,7 +1103,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Собирает runtime-структуру DataTableViewPipeline.
    */
-  private buildGroupNodes(
+  private _buildGroupNodes(
     rows: Array<DataTableDataViewRow<Row>>,
     rules: Array<DataTableGroupRule<Row>>,
     depth: number,
@@ -1119,7 +1119,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       if (!row.row) {
         continue
       }
-      const key = this.resolveGroupKey(rule, row.row, row.storeIndex)
+      const key = this._resolveGroupKey(rule, row.row, row.storeIndex)
       const label = formatGroupLabel(key)
       const bucketId = String(label)
       const bucket = buckets.get(bucketId)
@@ -1142,23 +1142,23 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         rows: groupRows,
         count: groupRows.length,
         parentId,
-        aggregate: this.computeAggregate(groupRows, [rule]),
-        expanded: this.isGroupExpanded(groupId),
+        aggregate: this._computeAggregate(groupRows, [rule]),
+        expanded: this._isGroupExpanded(groupId),
         children: [],
       }
-      const childGroups = this.buildGroupNodes(bucket.rows, rules, depth + 1, groupId)
+      const childGroups = this._buildGroupNodes(bucket.rows, rules, depth + 1, groupId)
       node.children = childGroups.length > 0 ? childGroups : bucket.rows.map(row => ({ ...row, depth: depth + 1 }))
-      this.groupNodes.set(groupId, node)
+      this._groupNodes.set(groupId, node)
       return node
     })
 
-    return this.sortGroups(groups, rule)
+    return this._sortGroups(groups, rule)
   }
 
   /**
    * Добавляет сущность в runtime-коллекцию DataTableViewPipeline.
    */
-  private appendGroupRows(
+  private _appendGroupRows(
     group: DataTableGroupNode<Row>,
     target: Array<DataTableViewRow<Row>>,
     showGroupRows: boolean,
@@ -1176,7 +1176,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     }
 
     if (group.expanded) {
-      if (showGroupFooters && this.view.groupingPinnedRows && this.view.groupingPinnedRows.placement === 'group-start') {
+      if (showGroupFooters && this._view.groupingPinnedRows && this._view.groupingPinnedRows.placement === 'group-start') {
         target.push({
           kind: 'group-footer',
           group,
@@ -1190,9 +1190,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         if ('kind' in child && child.kind === 'data') {
           target.push({ ...child, viewIndex: target.length })
         }
-        else { this.appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters) }
+        else { this._appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters) }
       }
-      if (showGroupFooters && (!this.view.groupingPinnedRows || this.view.groupingPinnedRows.placement !== 'group-start')) {
+      if (showGroupFooters && (!this._view.groupingPinnedRows || this._view.groupingPinnedRows.placement !== 'group-start')) {
         target.push({
           kind: 'group-footer',
           group,
@@ -1208,7 +1208,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Нормализует и возвращает итоговое значение DataTableViewPipeline.
    */
-  private resolveGroupKey(rule: DataTableGroupRule<Row>, row: Row, index: number): unknown {
+  private _resolveGroupKey(rule: DataTableGroupRule<Row>, row: Row, index: number): unknown {
     if (rule.value) {
       return rule.value(row, index)
     }
@@ -1221,7 +1221,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг sortGroups для DataTableViewPipeline.
    */
-  private sortGroups(groups: Array<DataTableGroupNode<Row>>, rule: DataTableGroupRule<Row>): Array<DataTableGroupNode<Row>> {
+  private _sortGroups(groups: Array<DataTableGroupNode<Row>>, rule: DataTableGroupRule<Row>): Array<DataTableGroupNode<Row>> {
     if (!rule.sort) {
       return groups
     }
@@ -1237,11 +1237,11 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Вычисляет производное значение DataTableViewPipeline.
    */
-  private computeAggregate(rows: Array<Row>, rules: Array<DataTableGroupRule<Row>>): Record<string, unknown> {
+  private _computeAggregate(rows: Array<Row>, rules: Array<DataTableGroupRule<Row>>): Record<string, unknown> {
     const aggregate: Record<string, unknown> = { count: rows.length }
     for (const rule of rules) {
       for (const [key, aggregator] of Object.entries(rule.aggregates ?? {})) {
-        aggregate[key] = this.resolveAggregate(rows, key, aggregator, rule)
+        aggregate[key] = this._resolveAggregate(rows, key, aggregator, rule)
       }
     }
     return aggregate
@@ -1250,7 +1250,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Нормализует и возвращает итоговое значение DataTableViewPipeline.
    */
-  private resolveAggregate(
+  private _resolveAggregate(
     rows: Array<Row>,
     key: string,
     aggregator: DataTableAggregator<Row>,
@@ -1295,39 +1295,39 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Выполняет внутренний шаг isGroupExpanded для DataTableViewPipeline.
    */
-  private isGroupExpanded(groupId: string): boolean {
-    if (this.groupingExpanded === 'all') {
+  private _isGroupExpanded(groupId: string): boolean {
+    if (this._groupingExpanded === 'all') {
       return true
     }
-    if (this.groupingExpanded === 'none') {
+    if (this._groupingExpanded === 'none') {
       return false
     }
-    return this.groupingExpanded.includes(groupId)
+    return this._groupingExpanded.includes(groupId)
   }
 
   /**
    * Обновляет значение состояния DataTableViewPipeline.
    */
-  private setGroupExpanded(groupId: string, expanded: boolean): void {
-    const allGroupIds = [...this.groupNodes.keys()]
-    if (this.groupingExpanded === 'all') {
+  private _setGroupExpanded(groupId: string, expanded: boolean): void {
+    const allGroupIds = [...this._groupNodes.keys()]
+    if (this._groupingExpanded === 'all') {
       if (expanded) {
         return
       }
-      this.groupingExpanded = allGroupIds.filter(id => id !== groupId)
+      this._groupingExpanded = allGroupIds.filter(id => id !== groupId)
     }
-    else if (this.groupingExpanded === 'none') {
-      this.groupingExpanded = expanded ? [groupId] : []
+    else if (this._groupingExpanded === 'none') {
+      this._groupingExpanded = expanded ? [groupId] : []
     }
     else {
-      const set = new Set(this.groupingExpanded)
+      const set = new Set(this._groupingExpanded)
       if (expanded) {
         set.add(groupId)
       }
       else { set.delete(groupId) }
-      this.groupingExpanded = [...set]
+      this._groupingExpanded = [...set]
     }
-    this.rebuild()
+    this._rebuild()
   }
 }
 

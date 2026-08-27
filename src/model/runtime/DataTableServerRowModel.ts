@@ -26,23 +26,23 @@ export interface DataTableServerRowModelSnapshot {
  * Координирует lazy/server-side запросы, summary и SSE deltas без материализации view.
  */
 export class DataTableServerRowModel<Row extends Record<string, any> = Record<string, any>> {
-  private query: DataTableQueryState | null = null
-  private querySignature = ''
-  private revision = 0
-  private requestId = 0
-  private summaryRequestId = 0
-  private summary: DataTableSummaryState | null = null
-  private unsubscribe: (() => void) | void
-  private abortController: AbortController | null = null
-  private loading = false
-  private error: string | null = null
-  private staleResponsesIgnored = 0
-  private cacheHits = 0
-  private cacheMisses = 0
+  private _query: DataTableQueryState | null = null
+  private _querySignature = ''
+  private _revision = 0
+  private _requestId = 0
+  private _summaryRequestId = 0
+  private _summary: DataTableSummaryState | null = null
+  private _unsubscribe: (() => void) | void
+  private _abortController: AbortController | null = null
+  private _loading = false
+  private _error: string | null = null
+  private _staleResponsesIgnored = 0
+  private _cacheHits = 0
+  private _cacheMisses = 0
 
   constructor(
-    private readonly store: DataTableStoreApi<Row>,
-    private readonly emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void,
+    private readonly _store: DataTableStoreApi<Row>,
+    private readonly _emitDelta: (delta: DataTableDelta<Row> | Array<DataTableDelta<Row>>) => void,
   ) {}
 
   /**
@@ -50,24 +50,24 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    */
   sync(query: DataTableQueryState, options: { subscribe: boolean }): boolean {
     const signature = JSON.stringify(query)
-    const queryChanged = signature !== this.querySignature
-    const subscribeChanged = options.subscribe !== !!this.unsubscribe
+    const queryChanged = signature !== this._querySignature
+    const subscribeChanged = options.subscribe !== !!this._unsubscribe
     if (!queryChanged && !subscribeChanged) {
       return false
     }
 
     if (!queryChanged) {
-      this.syncSubscription(options.subscribe)
+      this._syncSubscription(options.subscribe)
       return false
     }
 
-    this.query = cloneQuery(query)
-    this.querySignature = signature
-    this.revision += 1
-    this.summary = null
-    this.abortController?.abort()
-    this.abortController = null
-    this.syncSubscription(options.subscribe)
+    this._query = cloneQuery(query)
+    this._querySignature = signature
+    this._revision += 1
+    this._summary = null
+    this._abortController?.abort()
+    this._abortController = null
+    this._syncSubscription(options.subscribe)
     return true
   }
 
@@ -75,39 +75,39 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    * Загружает range с защитой от устаревших ответов.
    */
   async ensureRange(range: DataTableRange): Promise<boolean> {
-    const query = this.query
+    const query = this._query
     if (!query) {
       return false
     }
-    const revision = this.revision
-    const requestId = ++this.requestId
+    const revision = this._revision
+    const requestId = ++this._requestId
     const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null
-    this.abortController = abortController
-    this.loading = true
-    this.error = null
+    this._abortController = abortController
+    this._loading = true
+    this._error = null
     try {
-      await this.store.ensureRange(range, query, {
+      await this._store.ensureRange(range, query, {
         revision,
         requestId,
         signal: abortController?.signal,
       })
-      const fresh = revision === this.revision && !abortController?.signal.aborted
+      const fresh = revision === this._revision && !abortController?.signal.aborted
       if (!fresh) {
-        this.staleResponsesIgnored += 1
+        this._staleResponsesIgnored += 1
       }
-      else { this.cacheMisses += 1 }
+      else { this._cacheMisses += 1 }
       return fresh
     }
     catch (error) {
-      this.error = error instanceof Error ? error.message : 'Range request failed'
+      this._error = error instanceof Error ? error.message : 'Range request failed'
       throw error
     }
     finally {
-      if (this.abortController === abortController) {
-        this.abortController = null
+      if (this._abortController === abortController) {
+        this._abortController = null
       }
-      if (revision === this.revision) {
-        this.loading = false
+      if (revision === this._revision) {
+        this._loading = false
       }
     }
   }
@@ -116,39 +116,39 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    * Загружает server-side summary для текущего query.
    */
   async loadSummary(): Promise<DataTableSummaryState | null> {
-    const query = this.query
+    const query = this._query
     if (!query) {
       return null
     }
-    const revision = this.revision
-    const requestId = ++this.summaryRequestId
+    const revision = this._revision
+    const requestId = ++this._summaryRequestId
     const loadingState = {
-      values: this.summary?.values ?? {},
-      rowCount: this.store.rowCount,
+      values: this._summary?.values ?? {},
+      rowCount: this._store.rowCount,
       revision,
       source: 'server' as const,
       loading: true,
     }
-    this.summary = loadingState
-    const values = await this.store.loadSummary(query)
-    if (revision !== this.revision || requestId !== this.summaryRequestId) {
-      return this.summary
+    this._summary = loadingState
+    const values = await this._store.loadSummary(query)
+    if (revision !== this._revision || requestId !== this._summaryRequestId) {
+      return this._summary
     }
-    this.summary = {
+    this._summary = {
       values: values ?? {},
-      rowCount: this.store.rowCount,
+      rowCount: this._store.rowCount,
       revision,
       source: 'server',
       loading: false,
     }
-    return this.summary
+    return this._summary
   }
 
   /**
    * Загружает distinct filter values через server-side adapter.
    */
   async loadFilterValues(columnId: string, cursor?: string): Promise<{ values: Array<unknown>, cursor?: string, hasMore?: boolean } | undefined> {
-    return this.store.loadFilterValues(columnId, this.query ?? undefined, cursor)
+    return this._store.loadFilterValues(columnId, this._query ?? undefined, cursor)
   }
 
   /**
@@ -159,14 +159,14 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
     cursor?: string,
     direction: DataTableSearchDirection = 'next',
   ): Promise<DataTableSearchResult | undefined> {
-    return this.store.searchSource(search, this.query ?? undefined, cursor, direction)
+    return this._store.searchSource(search, this._query ?? undefined, cursor, direction)
   }
 
   /**
    * Делегирует lookup rowId -> view index текущему server-side adapter.
    */
   resolveRowIndex(rowId: DataTableRowId): Promise<number | undefined> {
-    return this.store.resolveSourceRowIndex(rowId, this.query ?? undefined)
+    return this._store.resolveSourceRowIndex(rowId, this._query ?? undefined)
   }
 
   /**
@@ -174,15 +174,15 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    */
   snapshot(): DataTableServerRowModelSnapshot {
     return {
-      query: this.query ? cloneQuery(this.query) : null,
-      revision: this.revision,
-      requestId: this.requestId,
-      summary: this.summary ? { ...this.summary, values: { ...this.summary.values } } : null,
-      subscribed: !!this.unsubscribe,
-      loading: this.loading,
-      error: this.error,
-      staleResponsesIgnored: this.staleResponsesIgnored,
-      cacheHitRate: this.cacheHits + this.cacheMisses === 0 ? 0 : this.cacheHits / (this.cacheHits + this.cacheMisses),
+      query: this._query ? cloneQuery(this._query) : null,
+      revision: this._revision,
+      requestId: this._requestId,
+      summary: this._summary ? { ...this._summary, values: { ...this._summary.values } } : null,
+      subscribed: !!this._unsubscribe,
+      loading: this._loading,
+      error: this._error,
+      staleResponsesIgnored: this._staleResponsesIgnored,
+      cacheHitRate: this._cacheHits + this._cacheMisses === 0 ? 0 : this._cacheHits / (this._cacheHits + this._cacheMisses),
     }
   }
 
@@ -190,25 +190,25 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    * Освобождает активную server-side подписку.
    */
   dispose(): void {
-    this.unsubscribe?.()
-    this.abortController?.abort()
-    this.unsubscribe = undefined
-    this.abortController = null
-    this.query = null
-    this.querySignature = ''
-    this.summary = null
+    this._unsubscribe?.()
+    this._abortController?.abort()
+    this._unsubscribe = undefined
+    this._abortController = null
+    this._query = null
+    this._querySignature = ''
+    this._summary = null
   }
 
   /**
    * Синхронизирует source.subscribe с текущим query.
    */
-  private syncSubscription(enabled: boolean): void {
-    this.unsubscribe?.()
-    this.unsubscribe = undefined
-    if (!enabled || !this.query) {
+  private _syncSubscription(enabled: boolean): void {
+    this._unsubscribe?.()
+    this._unsubscribe = undefined
+    if (!enabled || !this._query) {
       return
     }
-    this.unsubscribe = this.store.subscribe(this.query, this.emitDelta)
+    this._unsubscribe = this._store.subscribe(this._query, this._emitDelta)
   }
 }
 

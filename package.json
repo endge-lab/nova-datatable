@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "type": "module",
-  "version": "0.16.9",
+  "version": "0.16.10",
   "private": false,
   "sideEffects": false,
   "exports": {

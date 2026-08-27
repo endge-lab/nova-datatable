@@ -255,7 +255,7 @@ describe('dataTable enterprise clipboard paste', () => {
       raw: 'not-a-number',
       message: 'Invalid number',
     })
-    expect((root as any).clipboardFeedback).toMatchObject({
+    expect((root as any)._clipboardFeedback).toMatchObject({
       visible: true,
       tone: 'error',
       reason: 'paste-rejected',
@@ -295,7 +295,7 @@ describe('dataTable enterprise clipboard paste', () => {
     expect(result.skipped).toBe(1)
     expect(result.invalid).toHaveLength(1)
     expect(result.invalid[0]).toMatchObject({ columnId: 'amount', message: 'Invalid number' })
-    expect((root as any).clipboardFeedback).toMatchObject({
+    expect((root as any)._clipboardFeedback).toMatchObject({
       visible: true,
       tone: 'warning',
       reason: 'paste-partial',

@@ -39,20 +39,20 @@ export function normalizeDataTableHistory(
  * Управляет undo/redo стеком без смешивания history со store.
  */
 export class DataTableTransactionHistory<Row extends Record<string, any> = Record<string, any>> {
-  private undoStack: Array<DataTableTransaction<Row>> = []
-  private redoStack: Array<DataTableTransaction<Row>> = []
-  private idCounter = 0
+  private _undoStack: Array<DataTableTransaction<Row>> = []
+  private _redoStack: Array<DataTableTransaction<Row>> = []
+  private _idCounter = 0
 
   constructor(
-    private readonly store: DataTableStoreApi<Row>,
-    private options: false | DataTableResolvedHistoryOptions,
+    private readonly _store: DataTableStoreApi<Row>,
+    private _options: false | DataTableResolvedHistoryOptions,
   ) {}
 
   /**
    * Обновляет настройки history без потери текущего стека.
    */
   configure(options: false | DataTableResolvedHistoryOptions): void {
-    this.options = options
+    this._options = options
     if (options === false || !options.enabled) {
       this.clear()
     }
@@ -70,14 +70,14 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
       return null
     }
 
-    const inverseDeltas = createInverseDataTableDeltas(this.store, items)
-    this.store.applyDeltaBatch(items)
+    const inverseDeltas = createInverseDataTableDeltas(this._store, items)
+    this._store.applyDeltaBatch(items)
 
-    if (!this.shouldRecord(options.source, options.record)) {
+    if (!this._shouldRecord(options.source, options.record)) {
       return null
     }
     const transaction = this.createTransaction(items, inverseDeltas, options)
-    this.push(transaction)
+    this._push(transaction)
     return transaction
   }
 
@@ -85,22 +85,22 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    * Записывает уже примененную transaction.
    */
   record(transaction: DataTableTransaction<Row>): void {
-    if (!this.shouldRecord(transaction.source, true)) {
+    if (!this._shouldRecord(transaction.source, true)) {
       return
     }
-    this.push(transaction)
+    this._push(transaction)
   }
 
   /**
    * Откатывает последнюю transaction.
    */
   undo(): boolean {
-    const transaction = this.undoStack.pop()
+    const transaction = this._undoStack.pop()
     if (!transaction) {
       return false
     }
-    this.store.applyDeltaBatch(transaction.inverseDeltas)
-    this.redoStack.push({ ...transaction, status: 'reverted' })
+    this._store.applyDeltaBatch(transaction.inverseDeltas)
+    this._redoStack.push({ ...transaction, status: 'reverted' })
     return true
   }
 
@@ -108,12 +108,12 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    * Повторяет последнюю отмененную transaction.
    */
   redo(): boolean {
-    const transaction = this.redoStack.pop()
+    const transaction = this._redoStack.pop()
     if (!transaction) {
       return false
     }
-    this.store.applyDeltaBatch(transaction.deltas)
-    this.undoStack.push({ ...transaction, status: 'committed' })
+    this._store.applyDeltaBatch(transaction.deltas)
+    this._undoStack.push({ ...transaction, status: 'committed' })
     return true
   }
 
@@ -122,11 +122,11 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    */
   state(): DataTableHistoryState<Row> {
     return {
-      canUndo: this.undoStack.length > 0,
-      canRedo: this.redoStack.length > 0,
-      undoDepth: this.undoStack.length,
-      redoDepth: this.redoStack.length,
-      current: this.undoStack[this.undoStack.length - 1],
+      canUndo: this._undoStack.length > 0,
+      canRedo: this._redoStack.length > 0,
+      undoDepth: this._undoStack.length,
+      redoDepth: this._redoStack.length,
+      current: this._undoStack[this._undoStack.length - 1],
     }
   }
 
@@ -134,22 +134,22 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    * Проверяет возможность undo.
    */
   canUndo(): boolean {
-    return this.undoStack.length > 0
+    return this._undoStack.length > 0
   }
 
   /**
    * Проверяет возможность redo.
    */
   canRedo(): boolean {
-    return this.redoStack.length > 0
+    return this._redoStack.length > 0
   }
 
   /**
    * Очищает историю.
    */
   clear(): void {
-    this.undoStack = []
-    this.redoStack = []
+    this._undoStack = []
+    this._redoStack = []
   }
 
   /**
@@ -160,9 +160,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
     inverseDeltas: Array<DataTableDelta<Row>>,
     options: { source: DataTableCommitSource, label?: string, status?: DataTableTransaction<Row>['status'] },
   ): DataTableTransaction<Row> {
-    this.idCounter += 1
+    this._idCounter += 1
     return {
-      id: `dt-tx-${this.idCounter}`,
+      id: `dt-tx-${this._idCounter}`,
       label: options.label,
       source: options.source,
       deltas: cloneDeltas(deltas),
@@ -175,21 +175,21 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
   /**
    * Проверяет, нужно ли записывать источник в history.
    */
-  private shouldRecord(source: DataTableCommitSource, record: boolean | undefined): boolean {
-    if (record === false || this.options === false || !this.options.enabled) {
+  private _shouldRecord(source: DataTableCommitSource, record: boolean | undefined): boolean {
+    if (record === false || this._options === false || !this._options.enabled) {
       return false
     }
-    return this.options.include.includes(source)
+    return this._options.include.includes(source)
   }
 
   /**
    * Добавляет transaction с учетом лимита стека.
    */
-  private push(transaction: DataTableTransaction<Row>): void {
-    this.undoStack.push(transaction)
-    this.redoStack = []
-    if (this.options !== false && this.undoStack.length > this.options.maxEntries) {
-      this.undoStack.splice(0, this.undoStack.length - this.options.maxEntries)
+  private _push(transaction: DataTableTransaction<Row>): void {
+    this._undoStack.push(transaction)
+    this._redoStack = []
+    if (this._options !== false && this._undoStack.length > this._options.maxEntries) {
+      this._undoStack.splice(0, this._undoStack.length - this._options.maxEntries)
     }
   }
 }
@@ -216,8 +216,8 @@ export function createInverseDataTableDeltas<Row extends Record<string, any>>(
 }
 
 class DataTableInverseModel<Row extends Record<string, any>> {
-  private order: Array<DataTableRowId> = []
-  private readonly rowsById = new Map<DataTableRowId, Row>()
+  private _order: Array<DataTableRowId> = []
+  private readonly _rowsById = new Map<DataTableRowId, Row>()
 
   /**
    * Создает расчетную модель для inverse deltas из текущего store snapshot.
@@ -229,9 +229,9 @@ class DataTableInverseModel<Row extends Record<string, any>> {
         continue
       }
       const row = store.getRow(rowId) ?? store.getRowAt(index)
-      this.order.push(rowId)
+      this._order.push(rowId)
       if (row) {
-        this.rowsById.set(rowId, cloneRow(row))
+        this._rowsById.set(rowId, cloneRow(row))
       }
     }
   }
@@ -240,14 +240,14 @@ class DataTableInverseModel<Row extends Record<string, any>> {
    * Возвращает количество строк в расчетной модели.
    */
   get rowCount(): number {
-    return this.order.length
+    return this._order.length
   }
 
   /**
    * Возвращает строку по id.
    */
   getRow(rowId: DataTableRowId): Row | undefined {
-    const row = this.rowsById.get(rowId)
+    const row = this._rowsById.get(rowId)
     return row ? cloneRow(row) : undefined
   }
 
@@ -255,7 +255,7 @@ class DataTableInverseModel<Row extends Record<string, any>> {
    * Возвращает строку по индексу.
    */
   getRowAt(index: number): Row | undefined {
-    const rowId = this.order[index]
+    const rowId = this._order[index]
     return rowId === undefined ? undefined : this.getRow(rowId)
   }
 
@@ -263,7 +263,7 @@ class DataTableInverseModel<Row extends Record<string, any>> {
    * Возвращает индекс строки по id.
    */
   getRowIndex(rowId: DataTableRowId): number | undefined {
-    const index = this.order.indexOf(rowId)
+    const index = this._order.indexOf(rowId)
     return index >= 0 ? index : undefined
   }
 
@@ -271,7 +271,7 @@ class DataTableInverseModel<Row extends Record<string, any>> {
    * Возвращает значение ячейки по текущей расчетной модели.
    */
   getCell(rowId: DataTableRowId, columnId: string): unknown {
-    return this.rowsById.get(rowId)?.[columnId]
+    return this._rowsById.get(rowId)?.[columnId]
   }
 
   /**
@@ -286,82 +286,82 @@ class DataTableInverseModel<Row extends Record<string, any>> {
    */
   apply(delta: DataTableDelta<Row>): void {
     if (delta.type === 'setCell') {
-      this.patchRow(delta.rowId, { [delta.columnId]: delta.value } as Partial<Row>)
+      this._patchRow(delta.rowId, { [delta.columnId]: delta.value } as Partial<Row>)
     }
     else if (delta.type === 'patch') {
-      this.patchRow(delta.rowId, delta.patch)
+      this._patchRow(delta.rowId, delta.patch)
     }
     else if (delta.type === 'insert') {
-      this.insertRows(delta.index, delta.rows)
+      this._insertRows(delta.index, delta.rows)
     }
     else if (delta.type === 'remove') {
-      this.removeRows(delta.rowIds)
+      this._removeRows(delta.rowIds)
     }
     else if (delta.type === 'move') {
-      this.moveRow(delta.rowId, delta.toIndex)
+      this._moveRow(delta.rowId, delta.toIndex)
     }
     else if (delta.type === 'replaceRange') {
-      this.replaceRange(delta.start, delta.rows)
+      this._replaceRange(delta.start, delta.rows)
     }
   }
 
-  private patchRow(rowId: DataTableRowId, patch: Partial<Row>): void {
-    const row = this.rowsById.get(rowId)
+  private _patchRow(rowId: DataTableRowId, patch: Partial<Row>): void {
+    const row = this._rowsById.get(rowId)
     if (!row) {
       return
     }
-    this.rowsById.set(rowId, { ...row, ...patch })
+    this._rowsById.set(rowId, { ...row, ...patch })
   }
 
-  private insertRows(index: number | undefined, rows: Array<Row>): void {
+  private _insertRows(index: number | undefined, rows: Array<Row>): void {
     if (rows.length === 0) {
       return
     }
-    const start = clampHistoryIndex(index ?? this.order.length, 0, this.order.length)
+    const start = clampHistoryIndex(index ?? this._order.length, 0, this._order.length)
     const rowIds = rows.map((row, offset) => this.resolveRowId(row, start + offset))
-    this.order.splice(start, 0, ...rowIds)
+    this._order.splice(start, 0, ...rowIds)
     rows.forEach((row, offset) => {
-      this.rowsById.set(rowIds[offset]!, cloneRow(row))
+      this._rowsById.set(rowIds[offset]!, cloneRow(row))
     })
   }
 
-  private removeRows(rowIds: Array<DataTableRowId>): void {
+  private _removeRows(rowIds: Array<DataTableRowId>): void {
     if (rowIds.length === 0) {
       return
     }
     const removeSet = new Set(rowIds)
-    this.order = this.order.filter(rowId => !removeSet.has(rowId))
+    this._order = this._order.filter(rowId => !removeSet.has(rowId))
     for (const rowId of rowIds) {
-      this.rowsById.delete(rowId)
+      this._rowsById.delete(rowId)
     }
   }
 
-  private moveRow(rowId: DataTableRowId, toIndex: number): void {
-    const fromIndex = this.order.indexOf(rowId)
+  private _moveRow(rowId: DataTableRowId, toIndex: number): void {
+    const fromIndex = this._order.indexOf(rowId)
     if (fromIndex < 0) {
       return
     }
-    const [row] = this.order.splice(fromIndex, 1)
+    const [row] = this._order.splice(fromIndex, 1)
     if (row === undefined) {
       return
     }
-    this.order.splice(clampHistoryIndex(toIndex, 0, this.order.length), 0, row)
+    this._order.splice(clampHistoryIndex(toIndex, 0, this._order.length), 0, row)
   }
 
-  private replaceRange(start: number, rows: Array<Row>): void {
+  private _replaceRange(start: number, rows: Array<Row>): void {
     if (rows.length === 0) {
       return
     }
-    const safeStart = clampHistoryIndex(start, 0, this.order.length)
+    const safeStart = clampHistoryIndex(start, 0, this._order.length)
     const rowIds = rows.map((row, offset) => this.resolveRowId(row, safeStart + offset))
-    const removed = this.order.splice(safeStart, rows.length, ...rowIds)
+    const removed = this._order.splice(safeStart, rows.length, ...rowIds)
     for (const rowId of removed) {
-      if (!this.order.includes(rowId)) {
-        this.rowsById.delete(rowId)
+      if (!this._order.includes(rowId)) {
+        this._rowsById.delete(rowId)
       }
     }
     rows.forEach((row, offset) => {
-      this.rowsById.set(rowIds[offset]!, cloneRow(row))
+      this._rowsById.set(rowIds[offset]!, cloneRow(row))
     })
   }
 }

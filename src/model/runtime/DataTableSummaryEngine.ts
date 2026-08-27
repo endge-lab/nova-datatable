@@ -27,29 +27,29 @@ interface SummaryAccumulator {
  * Инкрементально считает summary для видимых/загруженных строк без участия UI render pass.
  */
 export class DataTableSummaryEngine<Row extends Record<string, any> = Record<string, any>> {
-  private readonly accumulators = new Map<string, SummaryAccumulator>()
-  private rules: Array<DataTableSummaryRule<Row>> = []
-  private rowCount = 0
-  private revision = 0
+  private readonly _accumulators = new Map<string, SummaryAccumulator>()
+  private _rules: Array<DataTableSummaryRule<Row>> = []
+  private _rowCount = 0
+  private _revision = 0
 
   /**
    * Вычисляет производное значение DataTableSummaryEngine.
    */
   compute(rows: Array<Row>, rules: Array<DataTableSummaryRule<Row>>): DataTableSummaryResult {
-    this.rules = [...rules]
-    this.accumulators.clear()
-    this.rowCount = rows.length
+    this._rules = [...rules]
+    this._accumulators.clear()
+    this._rowCount = rows.length
 
     for (const rule of rules) {
-      this.accumulators.set(rule.id, createAccumulator(rule.aggregate))
+      this._accumulators.set(rule.id, createAccumulator(rule.aggregate))
     }
 
     rows.forEach((row, index) => {
       for (const rule of rules) {
-        this.addValue(rule, row, index)
+        this._addValue(rule, row, index)
       }
     })
-    this.revision += 1
+    this._revision += 1
     return this.snapshot()
   }
 
@@ -61,21 +61,21 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
       return this.snapshot()
     }
     if (!previous && next) {
-      this.rowCount += 1
+      this._rowCount += 1
     }
     if (previous && !next) {
-      this.rowCount = Math.max(0, this.rowCount - 1)
+      this._rowCount = Math.max(0, this._rowCount - 1)
     }
 
-    for (const rule of this.rules) {
+    for (const rule of this._rules) {
       if (previous) {
-        this.removeValue(rule, previous, index)
+        this._removeValue(rule, previous, index)
       }
       if (next) {
-        this.addValue(rule, next, index)
+        this._addValue(rule, next, index)
       }
     }
-    this.revision += 1
+    this._revision += 1
     return this.snapshot()
   }
 
@@ -84,21 +84,21 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
    */
   snapshot(): DataTableSummaryResult {
     const values: Record<string, unknown> = {}
-    for (const [id, accumulator] of this.accumulators) {
+    for (const [id, accumulator] of this._accumulators) {
       values[id] = resolveAccumulatorValue(accumulator)
     }
     return {
       values,
-      rowCount: this.rowCount,
-      revision: this.revision,
+      rowCount: this._rowCount,
+      revision: this._revision,
     }
   }
 
   /**
    * Выполняет внутренний шаг addValue для DataTableSummaryEngine.
    */
-  private addValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
-    const accumulator = this.accumulators.get(rule.id)
+  private _addValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
+    const accumulator = this._accumulators.get(rule.id)
     if (!accumulator) {
       return
     }
@@ -107,7 +107,7 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
       return
     }
 
-    const value = this.resolveNumber(rule, row, index)
+    const value = this._resolveNumber(rule, row, index)
     if (value === undefined) {
       return
     }
@@ -121,8 +121,8 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
   /**
    * Удаляет сущность из runtime-коллекции DataTableSummaryEngine.
    */
-  private removeValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
-    const accumulator = this.accumulators.get(rule.id)
+  private _removeValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
+    const accumulator = this._accumulators.get(rule.id)
     if (!accumulator) {
       return
     }
@@ -131,7 +131,7 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
       return
     }
 
-    const value = this.resolveNumber(rule, row, index)
+    const value = this._resolveNumber(rule, row, index)
     if (value === undefined) {
       return
     }
@@ -156,7 +156,7 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
   /**
    * Нормализует и возвращает итоговое значение DataTableSummaryEngine.
    */
-  private resolveNumber(rule: DataTableSummaryRule<Row>, row: Row, index: number): number | undefined {
+  private _resolveNumber(rule: DataTableSummaryRule<Row>, row: Row, index: number): number | undefined {
     const raw = rule.value
       ? rule.value(row, index)
       : rule.field

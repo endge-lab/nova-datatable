@@ -48,58 +48,58 @@ export interface DataTableDetailFlattenResult<Row extends Record<string, any> = 
  * Управляет чистым состоянием раскрытия detail rows.
  */
 export class DataTableDetailExpansionController {
-  private expanded: 'all' | 'none' | Set<DataTableRowId>
+  private _expanded: 'all' | 'none' | Set<DataTableRowId>
 
   /**
    * Создает controller с нормализованным состоянием detail rows.
    */
   constructor(initial: DataTableDetailExpansionState = 'none') {
-    this.expanded = normalizeExpansionState(initial)
+    this._expanded = normalizeExpansionState(initial)
   }
 
   /**
    * Проверяет, раскрыта ли detail row для исходной строки.
    */
   isExpanded(rowId: DataTableRowId): boolean {
-    if (this.expanded === 'all') {
+    if (this._expanded === 'all') {
       return true
     }
-    if (this.expanded === 'none') {
+    if (this._expanded === 'none') {
       return false
     }
-    return this.expanded.has(rowId)
+    return this._expanded.has(rowId)
   }
 
   /**
    * Раскрывает detail row для одной или нескольких строк.
    */
   expand(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'all') {
+    if (this._expanded === 'all') {
       return
     }
-    const set = this.expanded === 'none' ? new Set<DataTableRowId>() : new Set(this.expanded)
+    const set = this._expanded === 'none' ? new Set<DataTableRowId>() : new Set(this._expanded)
     for (const rowId of toArray(rowIds)) {
       set.add(rowId)
     }
-    this.expanded = set
+    this._expanded = set
   }
 
   /**
    * Сворачивает detail row для одной или нескольких строк.
    */
   collapse(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'none') {
+    if (this._expanded === 'none') {
       return
     }
-    if (this.expanded === 'all') {
-      this.expanded = 'none'
+    if (this._expanded === 'all') {
+      this._expanded = 'none'
       return
     }
-    const set = new Set(this.expanded)
+    const set = new Set(this._expanded)
     for (const rowId of toArray(rowIds)) {
       set.delete(rowId)
     }
-    this.expanded = set.size === 0 ? 'none' : set
+    this._expanded = set.size === 0 ? 'none' : set
   }
 
   /**
@@ -118,31 +118,31 @@ export class DataTableDetailExpansionController {
    * Раскрывает все detail rows.
    */
   expandAll(): void {
-    this.expanded = 'all'
+    this._expanded = 'all'
   }
 
   /**
    * Сворачивает все detail rows.
    */
   collapseAll(): void {
-    this.expanded = 'none'
+    this._expanded = 'none'
   }
 
   /**
    * Заменяет состояние раскрытия detail rows.
    */
   replace(next: DataTableDetailExpansionState): void {
-    this.expanded = normalizeExpansionState(next)
+    this._expanded = normalizeExpansionState(next)
   }
 
   /**
    * Возвращает сериализуемый snapshot состояния detail rows.
    */
   snapshot(): 'all' | 'none' | Array<DataTableRowId> {
-    if (this.expanded === 'all' || this.expanded === 'none') {
-      return this.expanded
+    if (this._expanded === 'all' || this._expanded === 'none') {
+      return this._expanded
     }
-    return [...this.expanded]
+    return [...this._expanded]
   }
 }
 

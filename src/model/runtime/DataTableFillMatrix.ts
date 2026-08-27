@@ -87,12 +87,10 @@ export function parseDataTableCsv(
 export function parseDataTableHtmlTable(text: string): Array<Array<string>> {
   const rows: Array<Array<string>> = []
   const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi
-  let rowMatch: RegExpExecArray | null
-  while ((rowMatch = rowPattern.exec(text)) !== null) {
+  for (let rowMatch = rowPattern.exec(text); rowMatch !== null; rowMatch = rowPattern.exec(text)) {
     const cells: Array<string> = []
     const cellPattern = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi
-    let cellMatch: RegExpExecArray | null
-    while ((cellMatch = cellPattern.exec(rowMatch[1] ?? '')) !== null) {
+    for (let cellMatch = cellPattern.exec(rowMatch[1] ?? ''); cellMatch !== null; cellMatch = cellPattern.exec(rowMatch[1] ?? '')) {
       cells.push(normalizeHtmlCell(cellMatch[1] ?? ''))
     }
     if (cells.length > 0) {

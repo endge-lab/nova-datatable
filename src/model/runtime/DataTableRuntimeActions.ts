@@ -8,34 +8,34 @@ export class DataTableRuntimeActions<Row extends Record<string, any>> {
   /**
    * Создает actions для конкретного root node.
    */
-  constructor(private readonly root: DataTableRootNode<Row>) {}
+  constructor(private readonly _root: DataTableRootNode<Row>) {}
 
   /**
    * Обновляет scroll viewport.
    */
   scrollTo(x: number, y: number): void {
-    this.root.setScroll(x, y)
+    this._root.setScroll(x, y)
   }
 
   /**
    * Прокручивает таблицу к строке.
    */
   scrollToRow(rowIndex: number): void {
-    this.root.setScroll(this.root.scrollX, rowIndex * this.root.rowHeight)
+    this._root.setScroll(this._root.scrollX, rowIndex * this._root.rowHeight)
   }
 
   /**
    * Меняет ширину колонки.
    */
   resizeColumn(columnId: string, width: number): boolean {
-    return this.root.applyColumnWidth(columnId, width)
+    return this._root.applyColumnWidth(columnId, width)
   }
 
   /**
    * Обновляет одну ячейку.
    */
   setCell(rowId: DataTableRowId, columnId: string, value: unknown): void {
-    this.root.store.setCell(rowId, columnId, value)
-    this.root.invalidateDataTable(['data', 'layout'])
+    this._root.store.setCell(rowId, columnId, value)
+    this._root.invalidateDataTable(['data', 'layout'])
   }
 }

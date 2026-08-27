@@ -29,13 +29,13 @@ export interface DataTableCommitPlanInput<Row extends Record<string, any> = Reco
  * Создает pure-планы применения транзакций для optimistic и transactional commit стратегий.
  */
 export class DataTableCommitController<Row extends Record<string, any> = Record<string, any>> {
-  private readonly defaultStrategy: DataTableCommitStrategy
+  private readonly _defaultStrategy: DataTableCommitStrategy
 
   /**
    * Создает controller без прямого доступа к store или network layer.
    */
   constructor(options: DataTableCommitControllerOptions = {}) {
-    this.defaultStrategy = options.strategy ?? 'optimistic'
+    this._defaultStrategy = options.strategy ?? 'optimistic'
   }
 
   /**
@@ -44,7 +44,7 @@ export class DataTableCommitController<Row extends Record<string, any> = Record<
   createPlan(input: DataTableCommitPlanInput<Row>): DataTableCommitPlan<Row> {
     return createDataTableCommitPlan({
       transaction: input.transaction,
-      strategy: input.strategy ?? this.defaultStrategy,
+      strategy: input.strategy ?? this._defaultStrategy,
     })
   }
 

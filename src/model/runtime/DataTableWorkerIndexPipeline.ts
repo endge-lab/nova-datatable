@@ -62,25 +62,25 @@ interface DataTableWorkerIndexedRow<Row extends Record<string, any> = Record<str
  * Симулирует worker-side index pipeline для sort/filter/search без доступа к UI runtime.
  */
 export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Record<string, any>> {
-  private rows: Array<DataTableWorkerIndexedRow<Row>>
-  private columns: Array<DataTableWorkerIndexedColumn<Row>>
-  private columnById: Map<string, DataTableWorkerIndexedColumn<Row>>
-  private requestId = 0
+  private _rows: Array<DataTableWorkerIndexedRow<Row>>
+  private _columns: Array<DataTableWorkerIndexedColumn<Row>>
+  private _columnById: Map<string, DataTableWorkerIndexedColumn<Row>>
+  private _requestId = 0
 
   /**
    * Создает индекс строк и колонок для worker query pipeline.
    */
   constructor(options: DataTableWorkerIndexPipelineOptions<Row>) {
-    this.columns = [...options.columns]
-    this.columnById = new Map(this.columns.map(column => [column.id, column]))
-    this.rows = this.createRows(options.rows, options.getRowId)
+    this._columns = [...options.columns]
+    this._columnById = new Map(this._columns.map(column => [column.id, column]))
+    this._rows = this._createRows(options.rows, options.getRowId)
   }
 
   /**
    * Возвращает количество строк в worker index.
    */
   get rowCount(): number {
-    return this.rows.length
+    return this._rows.length
   }
 
   /**
@@ -88,36 +88,36 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
    */
   query(query: DataTableQueryState, options: DataTableWorkerQueryOptions = {}): DataTableWorkerQueryResult<Row> {
     const startedAt = Date.now()
-    const requestId = ++this.requestId
+    const requestId = ++this._requestId
     let valueReads = 0
     const readValue = (row: DataTableWorkerIndexedRow<Row>, columnId: string): unknown => {
       valueReads += 1
       return row.values.get(columnId)
     }
 
-    let result = this.rows
+    let result = this._rows
     const scannedRows = result.length
     if (hasFilters(query.filters)) {
-      result = result.filter(row => this.matchesFilterNode(query.filters, row, readValue))
+      result = result.filter(row => this._matchesFilterNode(query.filters, row, readValue))
     }
     const filteredRows = result.length
 
     if (query.sort.length > 0) {
-      result = [...result].sort((left, right) => this.compareRows(left, right, query, readValue))
+      result = [...result].sort((left, right) => this._compareRows(left, right, query, readValue))
     }
     const sortedRows = result.length
 
-    result = this.applyManualOrder(result, query.rowOrder)
+    result = this._applyManualOrder(result, query.rowOrder)
 
     const search = query.search
     if (search?.text.trim()) {
       result = search.filter
-        ? result.filter((row, index) => this.matchSearchRow(row, index, search, readValue).length > 0)
+        ? result.filter((row, index) => this._matchSearchRow(row, index, search, readValue).length > 0)
         : result
     }
 
     const matches = search?.text.trim()
-      ? result.flatMap((row, index) => this.matchSearchRow(row, index, search, readValue))
+      ? result.flatMap((row, index) => this._matchSearchRow(row, index, search, readValue))
       : []
     const offset = clampInteger(options.offset ?? 0, 0, result.length)
     const limit = Math.max(0, Math.floor(Number.isFinite(options.limit) ? options.limit! : result.length))
@@ -131,7 +131,7 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
       matches,
       total: result.length,
       metrics: {
-        inputRows: this.rows.length,
+        inputRows: this._rows.length,
         scannedRows,
         filteredRows,
         sortedRows,
@@ -155,19 +155,19 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
    * Пересобирает индекс строк с прежними колонками.
    */
   replaceRows(rows: ReadonlyArray<Row>, getRowId: (row: Row, index: number) => DataTableRowId): void {
-    this.rows = this.createRows(rows, getRowId)
+    this._rows = this._createRows(rows, getRowId)
   }
 
   /**
    * Создает индексированные строки с предрасчитанными значениями колонок.
    */
-  private createRows(
+  private _createRows(
     rows: ReadonlyArray<Row>,
     getRowId: (row: Row, index: number) => DataTableRowId,
   ): Array<DataTableWorkerIndexedRow<Row>> {
     return rows.map((row, index) => {
       const values = new Map<string, unknown>()
-      for (const column of this.columns) {
+      for (const column of this._columns) {
         values.set(column.id, resolveColumnValue(row, index, column))
       }
       return {
@@ -182,18 +182,18 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   /**
    * Проверяет filter expression для одной indexed row.
    */
-  private matchesFilterNode(
+  private _matchesFilterNode(
     node: DataTableFilterState | DataTableFilterExpression | DataTableFilterRule,
     row: DataTableWorkerIndexedRow<Row>,
     readValue: (row: DataTableWorkerIndexedRow<Row>, columnId: string) => unknown,
   ): boolean {
     if (Array.isArray(node)) {
-      return node.every(rule => this.matchesFilterNode(rule, row, readValue))
+      return node.every(rule => this._matchesFilterNode(rule, row, readValue))
     }
     if ('logic' in node) {
       return node.logic === 'or'
-        ? node.rules.some(rule => this.matchesFilterNode(rule, row, readValue))
-        : node.rules.every(rule => this.matchesFilterNode(rule, row, readValue))
+        ? node.rules.some(rule => this._matchesFilterNode(rule, row, readValue))
+        : node.rules.every(rule => this._matchesFilterNode(rule, row, readValue))
     }
     return matchesFilterRule(node, readValue(row, node.columnId))
   }
@@ -201,14 +201,14 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   /**
    * Сравнивает две indexed rows по query sort state.
    */
-  private compareRows(
+  private _compareRows(
     left: DataTableWorkerIndexedRow<Row>,
     right: DataTableWorkerIndexedRow<Row>,
     query: DataTableQueryState,
     readValue: (row: DataTableWorkerIndexedRow<Row>, columnId: string) => unknown,
   ): number {
     for (const rule of query.sort) {
-      if (!this.columnById.has(rule.columnId)) {
+      if (!this._columnById.has(rule.columnId)) {
         continue
       }
       const compared = compareValues(readValue(left, rule.columnId), readValue(right, rule.columnId))
@@ -222,7 +222,7 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   /**
    * Применяет ручной row order поверх результата worker query.
    */
-  private applyManualOrder(
+  private _applyManualOrder(
     rows: Array<DataTableWorkerIndexedRow<Row>>,
     rowOrder: ReadonlyArray<DataTableRowId>,
   ): Array<DataTableWorkerIndexedRow<Row>> {
@@ -251,13 +251,13 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   /**
    * Находит search matches для одной indexed row.
    */
-  private matchSearchRow(
+  private _matchSearchRow(
     row: DataTableWorkerIndexedRow<Row>,
     rowIndex: number,
     search: DataTableSearchQuery,
     readValue: (row: DataTableWorkerIndexedRow<Row>, columnId: string) => unknown,
   ): Array<DataTableSearchMatch> {
-    const columns = this.resolveSearchColumns(search)
+    const columns = this._resolveSearchColumns(search)
     if (search.scope === 'rows') {
       const value = columns.map(column => String(readValue(row, column.id) ?? '')).join(' ')
       const ranges = findSearchRanges(value, search)
@@ -278,7 +278,7 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
         rowIndex,
         storeIndex: row.index,
         columnId: column.id,
-        columnIndex: this.columns.indexOf(column),
+        columnIndex: this._columns.indexOf(column),
         value,
         ranges,
       })
@@ -289,8 +289,8 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   /**
    * Возвращает колонки, участвующие в search query.
    */
-  private resolveSearchColumns(search: DataTableSearchQuery): Array<DataTableWorkerIndexedColumn<Row>> {
-    const searchable = this.columns.filter(column => column.searchable !== false)
+  private _resolveSearchColumns(search: DataTableSearchQuery): Array<DataTableWorkerIndexedColumn<Row>> {
+    const searchable = this._columns.filter(column => column.searchable !== false)
     if (!search.columns || search.columns.length === 0) {
       return searchable
     }

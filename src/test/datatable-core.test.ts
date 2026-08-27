@@ -733,7 +733,7 @@ describe('dataTable scrollbars', () => {
     } as never)
     root.getApi().scrollTo(180, 120)
 
-    const geometry = (root as any).createScrollbarGeometry()
+    const geometry = (root as any)._createScrollbarGeometry()
     expect(geometry.horizontal).toMatchObject({
       axis: 'horizontal',
       value: 180,
@@ -2073,7 +2073,7 @@ describe('dataTable Root runtime', () => {
     const root = mountRoot(app)
     const tabEvent = new KeyboardEvent('keydown', { key: 'Tab' })
 
-    expect((root as any).resolveKeyboardDirection(tabEvent, {
+    expect((root as any)._resolveKeyboardDirection(tabEvent, {
       enabled: true,
       arrows: true,
       tab: 'commit-edit',
@@ -2083,7 +2083,7 @@ describe('dataTable Root runtime', () => {
       shiftSelection: true,
       ctrlMetaShortcuts: true,
     })).toBeNull()
-    expect((root as any).resolveKeyboardDirection(tabEvent, {
+    expect((root as any)._resolveKeyboardDirection(tabEvent, {
       enabled: true,
       arrows: true,
       tab: 'move',
@@ -2319,7 +2319,7 @@ describe('dataTable Root runtime', () => {
     app.raph.run()
     app.raph.run()
     const root = uiRoot.children[0] as DataTableRootNode<Row>
-    const bodyLayer = (root as any).renderLayers.get('body-static')
+    const bodyLayer = (root as any)._renderLayers.get('body-static')
     const bodySchema = bodyLayer.segments.flatMap((segment: { schema: NovaSchema }) => segment.schema)
     const bodyRectBatchItems = bodyLayer.segments
       .filter((segment: { kind: string }) => segment.kind === 'rect-batch')
@@ -2411,8 +2411,8 @@ describe('dataTable Root runtime', () => {
 
     expect(activeViewport.rowRange.start).toBe(9)
 
-    ;(root as any).scrollLodUntil = 0
-    ;(root as any).finishScrollLodIfIdle()
+    ;(root as any)._scrollLodUntil = 0
+    ;(root as any)._finishScrollLodIfIdle()
     app.raph.run()
     const idleViewport = root.getApi().getViewport()
 
@@ -2444,15 +2444,15 @@ describe('dataTable Root runtime', () => {
 
     root.getApi().setSearch({ text: 'Row 10', scope: 'cells', highlight: 'row-cell' })
     app.raph.run()
-    const searchLayer = (root as any).renderLayers.get('search')
+    const searchLayer = (root as any)._renderLayers.get('search')
     expect(searchLayer.segments.length).toBeGreaterThan(0)
 
     root.getApi().scrollTo(0, 120)
     app.raph.run()
     expect(searchLayer.segments.length).toBe(0)
 
-    ;(root as any).scrollLodUntil = 0
-    ;(root as any).finishScrollLodIfIdle()
+    ;(root as any)._scrollLodUntil = 0
+    ;(root as any)._finishScrollLodIfIdle()
     app.raph.run()
     expect(searchLayer.segments.length).toBeGreaterThan(0)
 
@@ -2495,7 +2495,7 @@ describe('dataTable Root runtime', () => {
     app.raph.run()
     app.raph.run()
     const root = uiRoot.children[0] as DataTableRootNode<Row>
-    const getViewRows = vi.spyOn((root as any).viewPipeline, 'getViewRows')
+    const getViewRows = vi.spyOn((root as any)._viewPipeline, 'getViewRows')
 
     root.getApi().scrollTo(0, 120)
     app.raph.run()
@@ -2583,7 +2583,7 @@ describe('dataTable Root runtime', () => {
 
     expect(acquireLoop).toHaveBeenCalledWith('nova-datatable:animated-cells')
     ;(root as any).__resetRenderLayerDiagnostics()
-    ;(root as any).markRenderLayersDirty(['body-animated'])
+    ;(root as any)._markRenderLayersDirty(['body-animated'])
     ;(root as any).dirty({ render: true })
     app.invalidate()
     app.raph.run()
@@ -2727,14 +2727,14 @@ describe('dataTable Root runtime', () => {
     const app = createApp()
     const root = mountRoot(app)
     const collectTextItems = () => {
-      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ schema: NovaSchema }> }>
+      const layers = (root as any)._renderLayers as Map<string, { segments: Array<{ schema: NovaSchema }> }>
       return [...layers.values()]
         .flatMap(layer => layer.segments)
         .flatMap(segment => segment.schema)
         .filter(item => item.type === 'text')
     }
     const collectTextBatches = () => {
-      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ kind: string, textBatch?: { meta?: Record<string, unknown> } }> }>
+      const layers = (root as any)._renderLayers as Map<string, { segments: Array<{ kind: string, textBatch?: { meta?: Record<string, unknown> } }> }>
       return [...layers.values()]
         .flatMap(layer => layer.segments)
         .filter(segment => segment.kind === 'text-batch' && segment.textBatch)

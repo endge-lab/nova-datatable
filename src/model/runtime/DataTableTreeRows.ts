@@ -38,40 +38,40 @@ export interface DataTableTreeFlattenResult<Row extends Record<string, any> = Re
  * Управляет чистым состоянием раскрытия tree rows без привязки к Vue или Canvas.
  */
 export class DataTableTreeExpansionController {
-  private expanded: 'all' | 'none' | Set<DataTableRowId>
+  private _expanded: 'all' | 'none' | Set<DataTableRowId>
 
   /**
    * Создает controller с нормализованным состоянием раскрытия.
    */
   constructor(initial: DataTableTreeExpansionState = 'none') {
-    this.expanded = normalizeExpansionState(initial)
+    this._expanded = normalizeExpansionState(initial)
   }
 
   /**
    * Проверяет, раскрыта ли строка дерева.
    */
   isExpanded(rowId: DataTableRowId): boolean {
-    if (this.expanded === 'all') {
+    if (this._expanded === 'all') {
       return true
     }
-    if (this.expanded === 'none') {
+    if (this._expanded === 'none') {
       return false
     }
-    return this.expanded.has(rowId)
+    return this._expanded.has(rowId)
   }
 
   /**
    * Раскрывает одну или несколько строк дерева.
    */
   expand(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'all') {
+    if (this._expanded === 'all') {
       return
     }
-    const set = this.expanded === 'none' ? new Set<DataTableRowId>() : new Set(this.expanded)
+    const set = this._expanded === 'none' ? new Set<DataTableRowId>() : new Set(this._expanded)
     for (const rowId of toArray(rowIds)) {
       set.add(rowId)
     }
-    this.expanded = set
+    this._expanded = set
   }
 
   /**
@@ -79,18 +79,18 @@ export class DataTableTreeExpansionController {
    */
   collapse(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
     const ids = toArray(rowIds)
-    if (this.expanded === 'none') {
+    if (this._expanded === 'none') {
       return
     }
-    if (this.expanded === 'all') {
-      this.expanded = 'none'
+    if (this._expanded === 'all') {
+      this._expanded = 'none'
       return
     }
-    const set = new Set(this.expanded)
+    const set = new Set(this._expanded)
     for (const rowId of ids) {
       set.delete(rowId)
     }
-    this.expanded = set.size === 0 ? 'none' : set
+    this._expanded = set.size === 0 ? 'none' : set
   }
 
   /**
@@ -109,31 +109,31 @@ export class DataTableTreeExpansionController {
    * Раскрывает все строки дерева.
    */
   expandAll(): void {
-    this.expanded = 'all'
+    this._expanded = 'all'
   }
 
   /**
    * Сворачивает все строки дерева.
    */
   collapseAll(): void {
-    this.expanded = 'none'
+    this._expanded = 'none'
   }
 
   /**
    * Заменяет состояние раскрытия внешним snapshot.
    */
   replace(next: DataTableTreeExpansionState): void {
-    this.expanded = normalizeExpansionState(next)
+    this._expanded = normalizeExpansionState(next)
   }
 
   /**
    * Возвращает сериализуемый snapshot состояния раскрытия.
    */
   snapshot(): 'all' | 'none' | Array<DataTableRowId> {
-    if (this.expanded === 'all' || this.expanded === 'none') {
-      return this.expanded
+    if (this._expanded === 'all' || this._expanded === 'none') {
+      return this._expanded
     }
-    return [...this.expanded]
+    return [...this._expanded]
   }
 }
 
