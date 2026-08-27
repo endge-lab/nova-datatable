@@ -106,6 +106,7 @@ import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { DataTableTransactionHistory } from '@/model/runtime/DataTableTransactionHistory'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
+import { DataTableStatePersistence_Service } from '@/model/services/DataTableStatePersistence_Service'
 import {
   DATATABLE_ROOT_NODE_DESCRIPTOR,
 
@@ -443,6 +444,7 @@ export class DataTableRootNode<
   private serverRowModel: DataTableServerRowModel<Row>
   private readonly textSelection = new NovaTextSelectionService<DataTableTextSelectionContext>()
   private readonly summaryEngine = new DataTableSummaryEngine<Row>()
+  private readonly _statePersistenceService = new DataTableStatePersistence_Service()
   private transactionHistory!: DataTableTransactionHistory<Row>
   private readonly widthOverrides = new Map<string, number>()
   private columnStateOverride: DataTableColumnState | null = null
@@ -1194,19 +1196,12 @@ export class DataTableRootNode<
    */
   private saveState(): DataTablePersistedState<Row> | null {
     const persistence = this.props.statePersistence
-    const storage = this.resolveStatePersistenceStorage()
-    if (!persistence || !storage) {
+    if (!persistence) {
       return null
     }
 
     const state = this.createPersistedState()
-    try {
-      storage.setItem(persistence.key, JSON.stringify(state))
-      return state
-    }
-    catch {
-      return null
-    }
+    return this._statePersistenceService.write(persistence, JSON.stringify(state)) ? state : null
   }
 
   /**
@@ -1232,18 +1227,12 @@ export class DataTableRootNode<
    * Удаляет сохраненное состояние.
    */
   private resetPersistedState(): void {
-    const storage = this.resolveStatePersistenceStorage()
     const persistence = this.props.statePersistence
     this.clearStatePersistenceTimer()
-    if (!storage || !persistence) {
+    if (!persistence) {
       return
     }
-    try {
-      storage.removeItem(persistence.key)
-    }
-    catch {
-      // Storage can be unavailable in private mode; reset remains best effort.
-    }
+    this._statePersistenceService.remove(persistence)
   }
 
   /**
@@ -1320,13 +1309,12 @@ export class DataTableRootNode<
    */
   private readPersistedState(): DataTablePersistedState<Row> | null {
     const persistence = this.props.statePersistence
-    const storage = this.resolveStatePersistenceStorage()
-    if (!persistence || !storage) {
+    if (!persistence) {
       return null
     }
 
     try {
-      const raw = storage.getItem(persistence.key)
+      const raw = this._statePersistenceService.read(persistence)
       if (!raw) {
         return null
       }
@@ -1340,22 +1328,6 @@ export class DataTableRootNode<
           : null
       }
       return parsed as DataTablePersistedState<Row>
-    }
-    catch {
-      return null
-    }
-  }
-
-  /**
-   * Возвращает configured browser storage.
-   */
-  private resolveStatePersistenceStorage(): Storage | null {
-    const persistence = this.props.statePersistence
-    if (!persistence || typeof window === 'undefined') {
-      return null
-    }
-    try {
-      return persistence.storage === 'sessionStorage' ? window.sessionStorage : window.localStorage
     }
     catch {
       return null
