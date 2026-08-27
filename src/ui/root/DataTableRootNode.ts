@@ -1706,7 +1706,7 @@ export class DataTableRootNode<
       }
       this.store.clearDirtyState()
       this._syncSummaryState()
-    } while (this._pendingDeltas.length > 0 && (!useBudget || performance.now() - startedAt < budget))
+    } while (this._pendingDeltas.length > 0 && performance.now() - startedAt < budget)
 
     if (this._pendingDeltas.length > 0 && useBudget) {
       this._deltaFlushQueued = true
