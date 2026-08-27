@@ -106,7 +106,7 @@ export function resolveColumnRange<Row extends Record<string, any>>(
     return { start: 0, end: 0, offset: 0 }
   }
 
-  const prefix = new Array<number>(columns.length + 1)
+  const prefix = Array.from({ length: columns.length + 1 }) as number[]
   prefix[0] = 0
   for (let index = 0; index < columns.length; index += 1) {
     prefix[index + 1] = prefix[index]! + columns[index]!.resolvedWidth
