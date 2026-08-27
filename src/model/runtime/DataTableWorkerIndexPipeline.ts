@@ -167,7 +167,9 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
   ): Array<DataTableWorkerIndexedRow<Row>> {
     return rows.map((row, index) => {
       const values = new Map<string, unknown>()
-      for (const column of this.columns) values.set(column.id, resolveColumnValue(row, index, column))
+      for (const column of this.columns) {
+        values.set(column.id, resolveColumnValue(row, index, column))
+      }
       return {
         row,
         rowId: getRowId(row, index),
@@ -185,7 +187,9 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
     row: DataTableWorkerIndexedRow<Row>,
     readValue: (row: DataTableWorkerIndexedRow<Row>, columnId: string) => unknown,
   ): boolean {
-    if (Array.isArray(node)) return node.every(rule => this.matchesFilterNode(rule, row, readValue))
+    if (Array.isArray(node)) {
+      return node.every(rule => this.matchesFilterNode(rule, row, readValue))
+    }
     if ('logic' in node) {
       return node.logic === 'or'
         ? node.rules.some(rule => this.matchesFilterNode(rule, row, readValue))
@@ -204,9 +208,13 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
     readValue: (row: DataTableWorkerIndexedRow<Row>, columnId: string) => unknown,
   ): number {
     for (const rule of query.sort) {
-      if (!this.columnById.has(rule.columnId)) continue
+      if (!this.columnById.has(rule.columnId)) {
+        continue
+      }
       const compared = compareValues(readValue(left, rule.columnId), readValue(right, rule.columnId))
-      if (compared !== 0) return rule.direction === 'asc' ? compared : -compared
+      if (compared !== 0) {
+        return rule.direction === 'asc' ? compared : -compared
+      }
     }
     return left.index - right.index
   }
@@ -218,18 +226,24 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
     rows: Array<DataTableWorkerIndexedRow<Row>>,
     rowOrder: ReadonlyArray<DataTableRowId>,
   ): Array<DataTableWorkerIndexedRow<Row>> {
-    if (rowOrder.length === 0) return rows
+    if (rowOrder.length === 0) {
+      return rows
+    }
     const byId = new Map(rows.map(row => [row.rowId, row]))
     const ordered: Array<DataTableWorkerIndexedRow<Row>> = []
     const used = new Set<DataTableRowId>()
     for (const rowId of rowOrder) {
       const row = byId.get(rowId)
-      if (!row) continue
+      if (!row) {
+        continue
+      }
       ordered.push(row)
       used.add(rowId)
     }
     for (const row of rows) {
-      if (!used.has(row.rowId)) ordered.push(row)
+      if (!used.has(row.rowId)) {
+        ordered.push(row)
+      }
     }
     return ordered
   }
@@ -256,7 +270,9 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
     for (const column of columns) {
       const value = String(readValue(row, column.id) ?? '')
       const ranges = findSearchRanges(value, search)
-      if (ranges.length === 0) continue
+      if (ranges.length === 0) {
+        continue
+      }
       matches.push({
         rowId: row.rowId,
         rowIndex,
@@ -275,7 +291,9 @@ export class DataTableWorkerIndexPipeline<Row extends Record<string, any> = Reco
    */
   private resolveSearchColumns(search: DataTableSearchQuery): Array<DataTableWorkerIndexedColumn<Row>> {
     const searchable = this.columns.filter(column => column.searchable !== false)
-    if (!search.columns || search.columns.length === 0) return searchable
+    if (!search.columns || search.columns.length === 0) {
+      return searchable
+    }
     const allowed = new Set(search.columns)
     return searchable.filter(column => allowed.has(column.id))
   }
@@ -295,37 +313,67 @@ function resolveColumnValue<Row extends Record<string, any>>(
   index: number,
   column: DataTableWorkerIndexedColumn<Row>,
 ): unknown {
-  if (column.value) return column.value(row, index)
-  if (column.field !== undefined) return row[column.field as keyof Row]
+  if (column.value) {
+    return column.value(row, index)
+  }
+  if (column.field !== undefined) {
+    return row[column.field as keyof Row]
+  }
   return row[column.id as keyof Row]
 }
 
 function matchesFilterRule(rule: DataTableFilterRule, value: unknown): boolean {
   const text = String(value ?? '').toLowerCase()
   const filterText = String(rule.value ?? '').toLowerCase()
-  if (rule.operator === 'contains') return text.includes(filterText)
-  if (rule.operator === 'startsWith') return text.startsWith(filterText)
-  if (rule.operator === 'endsWith') return text.endsWith(filterText)
-  if (rule.operator === 'equals' || rule.operator === 'is') return value === rule.value || text === filterText
-  if (rule.operator === 'isNot') return value !== rule.value && text !== filterText
-  if (rule.operator === 'in') return Array.isArray(rule.value) ? rule.value.includes(value) : false
-  if (rule.operator === 'notIn') return Array.isArray(rule.value) ? !rule.value.includes(value) : true
+  if (rule.operator === 'contains') {
+    return text.includes(filterText)
+  }
+  if (rule.operator === 'startsWith') {
+    return text.startsWith(filterText)
+  }
+  if (rule.operator === 'endsWith') {
+    return text.endsWith(filterText)
+  }
+  if (rule.operator === 'equals' || rule.operator === 'is') {
+    return value === rule.value || text === filterText
+  }
+  if (rule.operator === 'isNot') {
+    return value !== rule.value && text !== filterText
+  }
+  if (rule.operator === 'in') {
+    return Array.isArray(rule.value) ? rule.value.includes(value) : false
+  }
+  if (rule.operator === 'notIn') {
+    return Array.isArray(rule.value) ? !rule.value.includes(value) : true
+  }
   const number = Number(value)
-  if (!Number.isFinite(number)) return false
-  if (rule.operator === 'gt') return number > Number(rule.value)
-  if (rule.operator === 'gte') return number >= Number(rule.value)
-  if (rule.operator === 'lt') return number < Number(rule.value)
-  if (rule.operator === 'lte') return number <= Number(rule.value)
+  if (!Number.isFinite(number)) {
+    return false
+  }
+  if (rule.operator === 'gt') {
+    return number > Number(rule.value)
+  }
+  if (rule.operator === 'gte') {
+    return number >= Number(rule.value)
+  }
+  if (rule.operator === 'lt') {
+    return number < Number(rule.value)
+  }
+  if (rule.operator === 'lte') {
+    return number <= Number(rule.value)
+  }
   if (rule.operator === 'between' && Array.isArray(rule.value)) {
     return number >= Number(rule.value[0]) && number <= Number(rule.value[1])
   }
   return true
 }
 
-function findSearchRanges(value: string, search: DataTableSearchQuery): Array<{ start: number; end: number }> {
+function findSearchRanges(value: string, search: DataTableSearchQuery): Array<{ start: number, end: number }> {
   const source = search.caseSensitive ? value : value.toLowerCase()
   const query = search.caseSensitive ? search.text : search.text.toLowerCase()
-  if (!query) return []
+  if (!query) {
+    return []
+  }
   if (search.match === 'regex') {
     try {
       const flags = search.caseSensitive ? 'g' : 'gi'
@@ -334,14 +382,19 @@ function findSearchRanges(value: string, search: DataTableSearchQuery): Array<{ 
         start: match.index ?? 0,
         end: (match.index ?? 0) + match[0].length,
       }))
-    } catch {
+    }
+    catch {
       return []
     }
   }
-  if (search.match === 'equals') return source === query ? [{ start: 0, end: value.length }] : []
-  if (search.match === 'startsWith') return source.startsWith(query) ? [{ start: 0, end: query.length }] : []
+  if (search.match === 'equals') {
+    return source === query ? [{ start: 0, end: value.length }] : []
+  }
+  if (search.match === 'startsWith') {
+    return source.startsWith(query) ? [{ start: 0, end: query.length }] : []
+  }
 
-  const ranges: Array<{ start: number; end: number }> = []
+  const ranges: Array<{ start: number, end: number }> = []
   let index = source.indexOf(query)
   while (index >= 0) {
     ranges.push({ start: index, end: index + query.length })
@@ -351,15 +404,25 @@ function findSearchRanges(value: string, search: DataTableSearchQuery): Array<{ 
 }
 
 function hasFilters(filters: DataTableFilterState | DataTableFilterExpression): boolean {
-  if (Array.isArray(filters)) return filters.length > 0
+  if (Array.isArray(filters)) {
+    return filters.length > 0
+  }
   return filters.rules.length > 0
 }
 
 function compareValues(left: unknown, right: unknown): number {
-  if (left === right) return 0
-  if (left === undefined || left === null) return 1
-  if (right === undefined || right === null) return -1
-  if (typeof left === 'number' && typeof right === 'number') return left - right
+  if (left === right) {
+    return 0
+  }
+  if (left === undefined || left === null) {
+    return 1
+  }
+  if (right === undefined || right === null) {
+    return -1
+  }
+  if (typeof left === 'number' && typeof right === 'number') {
+    return left - right
+  }
   return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' })
 }
 

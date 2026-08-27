@@ -1,18 +1,19 @@
+import type { DataTableColumnGroup } from '@/model/runtime/DataTableColumnSystem'
+import type { DataTableColumnInput, DataTableResolvedColumn } from '@/model/types/datatable.types'
 import { bench, describe } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { buildDataTableAccessibilityLiveMessage } from '@/model/runtime/DataTableAccessibility'
 import {
   createDataTableColumnChooserState,
   createDataTableColumnGroupLayout,
+
   reduceDataTableColumnChooserState,
-  type DataTableColumnGroup,
 } from '@/model/runtime/DataTableColumnSystem'
 import {
   createDataTableFilterMenuState,
   reduceDataTableFilterMenuAction,
   resolveDataTableSetFilterValues,
 } from '@/model/runtime/DataTableFilterMenu'
-import type { DataTableColumnInput, DataTableResolvedColumn } from '@/model/types/datatable.types'
 
 interface EnterpriseBenchRow {
   id: string
@@ -64,7 +65,7 @@ function groupedColumns(groupCount: number, columnsPerGroup: number): Array<Data
   }))
 }
 
-describe('NovaDataTable enterprise column filter a11y benchmarks', () => {
+describe('novaDataTable enterprise column filter a11y benchmarks', () => {
   bench('set-filter values from 200k sparse store rows', () => {
     const store = createDataTableStore<EnterpriseBenchRow>({ rowKey: 'id', rows: rows(200_000) })
     const column: DataTableColumnInput<EnterpriseBenchRow> = {
@@ -143,7 +144,8 @@ describe('NovaDataTable enterprise column filter a11y benchmarks', () => {
           columns: cols,
           now: index,
         })
-      } else {
+      }
+      else {
         buildDataTableAccessibilityLiveMessage({
           type: 'viewport',
           viewport: {

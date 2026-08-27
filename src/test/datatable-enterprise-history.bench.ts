@@ -1,9 +1,9 @@
+import type { DataTableDelta, DataTableTransaction } from '@/model/types/datatable.types'
 import { bench, describe } from 'vitest'
+import { createDataTableStore } from '@/model/module/DataTableStore'
 import { DataTableCommitController } from '@/model/runtime/DataTableCommitController'
 import { createDataTableFillMatrix, parseDataTableClipboardMatrix } from '@/model/runtime/DataTableFillMatrix'
-import { DataTableTransactionHistory, createInverseDataTableDeltas, normalizeDataTableHistory } from '@/model/runtime/DataTableTransactionHistory'
-import { createDataTableStore } from '@/model/module/DataTableStore'
-import type { DataTableDelta, DataTableTransaction } from '@/model/types/datatable.types'
+import { createInverseDataTableDeltas, DataTableTransactionHistory, normalizeDataTableHistory } from '@/model/runtime/DataTableTransactionHistory'
 
 interface HistoryBenchRow {
   id: string
@@ -29,7 +29,7 @@ function rows(count: number): Array<HistoryBenchRow> {
   }))
 }
 
-describe('NovaDataTable enterprise history benchmarks', () => {
+describe('novaDataTable enterprise history benchmarks', () => {
   bench('build inverse for 10k setCell deltas', () => {
     const store = createDataTableStore<HistoryBenchRow>({ rowKey: 'id', rows: rows(20_000) })
     createInverseDataTableDeltas(store, BENCH_DELTAS)

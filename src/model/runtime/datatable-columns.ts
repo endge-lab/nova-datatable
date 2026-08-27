@@ -19,7 +19,7 @@ export function resolveDataTableColumns<Row extends Record<string, any>>(
   widthOverrides: ReadonlyMap<string, number>,
   store: DataTableStoreApi<Row>,
 ): Array<DataTableResolvedColumn<Row>> {
-  return columns.map(column => {
+  return columns.map((column) => {
     const minWidth = column.minWidth ?? resolveAutoWidth(column.width)?.min ?? DEFAULT_MIN_WIDTH
     const maxWidth = column.maxWidth ?? resolveAutoWidth(column.width)?.max ?? DEFAULT_MAX_WIDTH
     const override = widthOverrides.get(column.id)
@@ -60,7 +60,9 @@ export function autosizeDataTableColumn<Row extends Record<string, any>>(
 
   for (let index = 0; index < limit; index += 1) {
     const row = store.getRowAt(index)
-    if (!row) continue
+    if (!row) {
+      continue
+    }
     const value = resolveDataTableValue(row, index, column)
     width = Math.max(width, measureTextLike(value) + padding)
   }
@@ -76,8 +78,12 @@ export function resolveDataTableValue<Row extends Record<string, any>>(
   rowIndex: number,
   column: DataTableColumnInput<Row>,
 ): unknown {
-  if (column.value) return column.value(row, rowIndex)
-  if (column.field !== undefined) return row[column.field as keyof Row]
+  if (column.value) {
+    return column.value(row, rowIndex)
+  }
+  if (column.field !== undefined) {
+    return row[column.field as keyof Row]
+  }
   return row[column.id as keyof Row]
 }
 
@@ -92,8 +98,12 @@ function resolveColumnInitialWidth<Row extends Record<string, any>>(
   column: DataTableColumnInput<Row>,
   store: DataTableStoreApi<Row>,
 ): number {
-  if (typeof column.width === 'number') return column.width
-  if (resolveAutoWidth(column.width)) return autosizeDataTableColumn(column, store)
+  if (typeof column.width === 'number') {
+    return column.width
+  }
+  if (resolveAutoWidth(column.width)) {
+    return autosizeDataTableColumn(column, store)
+  }
   return DEFAULT_WIDTH
 }
 
@@ -105,8 +115,12 @@ function resolvePinnedSide<Row extends Record<string, any>>(
   column: DataTableColumnInput<Row>,
   pinnedColumns: DataTablePinnedColumns,
 ): DataTableResolvedColumn<Row>['pinned'] {
-  if (pinnedColumns.left?.includes(column.id)) return 'left'
-  if (pinnedColumns.right?.includes(column.id)) return 'right'
+  if (pinnedColumns.left?.includes(column.id)) {
+    return 'left'
+  }
+  if (pinnedColumns.right?.includes(column.id)) {
+    return 'right'
+  }
   return column.pinned
 }
 

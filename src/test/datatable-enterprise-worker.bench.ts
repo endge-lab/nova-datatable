@@ -1,6 +1,6 @@
+import type { DataTableQueryState } from '@/model/types/datatable.types'
 import { bench, describe } from 'vitest'
 import { createDataTableWorkerIndexPipeline } from '@/model/runtime/DataTableWorkerIndexPipeline'
-import type { DataTableQueryState } from '@/model/types/datatable.types'
 
 interface BenchRow {
   id: string
@@ -42,7 +42,7 @@ const query: DataTableQueryState = {
   columnOrder: [],
 }
 
-describe('NovaDataTable enterprise worker/index benchmarks', () => {
+describe('novaDataTable enterprise worker/index benchmarks', () => {
   bench('build 100k worker index', () => {
     createDataTableWorkerIndexPipeline({
       rows: source,
@@ -59,7 +59,9 @@ describe('NovaDataTable enterprise worker/index benchmarks', () => {
     })
 
     const result = pipeline.query(query, { offset: 100, limit: 120 })
-    if (result.rowIds.length !== 120) throw new Error('Worker query did not return requested page')
+    if (result.rowIds.length !== 120) {
+      throw new Error('Worker query did not return requested page')
+    }
   }, { iterations: 10 })
 
   bench('dispatch repeated worker index query without materializing rows', async () => {
@@ -70,6 +72,8 @@ describe('NovaDataTable enterprise worker/index benchmarks', () => {
     })
 
     const result = await pipeline.dispatch(query, { limit: 64 })
-    if (result.metrics.materializedRows !== 0) throw new Error('Worker query materialized rows unexpectedly')
+    if (result.metrics.materializedRows !== 0) {
+      throw new Error('Worker query materialized rows unexpectedly')
+    }
   }, { iterations: 10 })
 })

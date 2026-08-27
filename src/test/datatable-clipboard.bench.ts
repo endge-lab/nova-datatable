@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
 
-import { bench, describe, vi } from 'vitest'
+import type { NovaApp } from '@endge/nova'
+import type { DataTableColumnInput } from '@/model/types/datatable.types'
+import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import {
   Nova,
+
   RaphSchedulerType,
   RendererType,
-  type NovaApp,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
+import { bench, describe, vi } from 'vitest'
 import {
+
   NovaDataTableSchema,
-  type DataTableColumnInput,
 } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
-import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 
 interface ClipboardBenchRow {
   id: string
@@ -83,13 +85,17 @@ function installCanvasMocks(): void {
     configurable: true,
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type: string) => {
-    if (type !== RendererType.Web2D) return null
+    if (type !== RendererType.Web2D) {
+      return null
+    }
     return new Proxy({
       measureText: vi.fn((text: string) => ({ width: text.length * 8 })),
       createPattern: vi.fn(() => ({})),
     } as Record<PropertyKey, any>, {
       get(target, prop) {
-        if (!(prop in target)) target[prop] = vi.fn()
+        if (!(prop in target)) {
+          target[prop] = vi.fn()
+        }
         return target[prop]
       },
     }) as CanvasRenderingContext2D
@@ -182,9 +188,9 @@ function withBenchRoot(callback: (root: DataTableRootNode<ClipboardBenchRow>) =>
   document.body.innerHTML = ''
 }
 
-describe('NovaDataTable clipboard benchmarks', () => {
+describe('novaDataTable clipboard benchmarks', () => {
   bench('copy 10k typed cells from selected range', () => {
-    withBenchRoot(root => {
+    withBenchRoot((root) => {
       root.getApi().selectRange({
         id: 'bench-copy-range',
         unit: 'cell',
@@ -201,7 +207,7 @@ describe('NovaDataTable clipboard benchmarks', () => {
   }, { iterations: 5 })
 
   bench('paste 10k typed cells through public root API', async () => {
-    await withBenchRoot(async root => {
+    await withBenchRoot(async (root) => {
       root.getApi().selectCell('row-0', 'c0')
       await root.getApi().pasteClipboard(PASTE_10K_TYPED_CELLS)
     })

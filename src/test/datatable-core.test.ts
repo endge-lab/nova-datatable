@@ -1,30 +1,29 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { h } from 'vue'
+import type { NovaApp, NovaSchema } from '@endge/nova'
+import type { DataTableCellContext, DataTableQueryState, DataTableSourceRequestContext } from '@/model/types/datatable.types'
+import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import {
   Nova,
+
   RaphSchedulerType,
   RendererType,
-  type NovaApp,
-  type NovaSchema,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { h } from 'vue'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
 import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
-import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
+import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
 import {
+
   NovaDataTableSchema,
-  type DataTableCellContext,
-  type DataTableQueryState,
-  type DataTableSourceRequestContext,
 } from '@/model/types/datatable.types'
 import { normalizeDataTableEditing, normalizeDataTablePerformance, normalizeDataTableScrollbars, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
-import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import { DataTableColumn, DataTableGrouping, DataTableInteractionLayer, DataTableScrollbarLayer, Rect, Surface, TextBlock } from '@/vue/data-table-dsl'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
 
@@ -63,7 +62,9 @@ function create2DContextStub(): CanvasRenderingContext2D {
      * Возвращает значение состояния текущего класса.
      */
     get(target, prop) {
-      if (!(prop in target)) target[prop] = vi.fn()
+      if (!(prop in target)) {
+        target[prop] = vi.fn()
+      }
       return target[prop]
     },
     /**
@@ -84,7 +85,9 @@ function installCanvasMocks(): void {
     configurable: true,
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type: string) => {
-    if (type === RendererType.Web2D) return create2DContextStub()
+    if (type === RendererType.Web2D) {
+      return create2DContextStub()
+    }
     return null
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(function getRect(this: HTMLCanvasElement) {
@@ -190,7 +193,7 @@ function mountRoot(app: NovaApp<TestEvents>): DataTableRootNode<Row> {
   return uiRoot.children[0] as DataTableRootNode<Row>
 }
 
-describe('DataTableStore', () => {
+describe('dataTableStore', () => {
   it('keeps id/index maps consistent across mutations', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(3) })
 
@@ -269,11 +272,13 @@ describe('DataTableStore', () => {
 
   it('passes server source context into lazy range adapters and ignores stale responses', async () => {
     const loadRange = vi.fn((
-      range: { start: number; end: number },
+      range: { start: number, end: number },
       _query: DataTableQueryState | undefined,
       context: DataTableSourceRequestContext | undefined,
     ) => {
-      if (context?.revision === 1) return rows(range.end - range.start, 100)
+      if (context?.revision === 1) {
+        return rows(range.end - range.start, 100)
+      }
       return rows(range.end - range.start, range.start)
     })
     const store = createDataTableStore<Row>({
@@ -420,7 +425,7 @@ describe('DataTableStore', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) })
     const initialRevision = store.takeRevision()
 
-    store.batch(api => {
+    store.batch((api) => {
       api.insertMany(rows(2, 10))
       api.patch('row-0', { status: 'active' })
       api.setCell('row-10', 'amount', 500)
@@ -490,7 +495,7 @@ describe('DataTableStore', () => {
   })
 })
 
-describe('DataTableServerRowModel', () => {
+describe('dataTableServerRowModel', () => {
   it('passes the current query into range summary search and subscribe adapters', async () => {
     const query: DataTableQueryState = {
       sort: [{ columnId: 'amount', direction: 'asc' }],
@@ -499,7 +504,7 @@ describe('DataTableServerRowModel', () => {
       rowOrder: [],
       columnOrder: ['name', 'amount'],
     }
-    const loadRange = vi.fn((range: { start: number; end: number }) => rows(range.end - range.start, range.start))
+    const loadRange = vi.fn((range: { start: number, end: number }) => rows(range.end - range.start, range.start))
     const loadSummary = vi.fn(() => ({ count: 10_000_000, amount: 42 }))
     const search = vi.fn(() => ({
       matches: [{ rowId: 'row-2', rowIndex: 2, columnId: 'name', value: 'Row 2', ranges: [{ start: 0, end: 5 }] }],
@@ -582,7 +587,7 @@ describe('DataTableServerRowModel', () => {
   })
 })
 
-describe('DataTable layout and columns', () => {
+describe('dataTable layout and columns', () => {
   it('computes virtual ranges with overscan and pinned zones', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(200) })
     const columns = resolveDataTableColumns<Row>([
@@ -666,7 +671,7 @@ describe('DataTable layout and columns', () => {
   })
 })
 
-describe('DataTable scrollbars', () => {
+describe('dataTable scrollbars', () => {
   it('normalizes shared and axis scrollbar options', () => {
     const options = normalizeDataTableScrollbars({
       visibility: 'hover',
@@ -683,7 +688,9 @@ describe('DataTable scrollbars', () => {
     })
 
     expect(options).not.toBe(false)
-    if (options === false) return
+    if (options === false) {
+      return
+    }
     expect(options.visibility).toBe('hover')
     expect(options.horizontal && options.horizontal.visibility).toBe('scroll')
     expect(options.horizontal && options.horizontal.thickness).toBe(12)
@@ -700,7 +707,9 @@ describe('DataTable scrollbars', () => {
     })
 
     expect(options).not.toBe(false)
-    if (options === false) return
+    if (options === false) {
+      return
+    }
     expect(options.trackColor).toBe('#eef2ff')
     expect(options.thumbColor).toBe('#2563eb')
     expect(options.thumbHoverColor).toBe('#1d4ed8')
@@ -792,13 +801,15 @@ describe('DataTable scrollbars', () => {
   })
 })
 
-describe('DataTable editing', () => {
+describe('dataTable editing', () => {
   it('normalizes DOM overlay editing defaults and disabled mode', () => {
     const defaults = normalizeDataTableEditing(undefined)
     const disabled = normalizeDataTableEditing(false)
 
     expect(defaults).not.toBe(false)
-    if (defaults === false) return
+    if (defaults === false) {
+      return
+    }
     expect(defaults.renderer).toBe('dom-overlay')
     expect(defaults.mode).toBe('cell')
     expect(defaults.trigger).toEqual(['doubleClick', 'enter', 'programmatic'])
@@ -911,7 +922,7 @@ describe('DataTable editing', () => {
   })
 })
 
-describe('DataTableViewPipeline', () => {
+describe('dataTableViewPipeline', () => {
   function createPipelineStore(): ReturnType<typeof createDataTableStore<Row>> {
     return createDataTableStore<Row>({
       rowKey: 'id',
@@ -1543,7 +1554,7 @@ describe('DataTableViewPipeline', () => {
   })
 })
 
-describe('DataTableSummaryEngine', () => {
+describe('dataTableSummaryEngine', () => {
   it('computes numeric summaries and updates them incrementally', () => {
     const engine = new DataTableSummaryEngine<Row>()
     const result = engine.compute(rows(4), [
@@ -1590,7 +1601,7 @@ describe('DataTableSummaryEngine', () => {
   })
 })
 
-describe('DataTable DSL templates', () => {
+describe('dataTable DSL templates', () => {
   it('compiles column and pinned row marker nodes', () => {
     const cellSlot = (context: DataTableCellContext<Row>) => [
       h(Surface, { background: '#fff', padding: '0 10' }, () => [
@@ -1818,7 +1829,7 @@ describe('DataTable DSL templates', () => {
   })
 })
 
-describe('DataTable Root runtime', () => {
+describe('dataTable Root runtime', () => {
   it('mounts root and exposes the public ref API', () => {
     const app = createApp()
     const root = mountRoot(app)
@@ -1827,7 +1838,7 @@ describe('DataTable Root runtime', () => {
     expect(api.data()).toHaveLength(100)
     expect(api.setColumnWidth('status', 160)).toBe(true)
     api.scrollToRow(20)
-    api.batch(batch => {
+    api.batch((batch) => {
       batch.add({ id: 'row-new', name: 'New', status: 'active', amount: 1 })
       batch.update({ id: 'row-new', status: 'draft' })
     })
@@ -2360,7 +2371,8 @@ describe('DataTable Root runtime', () => {
       app.raph.run()
 
       expect(root.getApi().getViewport().scrollY).toBe(36)
-    } finally {
+    }
+    finally {
       app.destroy()
       Object.defineProperty(globalThis, 'requestAnimationFrame', {
         configurable: true,
@@ -2722,7 +2734,7 @@ describe('DataTable Root runtime', () => {
         .filter(item => item.type === 'text')
     }
     const collectTextBatches = () => {
-      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ kind: string; textBatch?: { meta?: Record<string, unknown> } }> }>
+      const layers = (root as any).renderLayers as Map<string, { segments: Array<{ kind: string, textBatch?: { meta?: Record<string, unknown> } }> }>
       return [...layers.values()]
         .flatMap(layer => layer.segments)
         .filter(segment => segment.kind === 'text-batch' && segment.textBatch)
@@ -2829,7 +2841,9 @@ describe('DataTable Root runtime', () => {
     root.setProps({
       interaction: { motion: false },
     } as never)
-    if (canvasContextStub) canvasContextStub.__sets = []
+    if (canvasContextStub) {
+      canvasContextStub.__sets = []
+    }
 
     root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 220, clientY: 84 }))
     app.raph.run()
@@ -2990,7 +3004,9 @@ describe('DataTable Root runtime', () => {
     app.raph.run()
     app.raph.run()
     const root = uiRoot.children[0] as DataTableRootNode<Row>
-    if (canvasContextStub) canvasContextStub.__sets = []
+    if (canvasContextStub) {
+      canvasContextStub.__sets = []
+    }
 
     root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 210, clientY: 36 }))
     app.raph.run()

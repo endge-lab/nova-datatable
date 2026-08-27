@@ -51,8 +51,12 @@ export class DataTableTreeExpansionController {
    * Проверяет, раскрыта ли строка дерева.
    */
   isExpanded(rowId: DataTableRowId): boolean {
-    if (this.expanded === 'all') return true
-    if (this.expanded === 'none') return false
+    if (this.expanded === 'all') {
+      return true
+    }
+    if (this.expanded === 'none') {
+      return false
+    }
     return this.expanded.has(rowId)
   }
 
@@ -60,9 +64,13 @@ export class DataTableTreeExpansionController {
    * Раскрывает одну или несколько строк дерева.
    */
   expand(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'all') return
+    if (this.expanded === 'all') {
+      return
+    }
     const set = this.expanded === 'none' ? new Set<DataTableRowId>() : new Set(this.expanded)
-    for (const rowId of toArray(rowIds)) set.add(rowId)
+    for (const rowId of toArray(rowIds)) {
+      set.add(rowId)
+    }
     this.expanded = set
   }
 
@@ -71,13 +79,17 @@ export class DataTableTreeExpansionController {
    */
   collapse(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
     const ids = toArray(rowIds)
-    if (this.expanded === 'none') return
+    if (this.expanded === 'none') {
+      return
+    }
     if (this.expanded === 'all') {
       this.expanded = 'none'
       return
     }
     const set = new Set(this.expanded)
-    for (const rowId of ids) set.delete(rowId)
+    for (const rowId of ids) {
+      set.delete(rowId)
+    }
     this.expanded = set.size === 0 ? 'none' : set
   }
 
@@ -86,8 +98,10 @@ export class DataTableTreeExpansionController {
    */
   toggle(rowId: DataTableRowId): boolean {
     const next = !this.isExpanded(rowId)
-    if (next) this.expand(rowId)
-    else this.collapse(rowId)
+    if (next) {
+      this.expand(rowId)
+    }
+    else { this.collapse(rowId) }
     return next
   }
 
@@ -116,7 +130,9 @@ export class DataTableTreeExpansionController {
    * Возвращает сериализуемый snapshot состояния раскрытия.
    */
   snapshot(): 'all' | 'none' | Array<DataTableRowId> {
-    if (this.expanded === 'all' || this.expanded === 'none') return this.expanded
+    if (this.expanded === 'all' || this.expanded === 'none') {
+      return this.expanded
+    }
     return [...this.expanded]
   }
 }
@@ -187,14 +203,22 @@ export function flattenDataTableTreeRows<Row extends Record<string, any>>(
  * Проверяет раскрытие row id в сериализуемом состоянии дерева.
  */
 export function isDataTableTreeRowExpanded(state: DataTableTreeExpansionState, rowId: DataTableRowId): boolean {
-  if (state === 'all') return true
-  if (state === 'none') return false
-  if (Array.isArray(state)) return state.includes(rowId)
+  if (state === 'all') {
+    return true
+  }
+  if (state === 'none') {
+    return false
+  }
+  if (Array.isArray(state)) {
+    return state.includes(rowId)
+  }
   return (state as ReadonlySet<DataTableRowId>).has(rowId)
 }
 
 function normalizeExpansionState(state: DataTableTreeExpansionState): 'all' | 'none' | Set<DataTableRowId> {
-  if (state === 'all' || state === 'none') return state
+  if (state === 'all' || state === 'none') {
+    return state
+  }
   return new Set(Array.isArray(state) ? state : [...(state as ReadonlySet<DataTableRowId>)])
 }
 

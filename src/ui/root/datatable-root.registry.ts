@@ -1,11 +1,12 @@
 import type { NovaComponentSchema, NovaSchemaRegistry } from '@endge/nova'
-import { DataTableRootNode } from '@/ui/root/DataTableRootNode'
+import type { DataTableRootProps } from '@/model/types/datatable.types'
+import type { DataTableRootDescriptor } from '@/ui/root/datatable-root.config'
 import {
   createDataTableRootDescriptor,
+
   normalizeDataTableRootProps,
-  type DataTableRootDescriptor,
 } from '@/ui/root/datatable-root.config'
-import type { DataTableRootProps } from '@/model/types/datatable.types'
+import { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 
 export const DATATABLE_ROOT_DESCRIPTOR: DataTableRootDescriptor = createDataTableRootDescriptor((context, schema) => {
   const rootSchema = schema as NovaComponentSchema<DataTableRootProps>

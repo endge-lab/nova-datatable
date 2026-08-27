@@ -17,7 +17,9 @@ export class DataTableInvalidationScope {
    * Увеличивает ревизии нескольких областей.
    */
   bumpMany(kinds: Array<string>): void {
-    for (const kind of kinds) this.bump(kind)
+    for (const kind of kinds) {
+      this.bump(kind)
+    }
   }
 
   /**

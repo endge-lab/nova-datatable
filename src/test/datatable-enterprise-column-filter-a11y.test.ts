@@ -1,3 +1,11 @@
+import type { DataTableColumnGroup } from '@/model/runtime/DataTableColumnSystem'
+import type {
+  DataTableColumnInput,
+  DataTableFilterExpression,
+  DataTableResolvedColumn,
+  DataTableSearchState,
+  DataTableSelectionState,
+} from '@/model/types/datatable.types'
 import { describe, expect, it } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import {
@@ -8,21 +16,14 @@ import {
 import {
   createDataTableColumnChooserState,
   createDataTableColumnGroupLayout,
+
   reduceDataTableColumnChooserState,
-  type DataTableColumnGroup,
 } from '@/model/runtime/DataTableColumnSystem'
 import {
   createDataTableFilterMenuState,
   reduceDataTableFilterMenuAction,
   resolveDataTableSetFilterValues,
 } from '@/model/runtime/DataTableFilterMenu'
-import type {
-  DataTableColumnInput,
-  DataTableFilterExpression,
-  DataTableResolvedColumn,
-  DataTableSearchState,
-  DataTableSelectionState,
-} from '@/model/types/datatable.types'
 
 interface EnterpriseGridRow {
   id: string
@@ -89,7 +90,7 @@ function groups(): Array<DataTableColumnGroup<EnterpriseGridRow>> {
   ]
 }
 
-describe('DataTable enterprise filter menu helpers', () => {
+describe('dataTable enterprise filter menu helpers', () => {
   it('builds set-filter values from store rows and keeps selected flags stable', () => {
     const store = createDataTableStore<EnterpriseGridRow>({ rowKey: 'id', rows: rows() })
     const [statusColumn] = columns().filter(column => column.id === 'status')
@@ -183,7 +184,7 @@ describe('DataTable enterprise filter menu helpers', () => {
   })
 })
 
-describe('DataTable enterprise column system helpers', () => {
+describe('dataTable enterprise column system helpers', () => {
   it('creates nested header layout with colspans rowspans hidden columns and pinned regions', () => {
     const layout = createDataTableColumnGroupLayout({
       columns: resolvedColumns(),
@@ -240,7 +241,7 @@ describe('DataTable enterprise column system helpers', () => {
   })
 })
 
-describe('DataTable enterprise accessibility helpers', () => {
+describe('dataTable enterprise accessibility helpers', () => {
   it('builds aria grid state with active descendant and live search message', () => {
     const search: DataTableSearchState = {
       query: { text: 'NVA', scope: 'cells' },

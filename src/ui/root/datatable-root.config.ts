@@ -1,48 +1,48 @@
-import { NOVA_UI_COMMON_FIELD_DEFINITIONS, normalizeCommonProps, normalizeNovaScrollbarVisualOptions } from '@endge/nova-ui-kit'
 import type { NovaComponentDescriptor, NovaComponentSchema } from '@endge/nova'
 import type {
-  DataTableInteractionOptions,
   DataTableClipboardOptions,
-  DataTablePerformanceOptions,
-  DataTableResolvedTextPerformanceOptions,
+  DataTableColumnAutosizeMode,
+  DataTableColumnGroupInput,
+  DataTableColumnState,
   DataTableDetailRowsOptions,
   DataTableEditingOptions,
   DataTableEditTrigger,
-  DataTableColumnState,
-  DataTableColumnGroupInput,
-  DataTableColumnAutosizeMode,
-  DataTableStatePersistenceOptions,
+  DataTableInteractionOptions,
   DataTableKeyboardNavigationOptions,
-  DataTableScrollbarAxisOptions,
-  DataTableResolvedColumnState,
-  DataTableResolvedStatePersistenceOptions,
-  DataTableResolvedDetailRowsOptions,
-  DataTableResolvedInteractionOptions,
+  DataTablePerformanceOptions,
   DataTableResolvedClipboardOptions,
-  DataTableResolvedPerformanceOptions,
+  DataTableResolvedColumnState,
+  DataTableResolvedDetailRowsOptions,
   DataTableResolvedEditingOptions,
+  DataTableResolvedInteractionOptions,
   DataTableResolvedKeyboardNavigationOptions,
-  DataTableResolvedSelectionOptions,
+  DataTableResolvedPerformanceOptions,
   DataTableResolvedScrollbarAxisOptions,
   DataTableResolvedScrollbarOptions,
+  DataTableResolvedSelectionOptions,
+  DataTableResolvedStatePersistenceOptions,
+  DataTableResolvedTextPerformanceOptions,
   DataTableResolvedTextSelectionOptions,
   DataTableResolvedTooltipOptions,
   DataTableResolvedViewOptions,
   DataTableResolvedZoomOptions,
   DataTableRootProps,
   DataTableRootResolvedProps,
-  DataTableSelectionOptions,
+  DataTableScrollbarAxisOptions,
   DataTableScrollbarOptions,
+  DataTableSelectionOptions,
+  DataTableStatePersistenceOptions,
   DataTableTextSelectionOptions,
   DataTableTooltipOptions,
   DataTableViewOptions,
   DataTableZoomAffect,
   DataTableZoomOptions,
 } from '@/model/types/datatable.types'
-import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
+import { normalizeCommonProps, normalizeNovaScrollbarVisualOptions, NOVA_UI_COMMON_FIELD_DEFINITIONS } from '@endge/nova-ui-kit'
 import { normalizeDataTableAccessibility } from '@/model/runtime/DataTableAccessibility'
 import { normalizeDataTableFillHandle } from '@/model/runtime/DataTableFillHandle'
 import { normalizeDataTableHistory } from '@/model/runtime/DataTableTransactionHistory'
+import { DATATABLE_ROOT_SCHEMA_TYPE } from '@/model/types/datatable.types'
 
 export type DataTableRootDescriptor = NovaComponentDescriptor<
   DataTableRootResolvedProps,
@@ -220,7 +220,9 @@ const DEFAULT_STATE_PERSISTENCE_SLICES = ['columnState', 'sort', 'filters', 'sea
 export function normalizeDataTableStatePersistence(
   persistence: false | DataTableStatePersistenceOptions | undefined,
 ): false | DataTableResolvedStatePersistenceOptions {
-  if (persistence === false || !persistence || !persistence.key) return false
+  if (persistence === false || !persistence || !persistence.key) {
+    return false
+  }
 
   return {
     key: persistence.key,
@@ -235,11 +237,15 @@ export function normalizeDataTableStatePersistence(
 function normalizeStatePersistenceSlices(
   include: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> | undefined,
 ): Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> {
-  if (!include || include.length === 0) return [...DEFAULT_STATE_PERSISTENCE_SLICES]
+  if (!include || include.length === 0) {
+    return [...DEFAULT_STATE_PERSISTENCE_SLICES]
+  }
   const allowed = new Set(DEFAULT_STATE_PERSISTENCE_SLICES)
   const result: Array<(typeof DEFAULT_STATE_PERSISTENCE_SLICES)[number]> = []
   for (const slice of include) {
-    if (!allowed.has(slice) || result.includes(slice)) continue
+    if (!allowed.has(slice) || result.includes(slice)) {
+      continue
+    }
     result.push(slice)
   }
   return result.length > 0 ? result : [...DEFAULT_STATE_PERSISTENCE_SLICES]
@@ -248,7 +254,9 @@ function normalizeStatePersistenceSlices(
 export function normalizeDataTableKeyboardNavigation(
   keyboardNavigation: false | DataTableKeyboardNavigationOptions | undefined,
 ): false | DataTableResolvedKeyboardNavigationOptions {
-  if (keyboardNavigation === false || keyboardNavigation === undefined) return false
+  if (keyboardNavigation === false || keyboardNavigation === undefined) {
+    return false
+  }
 
   return {
     enabled: keyboardNavigation.enabled ?? true,
@@ -282,7 +290,9 @@ export function normalizeDataTableColumnState(
 export function normalizeDataTableEditing<Row extends Record<string, any>>(
   editing: false | DataTableEditingOptions<Row> | undefined,
 ): false | DataTableResolvedEditingOptions<Row> {
-  if (editing === false) return false
+  if (editing === false) {
+    return false
+  }
 
   return {
     renderer: 'dom-overlay',
@@ -310,7 +320,9 @@ export function normalizeDataTableEditing<Row extends Record<string, any>>(
 export function normalizeDataTableDetailRows<Row extends Record<string, any>>(
   detailRows: false | DataTableDetailRowsOptions<Row> | undefined,
 ): false | DataTableResolvedDetailRowsOptions<Row> {
-  if (detailRows === false) return false
+  if (detailRows === false) {
+    return false
+  }
   return {
     enabled: detailRows?.enabled ?? false,
     height: detailRows?.height ?? 96,
@@ -338,8 +350,12 @@ export function normalizeDataTablePerformance(
 function normalizeDataTableTextPerformance(
   text: DataTablePerformanceOptions['text'] | undefined,
 ): false | DataTableResolvedTextPerformanceOptions {
-  if (text === undefined) return false
-  if (text === false) return false
+  if (text === undefined) {
+    return false
+  }
+  if (text === false) {
+    return false
+  }
 
   const mode = normalizeTextPerformanceMode(text?.mode)
   return {
@@ -359,12 +375,16 @@ function normalizeDataTableTextPerformance(
 }
 
 function normalizeTextPerformanceMode(value: unknown): DataTableResolvedTextPerformanceOptions['mode'] {
-  if (value === 'quality' || value === 'balanced' || value === 'fast' || value === 'ultra-fast') return value
+  if (value === 'quality' || value === 'balanced' || value === 'fast' || value === 'ultra-fast') {
+    return value
+  }
   return 'balanced'
 }
 
 function normalizeTextRenderMode(value: unknown): DataTableResolvedTextPerformanceOptions['renderMode'] {
-  if (value === 'auto' || value === 'run-atlas' || value === 'glyph-atlas' || value === 'msdf') return value
+  if (value === 'auto' || value === 'run-atlas' || value === 'glyph-atlas' || value === 'msdf') {
+    return value
+  }
   return 'run-atlas'
 }
 
@@ -473,7 +493,9 @@ export function normalizeDataTableScrollbars(
   scrollbars: false | DataTableScrollbarOptions | undefined,
   defaults: Pick<DataTableScrollbarOptions, 'trackColor' | 'thumbColor' | 'thumbHoverColor'> = {},
 ): false | DataTableResolvedScrollbarOptions {
-  if (scrollbars === false) return false
+  if (scrollbars === false) {
+    return false
+  }
 
   const base = normalizeDataTableScrollbarAxis(scrollbars, defaults)
   return {
@@ -499,8 +521,12 @@ export function normalizeDataTableSelection(
   selection: false | DataTableSelectionOptions | undefined,
   interaction?: DataTableInteractionOptions,
 ): false | DataTableResolvedSelectionOptions {
-  if (selection === false) return false
-  if (selection === undefined && interaction?.selection === false) return false
+  if (selection === false) {
+    return false
+  }
+  if (selection === undefined && interaction?.selection === false) {
+    return false
+  }
   const interactionSelection = interaction?.selection !== false ? interaction?.selection : undefined
   const mode = selection?.mode ?? interactionSelection?.mode ?? 'cell'
   return {
@@ -539,7 +565,9 @@ export function normalizeDataTableSelection(
 export function normalizeDataTableClipboard<Row extends Record<string, any>>(
   clipboard: false | DataTableClipboardOptions<Row> | undefined,
 ): false | DataTableResolvedClipboardOptions<Row> {
-  if (clipboard === false) return false
+  if (clipboard === false) {
+    return false
+  }
   const copy = clipboard?.copy === false
     ? false
     : {
@@ -571,7 +599,9 @@ export function normalizeDataTableClipboard<Row extends Record<string, any>>(
 export function normalizeDataTableTooltip<Row extends Record<string, any>>(
   tooltip: false | DataTableTooltipOptions<Row> | undefined,
 ): false | DataTableResolvedTooltipOptions<Row> {
-  if (tooltip === false) return false
+  if (tooltip === false) {
+    return false
+  }
 
   return {
     enabled: tooltip?.enabled ?? true,
@@ -613,7 +643,9 @@ export function normalizeDataTableTooltip<Row extends Record<string, any>>(
 export function normalizeDataTableTextSelection(
   textSelection: false | DataTableTextSelectionOptions | undefined,
 ): false | DataTableResolvedTextSelectionOptions {
-  if (textSelection === false) return false
+  if (textSelection === false) {
+    return false
+  }
 
   return {
     enabled: textSelection?.enabled ?? false,
@@ -629,7 +661,9 @@ export function normalizeDataTableTextSelection(
 export function normalizeDataTableZoom(
   zoom: false | DataTableZoomOptions | undefined,
 ): false | DataTableResolvedZoomOptions {
-  if (zoom === false) return false
+  if (zoom === false) {
+    return false
+  }
 
   const min = finiteClamp(zoom?.min, 0.4, 2, 0.65)
   const max = Math.max(min, finiteClamp(zoom?.max, min, 3, 1.5))
@@ -655,8 +689,8 @@ export function normalizeDataTableZoom(
     iconScale,
     preserveAnchor: zoom?.preserveAnchor ?? 'pointer',
     wheel: zoom?.wheel === false
-        ? false
-        : {
+      ? false
+      : {
           enabled: zoom?.wheel?.enabled ?? true,
           modifier: zoom?.wheel?.modifier ?? 'ctrl',
           pinch: zoom?.wheel?.pinch ?? true,
@@ -681,7 +715,9 @@ function normalizeZoomAffects(
 }
 
 function normalizeZoomScale(value: number, affected: boolean, scale: unknown): number {
-  if (typeof scale === 'number' && Number.isFinite(scale)) return finiteClamp(scale, 0.35, 3, 1)
+  if (typeof scale === 'number' && Number.isFinite(scale)) {
+    return finiteClamp(scale, 0.35, 3, 1)
+  }
   return finiteClamp(affected ? value : 1, 0.35, 3, 1)
 }
 
@@ -706,41 +742,41 @@ export function normalizeDataTableInteraction(
   const hover = interaction?.hover === false
     ? false
     : {
-        mode: interaction?.hover?.mode ?? 'row-column',
-        rowColor: interaction?.hover?.rowColor ?? 'rgba(37, 99, 235, 0.08)',
-        columnColor: interaction?.hover?.columnColor ?? 'rgba(14, 165, 233, 0.07)',
-        cellColor: interaction?.hover?.cellColor ?? 'rgba(250, 204, 21, 0.16)',
-        pinned: interaction?.hover?.pinned ?? true,
-      } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['hover'], false>>>
+      mode: interaction?.hover?.mode ?? 'row-column',
+      rowColor: interaction?.hover?.rowColor ?? 'rgba(37, 99, 235, 0.08)',
+      columnColor: interaction?.hover?.columnColor ?? 'rgba(14, 165, 233, 0.07)',
+      cellColor: interaction?.hover?.cellColor ?? 'rgba(250, 204, 21, 0.16)',
+      pinned: interaction?.hover?.pinned ?? true,
+    } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['hover'], false>>>
   const selection = interaction?.selection === false
     ? false
     : {
-        mode: interaction?.selection?.mode ?? 'cell',
-        color: interaction?.selection?.color ?? 'rgba(37, 99, 235, 0.18)',
-        borderColor: interaction?.selection?.borderColor ?? '#2563eb',
-      } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['selection'], false>>>
+      mode: interaction?.selection?.mode ?? 'cell',
+      color: interaction?.selection?.color ?? 'rgba(37, 99, 235, 0.18)',
+      borderColor: interaction?.selection?.borderColor ?? '#2563eb',
+    } satisfies Required<NonNullable<Exclude<DataTableInteractionOptions['selection'], false>>>
   const motion = interaction?.motion === false
     ? false
     : {
-        hover: {
-          duration: 120,
-          easing: 'outCubic' as const,
-          ...(interaction?.motion?.hover ?? {}),
-        },
-        selection: {
-          duration: 140,
-          easing: 'outCubic' as const,
-          ...(interaction?.motion?.selection ?? {}),
-        },
-        cells: interaction?.motion?.cells === false || interaction?.motion?.cells === undefined
-          ? false
-          : {
-              enter: interaction.motion.cells.enter ?? 'fade',
-              duration: interaction.motion.cells.duration ?? 90,
-              stagger: interaction.motion.cells.stagger ?? 4,
-              maxAnimatedCells: interaction.motion.cells.maxAnimatedCells ?? 120,
-            },
-      } satisfies DataTableResolvedInteractionOptions['motion']
+      hover: {
+        duration: 120,
+        easing: 'outCubic' as const,
+        ...(interaction?.motion?.hover ?? {}),
+      },
+      selection: {
+        duration: 140,
+        easing: 'outCubic' as const,
+        ...(interaction?.motion?.selection ?? {}),
+      },
+      cells: interaction?.motion?.cells === false || interaction?.motion?.cells === undefined
+        ? false
+        : {
+            enter: interaction.motion.cells.enter ?? 'fade',
+            duration: interaction.motion.cells.duration ?? 90,
+            stagger: interaction.motion.cells.stagger ?? 4,
+            maxAnimatedCells: interaction.motion.cells.maxAnimatedCells ?? 120,
+          },
+    } satisfies DataTableResolvedInteractionOptions['motion']
 
   return {
     hover,
@@ -819,7 +855,9 @@ export function createDataTableRootDescriptor(createNode?: DataTableRootDescript
     },
   }
 
-  if (createNode) descriptor.createNode = createNode
+  if (createNode) {
+    descriptor.createNode = createNode
+  }
   return descriptor
 }
 
@@ -849,12 +887,16 @@ function finiteClamp(value: unknown, min: number, max: number, fallback: number)
 }
 
 function normalizeStringList(value: unknown): Array<string> {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value)) {
+    return []
+  }
   return [...new Set(value.filter((item): item is string => typeof item === 'string' && item.length > 0))]
 }
 
 function normalizeColumnWidths(value: unknown): Record<string, number> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
   const result: Record<string, number> = {}
   for (const [columnId, width] of Object.entries(value)) {
     if (typeof width === 'number' && Number.isFinite(width)) {
@@ -865,10 +907,14 @@ function normalizeColumnWidths(value: unknown): Record<string, number> {
 }
 
 function normalizeColumnGroups(value: unknown): Array<DataTableColumnGroupInput> {
-  if (!Array.isArray(value)) return []
+  if (!Array.isArray(value)) {
+    return []
+  }
   return value
     .filter((group): group is DataTableColumnGroupInput => {
-      if (!group || typeof group !== 'object') return false
+      if (!group || typeof group !== 'object') {
+        return false
+      }
       const candidate = group as DataTableColumnGroupInput
       return typeof candidate.id === 'string'
         && typeof candidate.title === 'string'
@@ -884,6 +930,8 @@ function normalizeColumnGroups(value: unknown): Array<DataTableColumnGroupInput>
 }
 
 function normalizeColumnAutosizeMode(value: unknown): DataTableColumnAutosizeMode {
-  if (value === 'visible' || value === 'sampled' || value === 'all-loaded' || value === 'server-estimated') return value
+  if (value === 'visible' || value === 'sampled' || value === 'all-loaded' || value === 'server-estimated') {
+    return value
+  }
   return 'sampled'
 }

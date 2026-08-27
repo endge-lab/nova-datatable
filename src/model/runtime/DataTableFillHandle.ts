@@ -1,8 +1,8 @@
 import type {
   DataTableDelta,
   DataTableFillDirection,
-  DataTableFillHandleOptions,
   DataTableFillHandleMode,
+  DataTableFillHandleOptions,
   DataTableResolvedFillHandleOptions,
   DataTableSelectionRange,
   DataTableStoreApi,
@@ -14,7 +14,9 @@ import type {
 export function normalizeDataTableFillHandle(
   fillHandle: false | DataTableFillHandleOptions | undefined,
 ): false | DataTableResolvedFillHandleOptions {
-  if (fillHandle === false) return false
+  if (fillHandle === false) {
+    return false
+  }
   return {
     enabled: fillHandle?.enabled ?? false,
     mode: fillHandle?.mode ?? 'copy',
@@ -31,17 +33,23 @@ export function createDataTableFillDeltas<Row extends Record<string, any>>(
   direction: DataTableFillDirection,
   options: { mode: DataTableFillHandleMode },
 ): Array<DataTableDelta<Row>> {
-  if (range.unit !== 'cell') return []
+  if (range.unit !== 'cell') {
+    return []
+  }
   const startRow = range.startRowIndex ?? 0
   const endRow = range.endRowIndex ?? startRow
   const columnIds = range.columnIds ?? [range.startColumnId].filter((item): item is string => !!item)
-  if (columnIds.length === 0) return []
+  if (columnIds.length === 0) {
+    return []
+  }
 
   const sourceRowIndex = direction === 'up' ? endRow : startRow
   const deltas: Array<DataTableDelta<Row>> = []
   for (let rowIndex = startRow; rowIndex <= endRow; rowIndex += 1) {
     const rowId = store.getRowIdAt(rowIndex)
-    if (rowId === undefined || rowIndex === sourceRowIndex) continue
+    if (rowId === undefined || rowIndex === sourceRowIndex) {
+      continue
+    }
     for (const columnId of columnIds) {
       const value = resolveFillValue(store, sourceRowIndex, rowIndex, columnId, options.mode)
       deltas.push({ type: 'setCell', rowId, columnId, value })
@@ -57,15 +65,23 @@ export function parseDataTableClipboardText(text: string, format: 'auto' | 'plai
   const actual = format === 'auto'
     ? text.includes('<table') ? 'html' : text.includes('\t') ? 'tsv' : text.includes(',') ? 'csv' : 'plain'
     : format
-  if (actual === 'html') return parseHtmlTable(text)
-  if (actual === 'csv') return parseDelimited(text, ',')
-  if (actual === 'tsv') return parseDelimited(text, '\t')
+  if (actual === 'html') {
+    return parseHtmlTable(text)
+  }
+  if (actual === 'csv') {
+    return parseDelimited(text, ',')
+  }
+  if (actual === 'tsv') {
+    return parseDelimited(text, '\t')
+  }
   return [[text]]
 }
 
 function normalizeDirections(directions: Array<DataTableFillDirection> | undefined): Array<DataTableFillDirection> {
   const fallback: Array<DataTableFillDirection> = ['down', 'right']
-  if (!directions || directions.length === 0) return fallback
+  if (!directions || directions.length === 0) {
+    return fallback
+  }
   return directions.filter((direction, index) => directions.indexOf(direction) === index)
 }
 
@@ -77,10 +93,16 @@ function resolveFillValue<Row extends Record<string, any>>(
   mode: DataTableFillHandleMode,
 ): unknown {
   const sourceId = store.getRowIdAt(sourceRowIndex)
-  if (sourceId === undefined) return undefined
+  if (sourceId === undefined) {
+    return undefined
+  }
   const source = store.getCell(sourceId, columnId)
-  if (mode !== 'series' && mode !== 'auto') return source
-  if (typeof source === 'number') return source + (targetRowIndex - sourceRowIndex)
+  if (mode !== 'series' && mode !== 'auto') {
+    return source
+  }
+  if (typeof source === 'number') {
+    return source + (targetRowIndex - sourceRowIndex)
+  }
   return source
 }
 
@@ -95,7 +117,7 @@ function parseDelimited(text: string, delimiter: string): Array<Array<string>> {
 
 function parseHtmlTable(text: string): Array<Array<string>> {
   const rows = [...text.matchAll(/<tr[\s\S]*?<\/tr>/gi)]
-  return rows.map(rowMatch => {
+  return rows.map((rowMatch) => {
     const row = rowMatch[0]
     return [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)]
       .map(cell => decodeHtml(cell[1]!.replace(/<[^>]+>/g, '').trim()))

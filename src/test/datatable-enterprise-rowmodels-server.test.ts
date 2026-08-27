@@ -1,3 +1,7 @@
+import type {
+  DataTableQueryState,
+  DataTableViewRow,
+} from '@/model/types/datatable.types'
 import { describe, expect, it } from 'vitest'
 import {
   DataTableDetailExpansionController,
@@ -11,10 +15,6 @@ import {
   isDataTableTreeRowExpanded,
 } from '@/model/runtime/DataTableTreeRows'
 import { createDataTableWorkerIndexPipeline } from '@/model/runtime/DataTableWorkerIndexPipeline'
-import type {
-  DataTableQueryState,
-  DataTableViewRow,
-} from '@/model/types/datatable.types'
 
 interface EnterpriseRow {
   id: string
@@ -68,15 +68,15 @@ function dataViewRows(rows: Array<EnterpriseRow>): Array<DataTableViewRow<Enterp
   }))
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>(next => {
+  const promise = new Promise<T>((next) => {
     resolve = next
   })
   return { promise, resolve }
 }
 
-describe('DataTable enterprise tree row model helpers', () => {
+describe('dataTable enterprise tree row model helpers', () => {
   it('flattens tree rows using explicit expand/collapse state', () => {
     const controller = new DataTableTreeExpansionController(['north'])
 
@@ -121,7 +121,7 @@ describe('DataTable enterprise tree row model helpers', () => {
   })
 })
 
-describe('DataTable enterprise detail row helpers', () => {
+describe('dataTable enterprise detail row helpers', () => {
   it('inserts detail rows after expanded data rows only', () => {
     const controller = new DataTableDetailExpansionController(['row-b', 'row-d'])
     const flattened = flattenDataTableDetailRows({
@@ -152,7 +152,7 @@ describe('DataTable enterprise detail row helpers', () => {
   })
 })
 
-describe('DataTable enterprise worker/index query simulator', () => {
+describe('dataTable enterprise worker/index query simulator', () => {
   it('filters, sorts, searches and pages over indexed rows', async () => {
     const pipeline = createDataTableWorkerIndexPipeline({
       rows: flatRows(),
@@ -195,7 +195,7 @@ describe('DataTable enterprise worker/index query simulator', () => {
   })
 })
 
-describe('DataTable enterprise server datasource hardening', () => {
+describe('dataTable enterprise server datasource hardening', () => {
   it('marks older latest-only requests as stale and records metrics', async () => {
     const hardening = new DataTableServerHardening({ delay: () => Promise.resolve() })
     const firstGate = deferred<string>()
@@ -235,7 +235,9 @@ describe('DataTable enterprise server datasource hardening', () => {
 
     const first = await hardening.runLatest('summary', async () => {
       attempts += 1
-      if (attempts === 1) throw new Error('temporary')
+      if (attempts === 1) {
+        throw new Error('temporary')
+      }
       return { count: 42 }
     }, { cacheKey: 'summary:active' })
 

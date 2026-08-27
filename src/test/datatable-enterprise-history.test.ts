@@ -1,12 +1,13 @@
+import type { DataTableStore } from '@/model/module/DataTableStore'
+import type { DataTableDelta, DataTableTransaction } from '@/model/types/datatable.types'
 import { describe, expect, it } from 'vitest'
-import { createDataTableStore, type DataTableStore } from '@/model/module/DataTableStore'
-import { DataTableCommitController, createDataTableCommitPlan } from '@/model/runtime/DataTableCommitController'
+import { createDataTableStore } from '@/model/module/DataTableStore'
+import { createDataTableCommitPlan, DataTableCommitController } from '@/model/runtime/DataTableCommitController'
 import {
-  DataTableTransactionHistory,
   createInverseDataTableDeltas,
+  DataTableTransactionHistory,
   normalizeDataTableHistory,
 } from '@/model/runtime/DataTableTransactionHistory'
-import type { DataTableDelta, DataTableTransaction } from '@/model/types/datatable.types'
 
 interface HistoryRow {
   id: string
@@ -35,7 +36,7 @@ function createHistory(store: DataTableStore<HistoryRow>): DataTableTransactionH
   return new DataTableTransactionHistory(store, normalizeDataTableHistory({ enabled: true, maxEntries: 10 }))
 }
 
-describe('DataTable enterprise transaction history', () => {
+describe('dataTable enterprise transaction history', () => {
   it('records cell transactions and replays undo/redo inverse deltas', () => {
     const store = createDataTableStore<HistoryRow>({ rowKey: 'id', rows: rows(4) })
     const history = createHistory(store)
@@ -88,7 +89,7 @@ describe('DataTable enterprise transaction history', () => {
   })
 })
 
-describe('DataTable enterprise commit controller', () => {
+describe('dataTable enterprise commit controller', () => {
   it('plans optimistic and transactional commit strategies without applying side effects', () => {
     const transaction: DataTableTransaction<HistoryRow> = {
       id: 'tx-commit',

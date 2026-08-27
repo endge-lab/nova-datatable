@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 
-import { bench, describe } from 'vitest'
+import type { NovaApp } from '@endge/nova'
+import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import {
   Nova,
+
   RaphSchedulerType,
   RendererType,
-  type NovaApp,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
+import { bench, describe } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { NovaDataTableSchema } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
-import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 
 interface BenchRow {
   id: string
@@ -37,14 +38,18 @@ function installCanvasMocks(): void {
     configurable: true,
   })
   HTMLCanvasElement.prototype.getContext = function getContext(type: string) {
-    if (type !== RendererType.Web2D) return null
+    if (type !== RendererType.Web2D) {
+      return null
+    }
     const state: Record<PropertyKey, any> = {
       measureText: (text: string) => ({ width: text.length * 8 }),
       createPattern: () => ({}),
     }
     return new Proxy(state, {
       get(target, prop) {
-        if (!(prop in target)) target[prop] = () => undefined
+        if (!(prop in target)) {
+          target[prop] = () => undefined
+        }
         return target[prop]
       },
       set(target, prop, value) {
@@ -89,7 +94,7 @@ function createApp(width = 960, height = 520): NovaApp<TestEvents> {
   return app
 }
 
-function mountBenchRoot(rowCount: number, animated = false): { app: NovaApp<TestEvents>; root: DataTableRootNode<BenchRow>; calls: () => number } {
+function mountBenchRoot(rowCount: number, animated = false): { app: NovaApp<TestEvents>, root: DataTableRootNode<BenchRow>, calls: () => number } {
   let templateCalls = 0
   const app = createApp()
   const surface = app.createSurface('datatable-render-layer-bench')
@@ -134,14 +139,14 @@ function mountBenchRoot(rowCount: number, animated = false): { app: NovaApp<Test
   }
 }
 
-function mountLazyBenchRoot(rowCount: number): { app: NovaApp<TestEvents>; root: DataTableRootNode<BenchRow>; rangeCalls: () => number } {
+function mountLazyBenchRoot(rowCount: number): { app: NovaApp<TestEvents>, root: DataTableRootNode<BenchRow>, rangeCalls: () => number } {
   const app = createApp()
   let rangeCalls = 0
   const store = createDataTableStore<BenchRow>({
     rowKey: 'id',
     source: {
       rowCount,
-      loadRange: range => {
+      loadRange: (range) => {
         rangeCalls += 1
         return rows(range.end - range.start).map((row, index) => ({
           ...row,
@@ -190,7 +195,7 @@ function mountLazyBenchRoot(rowCount: number): { app: NovaApp<TestEvents>; root:
   }
 }
 
-describe('NovaDataTable render layer benchmarks', () => {
+describe('novaDataTable render layer benchmarks', () => {
   bench('100 rows x 54 columns hover 1000 moves without template rebuilds', () => {
     const { app, root, calls } = mountBenchRoot(100)
     const before = calls()
@@ -202,7 +207,9 @@ describe('NovaDataTable render layer benchmarks', () => {
       }))
       app.raph.run()
     }
-    if (calls() !== before) throw new Error('Hover rebuilt cell templates')
+    if (calls() !== before) {
+      throw new Error('Hover rebuilt cell templates')
+    }
     app.destroy()
   }, { iterations: 5 })
 
@@ -212,7 +219,9 @@ describe('NovaDataTable render layer benchmarks', () => {
     ;(root as any).__resetRenderLayerDiagnostics()
     app.raph.run()
     const diagnostics = (root as any).__getRenderLayerDiagnostics()
-    if (diagnostics.layerRebuilds['body-static'] !== 0) throw new Error('Animated frame rebuilt static cells')
+    if (diagnostics.layerRebuilds['body-static'] !== 0) {
+      throw new Error('Animated frame rebuilt static cells')
+    }
     app.destroy()
   }, { iterations: 10 })
 
@@ -222,7 +231,9 @@ describe('NovaDataTable render layer benchmarks', () => {
     ;(root as any).__resetRenderLayerDiagnostics()
     root.eventHandlers.mousemove?.(new MouseEvent('mousemove', { clientX: 220, clientY: 124 }))
     app.raph.run()
-    if (calls() !== before) throw new Error('Large hover rebuilt cell templates')
+    if (calls() !== before) {
+      throw new Error('Large hover rebuilt cell templates')
+    }
     app.destroy()
   }, { iterations: 20 })
 
@@ -234,8 +245,12 @@ describe('NovaDataTable render layer benchmarks', () => {
       app.raph.run()
     }
     const diagnostics = (root as any).__getRenderLayerDiagnostics()
-    if (diagnostics.layerRebuilds.header !== 0) throw new Error('Vertical scroll rebuilt header')
-    if (diagnostics.layerRebuilds.pinned !== 0) throw new Error('Vertical scroll rebuilt pinned rows')
+    if (diagnostics.layerRebuilds.header !== 0) {
+      throw new Error('Vertical scroll rebuilt header')
+    }
+    if (diagnostics.layerRebuilds.pinned !== 0) {
+      throw new Error('Vertical scroll rebuilt pinned rows')
+    }
     app.destroy()
   }, { iterations: 10 })
 
@@ -247,7 +262,9 @@ describe('NovaDataTable render layer benchmarks', () => {
       root.getApi().scrollTo(0, index * 24)
       app.raph.run()
     }
-    if (rangeCalls() - before > 4) throw new Error('Scroll issued too many lazy range requests')
+    if (rangeCalls() - before > 4) {
+      throw new Error('Scroll issued too many lazy range requests')
+    }
     app.destroy()
   }, { iterations: 10 })
 })

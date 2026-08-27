@@ -1,4 +1,3 @@
-import { resolveDataTableValue } from '@/model/runtime/datatable-columns'
 import type {
   DataTableAggregator,
   DataTableColumnInput,
@@ -13,9 +12,9 @@ import type {
   DataTableGroupingState,
   DataTableGroupNode,
   DataTableGroupRule,
-  DataTableResolvedPerformanceOptions,
   DataTableQueryState,
   DataTableResolvedColumn,
+  DataTableResolvedPerformanceOptions,
   DataTableResolvedViewOptions,
   DataTableRowId,
   DataTableRowReorderPayload,
@@ -29,6 +28,7 @@ import type {
   DataTableViewRow,
   DataTableViewState,
 } from '@/model/types/datatable.types'
+import { resolveDataTableValue } from '@/model/runtime/datatable-columns'
 
 interface DataTableViewPipelineInput<Row extends Record<string, any>> {
   columns: Array<DataTableResolvedColumn<Row>>
@@ -53,8 +53,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private searchCursor: string | undefined
   private searchPreviousCursor: string | undefined
   private searchHasMore = false
-  private readonly searchMatchByCell = new Map<string, { match: DataTableSearchMatch; index: number }>()
-  private readonly searchMatchByRow = new Map<string, { match: DataTableSearchMatch; index: number }>()
+  private readonly searchMatchByCell = new Map<string, { match: DataTableSearchMatch, index: number }>()
+  private readonly searchMatchByRow = new Map<string, { match: DataTableSearchMatch, index: number }>()
   private rowOrder: Array<DataTableRowId> = []
   private columnOrder: Array<string> = []
   private groupingExpanded: 'all' | 'none' | Array<string> = 'all'
@@ -114,7 +114,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       this.groupingExpanded = view.grouping ? cloneExpanded(view.grouping.expanded) : 'all'
       this.expandedInputSignature = view.grouping ? JSON.stringify(view.grouping.expanded) : ''
       this.initialized = true
-    } else {
+    }
+    else {
       if (view.columnOrdering && view.columnOrdering.order.length > 0 && this.columnOrder.length === 0) {
         this.columnOrder = [...view.columnOrdering.order]
       }
@@ -146,7 +147,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   getRowAt(viewIndex: number): Row | undefined {
     const row = this.rows[viewIndex]
-    if (!row) return this.store.getRowAt(viewIndex)
+    if (!row) {
+      return this.store.getRowAt(viewIndex)
+    }
     return row.kind === 'data' ? row.row : undefined
   }
 
@@ -169,7 +172,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   getViewRowAt(viewIndex: number): DataTableViewRow<Row> | undefined {
     if (this.passthrough) {
-      if (viewIndex < 0 || viewIndex >= this.store.rowCount) return undefined
+      if (viewIndex < 0 || viewIndex >= this.store.rowCount) {
+        return undefined
+      }
       const row = this.store.getRowAt(viewIndex)
       return {
         kind: 'data',
@@ -187,7 +192,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findViewIndexByRowId(rowId: DataTableRowId): number | undefined {
-    if (this.passthrough) return this.store.getRowIndex(rowId)
+    if (this.passthrough) {
+      return this.store.getRowIndex(rowId)
+    }
     return this.rows.find(row => row.kind === 'data' && row.rowId === rowId)?.viewIndex
   }
 
@@ -273,7 +280,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет действие cycleSort в рамках ответственности DataTableViewPipeline.
    */
   cycleSort(columnId: string, additive: boolean): void {
-    if (!this.view.sorting) return
+    if (!this.view.sorting) {
+      return
+    }
     const current = this.sort.find(rule => rule.columnId === columnId)
     const nextDirection = current?.direction === 'asc'
       ? 'desc'
@@ -352,7 +361,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findNext(): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) return null
+    if (this.searchMatches.length === 0) {
+      return null
+    }
     const nextIndex = this.searchActiveIndex < 0
       ? 0
       : (this.searchActiveIndex + 1) % this.searchMatches.length
@@ -363,7 +374,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Находит сущность по runtime-критериям DataTableViewPipeline.
    */
   findPrevious(): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) return null
+    if (this.searchMatches.length === 0) {
+      return null
+    }
     const nextIndex = this.searchActiveIndex < 0
       ? this.searchMatches.length - 1
       : (this.searchActiveIndex - 1 + this.searchMatches.length) % this.searchMatches.length
@@ -374,7 +387,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Переводит focus в целевое состояние DataTableViewPipeline.
    */
   focusSearchMatch(index: number): DataTableSearchMatch | null {
-    if (this.searchMatches.length === 0) return null
+    if (this.searchMatches.length === 0) {
+      return null
+    }
     this.searchActiveIndex = clampInteger(index, 0, this.searchMatches.length - 1)
     return this.searchMatches[this.searchActiveIndex] ?? null
   }
@@ -460,7 +475,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     }
     if (typeof activeIndex === 'number') {
       this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
-    } else if (this.searchActiveIndex < 0) {
+    }
+    else if (this.searchActiveIndex < 0) {
       this.searchActiveIndex = 0
     }
   }
@@ -492,7 +508,8 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     }
     if (typeof activeIndex === 'number') {
       this.searchActiveIndex = clampInteger(activeIndex, 0, this.searchMatches.length - 1)
-    } else {
+    }
+    else {
       this.searchActiveIndex = previousMatches.length > 0
         ? previousMatches.length - 1
         : Math.max(0, this.searchActiveIndex)
@@ -502,7 +519,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
-  getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch; index: number } | null {
+  getSearchMatchForCell(rowId: DataTableRowId, columnId: string): { match: DataTableSearchMatch, index: number } | null {
     return this.search.scope === 'rows'
       ? this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
       : this.searchMatchByCell.get(createSearchCellKey(rowId, columnId)) ?? null
@@ -511,7 +528,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   /**
    * Возвращает значение состояния DataTableViewPipeline.
    */
-  getSearchMatchForRow(rowId: DataTableRowId): { match: DataTableSearchMatch; index: number } | null {
+  getSearchMatchForRow(rowId: DataTableRowId): { match: DataTableSearchMatch, index: number } | null {
     return this.searchMatchByRow.get(createSearchRowKey(rowId)) ?? null
   }
 
@@ -519,7 +536,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Обновляет значение состояния DataTableViewPipeline.
    */
   setGrouping(groups: Array<DataTableGroupRule<Row>>): void {
-    if (!this.view.grouping) return
+    if (!this.view.grouping) {
+      return
+    }
     this.groupingGroupsOverride = [...groups]
     this.view = {
       ...this.view,
@@ -537,7 +556,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Очищает накопленное состояние DataTableViewPipeline.
    */
   clearGrouping(): void {
-    if (!this.view.grouping) return
+    if (!this.view.grouping) {
+      return
+    }
     this.groupingGroupsOverride = []
     this.view = {
       ...this.view,
@@ -556,10 +577,14 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   toggleGroup(groupId: string): DataTableGroupNode<Row> | undefined {
     const group = this.groupNodes.get(groupId)
-    if (!group) return undefined
+    if (!group) {
+      return undefined
+    }
 
-    if (group.expanded) this.collapseGroup(groupId)
-    else this.expandGroup(groupId)
+    if (group.expanded) {
+      this.collapseGroup(groupId)
+    }
+    else { this.expandGroup(groupId) }
     return this.groupNodes.get(groupId) ?? group
   }
 
@@ -612,7 +637,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const fromIndex = clampInteger(payload.fromIndex, 0, Math.max(0, ids.length - 1))
     const toIndex = clampInteger(payload.toIndex, 0, Math.max(0, ids.length - 1))
     const [id] = ids.splice(fromIndex, 1)
-    if (id !== undefined) ids.splice(toIndex, 0, id)
+    if (id !== undefined) {
+      ids.splice(toIndex, 0, id)
+    }
     this.rowOrder = ids
     this.rebuild()
     return {
@@ -632,7 +659,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const fromIndex = clampInteger(payload.fromIndex, 0, Math.max(0, ids.length - 1))
     const toIndex = clampInteger(payload.toIndex, 0, Math.max(0, ids.length - 1))
     const [id] = ids.splice(fromIndex, 1)
-    if (id !== undefined) ids.splice(toIndex, 0, id)
+    if (id !== undefined) {
+      ids.splice(toIndex, 0, id)
+    }
     this.columnOrder = payload.order ? normalizeColumnOrder(payload.order, columns) : ids
     return {
       ...payload,
@@ -685,12 +714,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   orderColumns(columns: Array<DataTableColumnInput<Row>>): Array<DataTableColumnInput<Row>> {
     const order = this.columnOrder.length > 0 ? this.columnOrder : this.view.columnOrdering && this.view.columnOrdering.order
-    if (!order || order.length === 0) return columns
+    if (!order || order.length === 0) {
+      return columns
+    }
     const rank = new Map(order.map((id, index) => [id, index]))
     return [...columns].sort((a, b) => {
       const aRank = rank.get(a.id) ?? Number.MAX_SAFE_INTEGER
       const bRank = rank.get(b.id) ?? Number.MAX_SAFE_INTEGER
-      if (aRank !== bRank) return aRank - bRank
+      if (aRank !== bRank) {
+        return aRank - bRank
+      }
       return columns.indexOf(a) - columns.indexOf(b)
     })
   }
@@ -732,7 +765,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     const rows: Array<DataTableDataViewRow<Row>> = []
     for (let storeIndex = 0; storeIndex < this.store.rowCount; storeIndex += 1) {
       const row = this.store.getRowAt(storeIndex)
-      if (!row) continue
+      if (!row) {
+        continue
+      }
       const rowId = this.store.getRowIdAt(storeIndex)
       rows.push({ kind: 'data', row, rowId, storeIndex, viewIndex: rows.length, depth: 0 })
     }
@@ -754,11 +789,21 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг shouldApplyLocal для DataTableViewPipeline.
    */
   private shouldApplyLocal(mode: DataTableViewMode): boolean {
-    if (this.view.serverRowModel && this.view.serverRowModel.enabled && this.view.serverRowModel.authoritative) return false
-    if (this.store.rowCount > this.maxClientRows) return false
-    if (this.store.loadedRowCount < this.store.rowCount) return false
-    if (mode === 'client') return true
-    if (mode === 'server') return false
+    if (this.view.serverRowModel && this.view.serverRowModel.enabled && this.view.serverRowModel.authoritative) {
+      return false
+    }
+    if (this.store.rowCount > this.maxClientRows) {
+      return false
+    }
+    if (this.store.loadedRowCount < this.store.rowCount) {
+      return false
+    }
+    if (mode === 'client') {
+      return true
+    }
+    if (mode === 'server') {
+      return false
+    }
     return this.store.loadedRowCount >= this.store.rowCount
   }
 
@@ -766,7 +811,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг matchesFilters для DataTableViewPipeline.
    */
   private matchesFilters(item: DataTableDataViewRow<Row>): boolean {
-    if (!item.row || item.rowId === undefined) return false
+    if (!item.row || item.rowId === undefined) {
+      return false
+    }
     return this.matchesFilterNode(this.filters, item)
   }
 
@@ -777,7 +824,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     node: DataTableFilterState | DataTableFilterExpression | DataTableFilterRule,
     item: DataTableDataViewRow<Row>,
   ): boolean {
-    if (Array.isArray(node)) return node.every(rule => this.matchesFilterRule(rule, item))
+    if (Array.isArray(node)) {
+      return node.every(rule => this.matchesFilterRule(rule, item))
+    }
     if ('logic' in node) {
       return node.logic === 'or'
         ? node.rules.some(rule => this.matchesFilterNode(rule, item))
@@ -790,9 +839,13 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг matchesFilterRule для DataTableViewPipeline.
    */
   private matchesFilterRule(rule: DataTableFilterRule, item: DataTableDataViewRow<Row>): boolean {
-    if (!item.row || item.rowId === undefined) return false
+    if (!item.row || item.rowId === undefined) {
+      return false
+    }
     const column = this.columns.find(candidate => candidate.id === rule.columnId)
-    if (!column) return true
+    if (!column) {
+      return true
+    }
     const value = resolveDataTableValue(item.row, item.storeIndex, column)
     const filter = typeof column.filter === 'object' ? column.filter : undefined
     const context: DataTableFilterContext<Row> = {
@@ -804,7 +857,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       operator: rule.operator,
       filterValue: rule.value,
     }
-    if (filter?.predicate) return filter.predicate(context)
+    if (filter?.predicate) {
+      return filter.predicate(context)
+    }
     return defaultPredicate(rule.operator, value, rule.value)
   }
 
@@ -815,7 +870,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     for (let index = 0; index < this.sort.length; index += 1) {
       const rule = this.sort[index]!
       const column = this.columns.find(item => item.id === rule.columnId)
-      if (!column || !a.row || !b.row) continue
+      if (!column || !a.row || !b.row) {
+        continue
+      }
       const sortConfig = typeof column.sortable === 'object' ? column.sortable : undefined
       const aValue = sortConfig?.accessor
         ? sortConfig.accessor(a.row, a.storeIndex)
@@ -826,7 +883,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       const compared = sortConfig?.compare
         ? sortConfig.compare(aValue, bValue, a.row, b.row)
         : compareValues(aValue, bValue, sortConfig?.nulls)
-      if (compared !== 0) return rule.direction === 'asc' ? compared : -compared
+      if (compared !== 0) {
+        return rule.direction === 'asc' ? compared : -compared
+      }
     }
     return a.storeIndex - b.storeIndex
   }
@@ -878,7 +937,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       : this.rows
     const matches: Array<DataTableSearchMatch> = []
     for (const viewRow of sourceRows) {
-      if (!viewRow || viewRow.kind !== 'data' || !viewRow.row) continue
+      if (!viewRow || viewRow.kind !== 'data' || !viewRow.row) {
+        continue
+      }
       matches.push(...this.matchSearchRow(viewRow))
     }
     this.searchMatches = matches
@@ -888,9 +949,13 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     this.searchCursor = undefined
     this.searchPreviousCursor = undefined
     this.searchHasMore = false
-    if (matches.length === 0) this.searchActiveIndex = -1
-    else if (this.searchActiveIndex < 0) this.searchActiveIndex = 0
-    else this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1)
+    if (matches.length === 0) {
+      this.searchActiveIndex = -1
+    }
+    else if (this.searchActiveIndex < 0) {
+      this.searchActiveIndex = 0
+    }
+    else { this.searchActiveIndex = Math.min(this.searchActiveIndex, matches.length - 1) }
   }
 
   /**
@@ -904,10 +969,16 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       const match = this.searchMatches[index]!
       const entry = { match, index }
       const rowKey = createSearchRowKey(match.rowId)
-      if (!this.searchMatchByRow.has(rowKey)) this.searchMatchByRow.set(rowKey, entry)
-      if (match.columnId === undefined) continue
+      if (!this.searchMatchByRow.has(rowKey)) {
+        this.searchMatchByRow.set(rowKey, entry)
+      }
+      if (match.columnId === undefined) {
+        continue
+      }
       const cellKey = createSearchCellKey(match.rowId, match.columnId)
-      if (!this.searchMatchByCell.has(cellKey)) this.searchMatchByCell.set(cellKey, entry)
+      if (!this.searchMatchByCell.has(cellKey)) {
+        this.searchMatchByCell.set(cellKey, entry)
+      }
     }
   }
 
@@ -916,7 +987,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   private matchSearchRow(viewRow: DataTableDataViewRow<Row>): Array<DataTableSearchMatch> {
     const row = viewRow.row
-    if (!row) return []
+    if (!row) {
+      return []
+    }
     const searchableColumns = this.resolveSearchableColumns()
     const matches: Array<DataTableSearchMatch> = []
     if (this.search.scope === 'rows') {
@@ -939,7 +1012,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     for (const column of searchableColumns) {
       const value = String(resolveDataTableValue(row, viewRow.storeIndex, column) ?? '')
       const ranges = findSearchRanges(value, this.search)
-      if (ranges.length === 0) continue
+      if (ranges.length === 0) {
+        continue
+      }
       matches.push({
         rowId: viewRow.rowId,
         rowIndex: viewRow.viewIndex,
@@ -958,7 +1033,9 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    */
   private resolveSearchableColumns(): Array<DataTableResolvedColumn<Row>> {
     const ids = this.search.columns ?? []
-    if (ids.length === 0) return this.columns
+    if (ids.length === 0) {
+      return this.columns
+    }
     const allowed = new Set(ids)
     return this.columns.filter(column => allowed.has(column.id))
   }
@@ -967,18 +1044,24 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Применяет подготовленное состояние DataTableViewPipeline.
    */
   private applyManualOrder(rows: Array<DataTableDataViewRow<Row>>): Array<DataTableDataViewRow<Row>> {
-    if (this.rowOrder.length === 0) return rows
+    if (this.rowOrder.length === 0) {
+      return rows
+    }
     const byId = new Map(rows.map(row => [row.rowId, row]))
     const ordered: Array<DataTableDataViewRow<Row>> = []
     const used = new Set<DataTableRowId>()
     for (const id of this.rowOrder) {
       const row = byId.get(id)
-      if (!row) continue
+      if (!row) {
+        continue
+      }
       ordered.push(row)
       used.add(id)
     }
     for (const row of rows) {
-      if (row.rowId === undefined || !used.has(row.rowId)) ordered.push(row)
+      if (row.rowId === undefined || !used.has(row.rowId)) {
+        ordered.push(row)
+      }
     }
     return ordered
   }
@@ -1027,20 +1110,26 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
     parentId: string | undefined,
   ): Array<DataTableGroupNode<Row>> {
     const rule = rules[depth]
-    if (!rule) return []
+    if (!rule) {
+      return []
+    }
 
-    const buckets = new Map<string, { key: unknown; label: string; rows: Array<DataTableDataViewRow<Row>> }>()
+    const buckets = new Map<string, { key: unknown, label: string, rows: Array<DataTableDataViewRow<Row>> }>()
     for (const row of rows) {
-      if (!row.row) continue
+      if (!row.row) {
+        continue
+      }
       const key = this.resolveGroupKey(rule, row.row, row.storeIndex)
       const label = formatGroupLabel(key)
       const bucketId = String(label)
       const bucket = buckets.get(bucketId)
-      if (bucket) bucket.rows.push(row)
-      else buckets.set(bucketId, { key, label, rows: [row] })
+      if (bucket) {
+        bucket.rows.push(row)
+      }
+      else { buckets.set(bucketId, { key, label, rows: [row] }) }
     }
 
-    const groups = [...buckets.values()].map(bucket => {
+    const groups = [...buckets.values()].map((bucket) => {
       const groupId = `${parentId ? `${parentId}/` : ''}${rule.id}:${bucket.label}`
       const groupRows = bucket.rows.map(item => item.row).filter((row): row is Row => !!row)
       const node: DataTableGroupNode<Row> = {
@@ -1098,8 +1187,10 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
         })
       }
       for (const child of group.children) {
-        if ('kind' in child && child.kind === 'data') target.push({ ...child, viewIndex: target.length })
-        else this.appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters)
+        if ('kind' in child && child.kind === 'data') {
+          target.push({ ...child, viewIndex: target.length })
+        }
+        else { this.appendGroupRows(child as DataTableGroupNode<Row>, target, showGroupRows, showGroupFooters) }
       }
       if (showGroupFooters && (!this.view.groupingPinnedRows || this.view.groupingPinnedRows.placement !== 'group-start')) {
         target.push({
@@ -1118,8 +1209,12 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Нормализует и возвращает итоговое значение DataTableViewPipeline.
    */
   private resolveGroupKey(rule: DataTableGroupRule<Row>, row: Row, index: number): unknown {
-    if (rule.value) return rule.value(row, index)
-    if (rule.field) return row[rule.field as keyof Row]
+    if (rule.value) {
+      return rule.value(row, index)
+    }
+    if (rule.field) {
+      return row[rule.field as keyof Row]
+    }
     return row[rule.id]
   }
 
@@ -1127,9 +1222,13 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг sortGroups для DataTableViewPipeline.
    */
   private sortGroups(groups: Array<DataTableGroupNode<Row>>, rule: DataTableGroupRule<Row>): Array<DataTableGroupNode<Row>> {
-    if (!rule.sort) return groups
+    if (!rule.sort) {
+      return groups
+    }
     const sorted = [...groups]
-    if (typeof rule.sort === 'function') return sorted.sort(rule.sort)
+    if (typeof rule.sort === 'function') {
+      return sorted.sort(rule.sort)
+    }
     return sorted.sort((a, b) => rule.sort === 'asc'
       ? compareValues(a.label, b.label)
       : compareValues(b.label, a.label))
@@ -1167,15 +1266,29 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
       rows,
       count: rows.length,
     }
-    if (typeof aggregator === 'function') return aggregator(rows, context)
-    if (aggregator === 'count') return rows.length
+    if (typeof aggregator === 'function') {
+      return aggregator(rows, context)
+    }
+    if (aggregator === 'count') {
+      return rows.length
+    }
 
     const values = rows.map(row => Number(row[key])).filter(Number.isFinite)
-    if (values.length === 0) return 0
-    if (aggregator === 'sum') return values.reduce((sum, value) => sum + value, 0)
-    if (aggregator === 'avg') return values.reduce((sum, value) => sum + value, 0) / values.length
-    if (aggregator === 'min') return Math.min(...values)
-    if (aggregator === 'max') return Math.max(...values)
+    if (values.length === 0) {
+      return 0
+    }
+    if (aggregator === 'sum') {
+      return values.reduce((sum, value) => sum + value, 0)
+    }
+    if (aggregator === 'avg') {
+      return values.reduce((sum, value) => sum + value, 0) / values.length
+    }
+    if (aggregator === 'min') {
+      return Math.min(...values)
+    }
+    if (aggregator === 'max') {
+      return Math.max(...values)
+    }
     return undefined
   }
 
@@ -1183,8 +1296,12 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
    * Выполняет внутренний шаг isGroupExpanded для DataTableViewPipeline.
    */
   private isGroupExpanded(groupId: string): boolean {
-    if (this.groupingExpanded === 'all') return true
-    if (this.groupingExpanded === 'none') return false
+    if (this.groupingExpanded === 'all') {
+      return true
+    }
+    if (this.groupingExpanded === 'none') {
+      return false
+    }
     return this.groupingExpanded.includes(groupId)
   }
 
@@ -1194,14 +1311,20 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   private setGroupExpanded(groupId: string, expanded: boolean): void {
     const allGroupIds = [...this.groupNodes.keys()]
     if (this.groupingExpanded === 'all') {
-      if (expanded) return
+      if (expanded) {
+        return
+      }
       this.groupingExpanded = allGroupIds.filter(id => id !== groupId)
-    } else if (this.groupingExpanded === 'none') {
+    }
+    else if (this.groupingExpanded === 'none') {
       this.groupingExpanded = expanded ? [groupId] : []
-    } else {
+    }
+    else {
       const set = new Set(this.groupingExpanded)
-      if (expanded) set.add(groupId)
-      else set.delete(groupId)
+      if (expanded) {
+        set.add(groupId)
+      }
+      else { set.delete(groupId) }
       this.groupingExpanded = [...set]
     }
     this.rebuild()
@@ -1209,29 +1332,61 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
 }
 
 function compareValues(a: unknown, b: unknown, nulls: 'first' | 'last' = 'last'): number {
-  if (a === b) return 0
-  if (a === undefined || a === null) return nulls === 'first' ? -1 : 1
-  if (b === undefined || b === null) return nulls === 'first' ? 1 : -1
-  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (a === b) {
+    return 0
+  }
+  if (a === undefined || a === null) {
+    return nulls === 'first' ? -1 : 1
+  }
+  if (b === undefined || b === null) {
+    return nulls === 'first' ? 1 : -1
+  }
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b
+  }
   return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' })
 }
 
 function defaultPredicate(operator: DataTableFilterOperator, value: unknown, filterValue: unknown): boolean {
   const text = String(value ?? '').toLowerCase()
   const filterText = String(filterValue ?? '').toLowerCase()
-  if (operator === 'contains') return text.includes(filterText)
-  if (operator === 'startsWith') return text.startsWith(filterText)
-  if (operator === 'endsWith') return text.endsWith(filterText)
-  if (operator === 'equals' || operator === 'is') return value === filterValue || text === filterText
-  if (operator === 'isNot') return value !== filterValue && text !== filterText
-  if (operator === 'in') return Array.isArray(filterValue) ? filterValue.includes(value) : false
-  if (operator === 'notIn') return Array.isArray(filterValue) ? !filterValue.includes(value) : true
+  if (operator === 'contains') {
+    return text.includes(filterText)
+  }
+  if (operator === 'startsWith') {
+    return text.startsWith(filterText)
+  }
+  if (operator === 'endsWith') {
+    return text.endsWith(filterText)
+  }
+  if (operator === 'equals' || operator === 'is') {
+    return value === filterValue || text === filterText
+  }
+  if (operator === 'isNot') {
+    return value !== filterValue && text !== filterText
+  }
+  if (operator === 'in') {
+    return Array.isArray(filterValue) ? filterValue.includes(value) : false
+  }
+  if (operator === 'notIn') {
+    return Array.isArray(filterValue) ? !filterValue.includes(value) : true
+  }
   const number = Number(value)
-  if (!Number.isFinite(number)) return false
-  if (operator === 'gt') return number > Number(filterValue)
-  if (operator === 'gte') return number >= Number(filterValue)
-  if (operator === 'lt') return number < Number(filterValue)
-  if (operator === 'lte') return number <= Number(filterValue)
+  if (!Number.isFinite(number)) {
+    return false
+  }
+  if (operator === 'gt') {
+    return number > Number(filterValue)
+  }
+  if (operator === 'gte') {
+    return number >= Number(filterValue)
+  }
+  if (operator === 'lt') {
+    return number < Number(filterValue)
+  }
+  if (operator === 'lte') {
+    return number <= Number(filterValue)
+  }
   if (operator === 'between' && Array.isArray(filterValue)) {
     return number >= Number(filterValue[0]) && number <= Number(filterValue[1])
   }
@@ -1260,13 +1415,17 @@ function normalizeColumnOrder<Row extends Record<string, any>>(
   const next: Array<string> = []
 
   for (const id of order) {
-    if (!columnSet.has(id) || seen.has(id)) continue
+    if (!columnSet.has(id) || seen.has(id)) {
+      continue
+    }
     seen.add(id)
     next.push(id)
   }
 
   for (const id of columnIds) {
-    if (seen.has(id)) continue
+    if (seen.has(id)) {
+      continue
+    }
     next.push(id)
   }
 
@@ -1274,7 +1433,9 @@ function normalizeColumnOrder<Row extends Record<string, any>>(
 }
 
 function cloneFilters(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState | DataTableFilterExpression {
-  if (Array.isArray(filters)) return filters.map(rule => ({ ...rule }))
+  if (Array.isArray(filters)) {
+    return filters.map(rule => ({ ...rule }))
+  }
   return {
     logic: filters.logic,
     rules: filters.rules.map(rule => cloneFilterNode(rule)),
@@ -1311,7 +1472,9 @@ function removeFilterRule(
   filters: DataTableFilterState | DataTableFilterExpression,
   columnId: string,
 ): DataTableFilterState | DataTableFilterExpression {
-  if (Array.isArray(filters)) return filters.filter(rule => rule.columnId !== columnId).map(rule => ({ ...rule }))
+  if (Array.isArray(filters)) {
+    return filters.filter(rule => rule.columnId !== columnId).map(rule => ({ ...rule }))
+  }
 
   return {
     logic: filters.logic,
@@ -1325,7 +1488,9 @@ function removeFilterNode(
   rule: DataTableFilterRule | DataTableFilterExpression,
   columnId: string,
 ): DataTableFilterRule | DataTableFilterExpression | null {
-  if (!('logic' in rule)) return rule.columnId === columnId ? null : { ...rule }
+  if (!('logic' in rule)) {
+    return rule.columnId === columnId ? null : { ...rule }
+  }
 
   const rules = rule.rules
     .map(child => removeFilterNode(child, columnId))
@@ -1334,12 +1499,16 @@ function removeFilterNode(
 }
 
 function _flattenFilterRules(filters: DataTableFilterState | DataTableFilterExpression): DataTableFilterState {
-  if (Array.isArray(filters)) return filters.map(rule => ({ ...rule }))
+  if (Array.isArray(filters)) {
+    return filters.map(rule => ({ ...rule }))
+  }
   return filters.rules.flatMap(rule => 'logic' in rule ? _flattenFilterRules(rule) : [{ ...rule }])
 }
 
 function hasFilters(filters: DataTableFilterState | DataTableFilterExpression): boolean {
-  if (Array.isArray(filters)) return filters.length > 0
+  if (Array.isArray(filters)) {
+    return filters.length > 0
+  }
   return filters.rules.length > 0
 }
 
@@ -1351,13 +1520,15 @@ function createSearchCellKey(rowId: DataTableRowId, columnId: string): string {
   return `${createSearchRowKey(rowId)}\u0000${columnId}`
 }
 
-function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ start: number; end: number }> {
+function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ start: number, end: number }> {
   const needle = query.text
-  if (!needle) return []
+  if (!needle) {
+    return []
+  }
 
   const source = query.caseSensitive ? value : value.toLowerCase()
   const target = query.caseSensitive ? needle : needle.toLowerCase()
-  const ranges: Array<{ start: number; end: number }> = []
+  const ranges: Array<{ start: number, end: number }> = []
 
   if (query.match === 'regex') {
     try {
@@ -1366,9 +1537,12 @@ function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ s
       for (const match of source.matchAll(regex)) {
         const start = match.index ?? -1
         const text = match[0] ?? ''
-        if (start >= 0 && text.length > 0) ranges.push({ start, end: start + text.length })
+        if (start >= 0 && text.length > 0) {
+          ranges.push({ start, end: start + text.length })
+        }
       }
-    } catch {
+    }
+    catch {
       return []
     }
     return ranges
@@ -1385,7 +1559,9 @@ function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ s
   let cursor = 0
   while (cursor <= source.length) {
     const index = source.indexOf(target, cursor)
-    if (index < 0) break
+    if (index < 0) {
+      break
+    }
     ranges.push({ start: index, end: index + needle.length })
     cursor = index + Math.max(1, needle.length)
   }
@@ -1393,7 +1569,9 @@ function findSearchRanges(value: string, query: DataTableSearchQuery): Array<{ s
 }
 
 function formatGroupLabel(value: unknown): string {
-  if (value === undefined || value === null || value === '') return 'Empty'
+  if (value === undefined || value === null || value === '') {
+    return 'Empty'
+  }
   return String(value)
 }
 

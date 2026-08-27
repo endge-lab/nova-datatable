@@ -1,7 +1,7 @@
-import path from 'path'
-import { defineConfig } from 'vitest/config'
+import path from 'node:path'
 import vue from '@vitejs/plugin-vue'
 import dts from 'unplugin-dts/vite'
+import { defineConfig } from 'vitest/config'
 import { novaVitePlugin } from '../@endge-nova-compiler/src/index'
 
 const publicTypesEntry = `import 'reflect-metadata'
@@ -53,18 +53,18 @@ export default defineConfig({
     },
     rollupOptions: {
       external: id =>
-        id === 'vue' ||
-        id.startsWith('vue/') ||
-        id === '@endge/nova' ||
-        id === '@endge/nova-compiler' ||
-        id === '@endge/nova-ui-kit' ||
-        id === '@endge/nova-vue' ||
-        id === '@endge/utils' ||
-        id.startsWith('@endge/nova/') ||
-        id.startsWith('@endge/nova-compiler/') ||
-        id.startsWith('@endge/nova-ui-kit/') ||
-        id.startsWith('@endge/nova-vue/') ||
-        id.startsWith('@endge/utils/'),
+        id === 'vue'
+        || id.startsWith('vue/')
+        || id === '@endge/nova'
+        || id === '@endge/nova-compiler'
+        || id === '@endge/nova-ui-kit'
+        || id === '@endge/nova-vue'
+        || id === '@endge/utils'
+        || id.startsWith('@endge/nova/')
+        || id.startsWith('@endge/nova-compiler/')
+        || id.startsWith('@endge/nova-ui-kit/')
+        || id.startsWith('@endge/nova-vue/')
+        || id.startsWith('@endge/utils/'),
     },
   },
   plugins: [

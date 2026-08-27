@@ -1,3 +1,4 @@
+import type { DataTableQueryState, DataTableSelectionRange } from '@/model/types/datatable.types'
 import { bench, describe } from 'vitest'
 import { createDataTableStore } from '@/model/module/DataTableStore'
 import { autosizeDataTableColumn, resolveDataTableColumns } from '@/model/runtime/datatable-columns'
@@ -5,7 +6,6 @@ import { createDataTableViewport } from '@/model/runtime/datatable-layout'
 import { DataTableServerRowModel } from '@/model/runtime/DataTableServerRowModel'
 import { DataTableSummaryEngine } from '@/model/runtime/DataTableSummaryEngine'
 import { DataTableViewPipeline } from '@/model/runtime/DataTableViewPipeline'
-import type { DataTableQueryState, DataTableSelectionRange } from '@/model/types/datatable.types'
 import { normalizeDataTablePerformance, normalizeDataTableView } from '@/ui/root/datatable-root.config'
 
 interface BenchRow {
@@ -27,7 +27,7 @@ function rows(count: number, start = 0): Array<BenchRow> {
   })
 }
 
-describe('NovaDataTable benchmarks', () => {
+describe('novaDataTable benchmarks', () => {
   bench('10M lazy store initialization', () => {
     const store = createDataTableStore<BenchRow>({
       rowKey: 'id',
@@ -52,7 +52,7 @@ describe('NovaDataTable benchmarks', () => {
 
   bench('10k patches in one batch', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(20_000) })
-    store.batch(api => {
+    store.batch((api) => {
       for (let index = 0; index < 10_000; index += 1) {
         api.patch(`row-${index}`, { status: 'active' })
       }
@@ -61,7 +61,7 @@ describe('NovaDataTable benchmarks', () => {
 
   bench('10k edit commits through setCell path', () => {
     const store = createDataTableStore<BenchRow>({ rowKey: 'id', rows: rows(20_000) })
-    store.batch(api => {
+    store.batch((api) => {
       for (let index = 0; index < 10_000; index += 1) {
         api.setCell(`row-${index}`, 'name', `Edited ${index}`)
       }
@@ -404,7 +404,7 @@ describe('NovaDataTable benchmarks', () => {
       x: index * 96,
       width: 96,
     }))
-    const plan: Array<{ key: string; x: number; y: number; width: number; text: string }> = []
+    const plan: Array<{ key: string, x: number, y: number, width: number, text: string }> = []
     for (let rowIndex = 0; rowIndex < visibleRows.length; rowIndex += 1) {
       const row = visibleRows[rowIndex]!
       const y = 40 + rowIndex * 32
@@ -418,7 +418,9 @@ describe('NovaDataTable benchmarks', () => {
         })
       }
     }
-    if (plan.length !== 5_000) throw new Error('Render plan did not cover 100x50 cells')
+    if (plan.length !== 5_000) {
+      throw new Error('Render plan did not cover 100x50 cells')
+    }
   })
 
   bench('column drag layout preview over 1k columns', () => {
@@ -440,7 +442,9 @@ describe('NovaDataTable benchmarks', () => {
         x += width
       }
     }
-    if (insertionIndex < 0) throw new Error('Invalid column insertion index')
+    if (insertionIndex < 0) {
+      throw new Error('Invalid column insertion index')
+    }
   })
 
   bench('selection overlay intersections for 1M logical selected rows', () => {
@@ -454,9 +458,13 @@ describe('NovaDataTable benchmarks', () => {
     const viewport = { start: 50_000, end: 50_140 }
     let visible = 0
     for (let rowIndex = viewport.start; rowIndex < viewport.end; rowIndex += 1) {
-      if (rowIndex >= (range.startRowIndex ?? 0) && rowIndex <= (range.endRowIndex ?? 0)) visible += 1
+      if (rowIndex >= (range.startRowIndex ?? 0) && rowIndex <= (range.endRowIndex ?? 0)) {
+        visible += 1
+      }
     }
-    if (visible === 0) throw new Error('Selection range was not visible')
+    if (visible === 0) {
+      throw new Error('Selection range was not visible')
+    }
   })
 
   bench('10k paste cells parse and delta generation', () => {
@@ -468,7 +476,9 @@ describe('NovaDataTable benchmarks', () => {
         { type: 'setCell' as const, rowId: `row-${index}`, columnId: 'status', value: status },
       ]
     })
-    if (deltas.length !== 20_000) throw new Error('Invalid paste delta count')
+    if (deltas.length !== 20_000) {
+      throw new Error('Invalid paste delta count')
+    }
   })
 
   bench('state persistence serialize restore for 1k columns', () => {
@@ -504,6 +514,8 @@ describe('NovaDataTable benchmarks', () => {
     }
     const encoded = JSON.stringify(state)
     const restored = JSON.parse(encoded) as typeof state
-    if (restored.columnState.order.length !== 1_000) throw new Error('Invalid restored column order')
+    if (restored.columnState.order.length !== 1_000) {
+      throw new Error('Invalid restored column order')
+    }
   })
 })

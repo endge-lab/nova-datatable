@@ -1,5 +1,5 @@
-import { Fragment, type VNode, type VNodeArrayChildren } from 'vue'
 import type { NovaSchema } from '@endge/nova'
+import type { VNode, VNodeArrayChildren } from 'vue'
 import type {
   DataTableCellContext,
   DataTableCellRect,
@@ -16,6 +16,7 @@ import type {
   DataTableTemplate,
   DataTableViewGroupingOptions,
 } from '@/model/types/datatable.types'
+import { Fragment } from 'vue'
 
 export interface DataTableDslNodes<Row extends Record<string, any>> {
   columns: Array<DataTableColumnInput<Row>>
@@ -48,13 +49,19 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
     const tag = getVNodeTag(node)
     if (tag === 'DataTableColumn') {
       const column = compileColumnNode<Row>(node)
-      if (column) columns.push(column)
+      if (column) {
+        columns.push(column)
+      }
     }
     if (tag === 'DataTablePinnedRows') {
       const position = readStringProp(node, 'position')
       const rows = readArrayProp<Row>(node, 'rows')
-      if (position === 'top') pinnedRows.top = rows
-      if (position === 'bottom') pinnedRows.bottom = rows
+      if (position === 'top') {
+        pinnedRows.top = rows
+      }
+      if (position === 'bottom') {
+        pinnedRows.bottom = rows
+      }
     }
     if (tag === 'DataTableInteractionLayer') {
       const slots = readSlots(node)
@@ -102,9 +109,11 @@ export function compileDataTableDslNodes<Row extends Record<string, any>>(nodes:
 export function createSlotTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableCellContext<Row>) => Array<VNode>) | undefined,
 ): DataTableTemplate<Row> | undefined {
-  if (!slot) return undefined
+  if (!slot) {
+    return undefined
+  }
 
-  return context => {
+  return (context) => {
     const schema: NovaSchema = []
     for (const node of flattenVNodes(slot(context))) {
       appendPrimitiveNode(schema, node, context.rect)
@@ -116,9 +125,11 @@ export function createSlotTemplate<Row extends Record<string, any>>(
 export function createInteractionLayerTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableInteractionLayerContext<Row>) => Array<VNode>) | undefined,
 ): DataTableInteractionLayerTemplate<Row> | undefined {
-  if (!slot) return undefined
+  if (!slot) {
+    return undefined
+  }
 
-  return context => {
+  return (context) => {
     const schema: NovaSchema = []
     const rootRect = {
       x: 0,
@@ -136,9 +147,11 @@ export function createInteractionLayerTemplate<Row extends Record<string, any>>(
 export function createScrollbarLayerTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableScrollbarLayerContext<Row>) => Array<VNode>) | undefined,
 ): DataTableScrollbarLayerTemplate<Row> | undefined {
-  if (!slot) return undefined
+  if (!slot) {
+    return undefined
+  }
 
-  return context => {
+  return (context) => {
     const schema: NovaSchema = []
     const rootRect = {
       x: 0,
@@ -156,9 +169,11 @@ export function createScrollbarLayerTemplate<Row extends Record<string, any>>(
 export function createGroupTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableGroupTemplateContext<Row>) => Array<VNode>) | undefined,
 ): DataTableGroupTemplate<Row> | undefined {
-  if (!slot) return undefined
+  if (!slot) {
+    return undefined
+  }
 
-  return context => {
+  return (context) => {
     const schema: NovaSchema = []
     for (const node of flattenVNodes(slot(context))) {
       appendPrimitiveNode(schema, node, context.rect)
@@ -169,7 +184,9 @@ export function createGroupTemplate<Row extends Record<string, any>>(
 
 function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTableColumnInput<Row> | null {
   const id = readStringProp(node, 'id')
-  if (!id) return null
+  if (!id) {
+    return null
+  }
 
   const slots = readSlots(node)
   const tooltip = readProp(node, 'tooltip')
@@ -209,7 +226,9 @@ function compileColumnNode<Row extends Record<string, any>>(node: VNode): DataTa
 export function createDomEditorTemplate<Row extends Record<string, any>>(
   slot: ((context: DataTableDomEditorContext<Row>) => Array<VNode>) | undefined,
 ): DataTableDomEditorTemplate<Row> | undefined {
-  if (!slot) return undefined
+  if (!slot) {
+    return undefined
+  }
   return context => slot(context)
 }
 
@@ -228,13 +247,21 @@ function compileGroupingNode<Row extends Record<string, any>>(node: VNode): Data
 
 function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTableCellRect): void {
   const tag = getVNodeTag(node)
-  if (!tag) return
-  if (tag === 'template') {
-    for (const child of flattenChildren(node.children)) appendPrimitiveNode(schema, child, parentRect)
+  if (!tag) {
     return
   }
-  if (!PRIMITIVE_TAGS.has(tag)) return
-  if (readProp(node, 'if') === false || readProp(node, 'active') === false) return
+  if (tag === 'template') {
+    for (const child of flattenChildren(node.children)) {
+      appendPrimitiveNode(schema, child, parentRect)
+    }
+    return
+  }
+  if (!PRIMITIVE_TAGS.has(tag)) {
+    return
+  }
+  if (readProp(node, 'if') === false || readProp(node, 'active') === false) {
+    return
+  }
 
   if (tag === 'Rect' || tag === 'Surface') {
     const rect = resolveNodeRect(node, parentRect)
@@ -263,7 +290,9 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
     })
 
     const contentRect = applyPadding(rect, readProp(node, 'padding'))
-    for (const child of flattenChildren(node.children)) appendPrimitiveNode(schema, child, contentRect)
+    for (const child of flattenChildren(node.children)) {
+      appendPrimitiveNode(schema, child, contentRect)
+    }
     return
   }
 
@@ -297,7 +326,7 @@ function appendPrimitiveNode(schema: NovaSchema, node: VNode, parentRect: DataTa
         text,
         rect,
         align?.horizontal === 'center' || align?.horizontal === 'right' ? align.horizontal : 'left',
-        highlightRanges as Array<{ start: number; end: number }>,
+        highlightRanges as Array<{ start: number, end: number }>,
         highlightActive,
         readStringProp(node, 'highlightColor') ?? '#b45309',
         readStringProp(node, 'activeHighlightColor') ?? '#be123c',
@@ -313,7 +342,7 @@ function createDslTextHighlights(
   text: string,
   rect: DataTableCellRect,
   align: 'left' | 'center' | 'right',
-  ranges: Array<{ start: number; end: number }>,
+  ranges: Array<{ start: number, end: number }>,
   active: boolean,
   color: string,
   activeColor: string,
@@ -333,7 +362,9 @@ function createDslTextHighlights(
     const start = Math.max(0, Math.min(text.length, range.start))
     const end = Math.max(start, Math.min(text.length, range.end))
     const part = text.slice(start, end)
-    if (!part) continue
+    if (!part) {
+      continue
+    }
     const x = originX + estimateDslTextWidth(text.slice(0, start), fontSize)
     schema.push({
       type: 'text',
@@ -377,11 +408,15 @@ function resolveNodeRect(node: VNode, parentRect: DataTableCellRect): DataTableC
 
 function resolveFont(node: VNode): Record<string, unknown> | undefined {
   const explicit = readProp(node, 'font')
-  if (explicit && typeof explicit === 'object') return explicit as Record<string, unknown>
+  if (explicit && typeof explicit === 'object') {
+    return explicit as Record<string, unknown>
+  }
 
   const fontSize = readNumberProp(node, 'fontSize')
   const fontWeight = readProp(node, 'fontWeight')
-  if (!fontSize && !fontWeight) return undefined
+  if (!fontSize && !fontWeight) {
+    return undefined
+  }
 
   return {
     size: fontSize,
@@ -392,7 +427,9 @@ function resolveFont(node: VNode): Record<string, unknown> | undefined {
 function resolveAlign(node: VNode): Record<string, unknown> | undefined {
   const align = readProp(node, 'align')
   const verticalAlign = readProp(node, 'verticalAlign')
-  if (!align && !verticalAlign) return undefined
+  if (!align && !verticalAlign) {
+    return undefined
+  }
 
   return {
     horizontal: align,
@@ -410,10 +447,14 @@ function applyPadding(rect: DataTableCellRect, padding: unknown): DataTableCellR
     }
   }
 
-  if (typeof padding !== 'string') return rect
+  if (typeof padding !== 'string') {
+    return rect
+  }
 
   const parts = padding.trim().split(/\s+/).map(part => Number.parseFloat(part)).filter(Number.isFinite)
-  if (parts.length === 0) return rect
+  if (parts.length === 0) {
+    return rect
+  }
 
   const top = parts[0] ?? 0
   const right = parts[1] ?? top
@@ -431,31 +472,47 @@ function applyPadding(rect: DataTableCellRect, padding: unknown): DataTableCellR
 function estimateDslTextWidth(value: string, fontSize: number): number {
   let width = 0
   for (const character of value) {
-    if (character === ' ') width += fontSize * 0.32
-    else if (/[il|.,:;]/.test(character)) width += fontSize * 0.28
-    else if (/[mwMW@#]/.test(character)) width += fontSize * 0.82
-    else width += fontSize * 0.56
+    if (character === ' ') {
+      width += fontSize * 0.32
+    }
+    else if (/[il|.,:;]/.test(character)) {
+      width += fontSize * 0.28
+    }
+    else if (/[mw@#]/i.test(character)) {
+      width += fontSize * 0.82
+    }
+    else { width += fontSize * 0.56 }
   }
   return width
 }
 
 function flattenVNodes(nodes: Array<VNode>): Array<VNode> {
-  return nodes.flatMap(node => {
-    if (node.type === Fragment) return flattenChildren(node.children)
+  return nodes.flatMap((node) => {
+    if (node.type === Fragment) {
+      return flattenChildren(node.children)
+    }
     return [node]
   })
 }
 
 function flattenChildren(children: VNode['children']): Array<VNode> {
-  if (typeof children === 'function') return flattenVNodes((children as () => Array<VNode>)())
+  if (typeof children === 'function') {
+    return flattenVNodes((children as () => Array<VNode>)())
+  }
   if (children && typeof children === 'object' && !Array.isArray(children) && 'default' in children) {
     const defaultSlot = (children as { default?: () => Array<VNode> }).default
     return defaultSlot ? flattenVNodes(defaultSlot()) : []
   }
-  if (!Array.isArray(children)) return []
-  return (children as VNodeArrayChildren).flatMap(child => {
-    if (!isVNode(child)) return []
-    if (child.type === Fragment) return flattenChildren(child.children)
+  if (!Array.isArray(children)) {
+    return []
+  }
+  return (children as VNodeArrayChildren).flatMap((child) => {
+    if (!isVNode(child)) {
+      return []
+    }
+    if (child.type === Fragment) {
+      return flattenChildren(child.children)
+    }
     return [child]
   })
 }
@@ -465,8 +522,12 @@ function isVNode(value: unknown): value is VNode {
 }
 
 function getVNodeTag(node: VNode): string | null {
-  if (typeof node.type === 'string') return node.type
-  if (typeof node.type === 'object' && 'name' in node.type && typeof node.type.name === 'string') return node.type.name
+  if (typeof node.type === 'string') {
+    return node.type
+  }
+  if (typeof node.type === 'object' && 'name' in node.type && typeof node.type.name === 'string') {
+    return node.type.name
+  }
   return null
 }
 
@@ -492,8 +553,12 @@ function readNumberProp(node: VNode, key: string): number | undefined {
 
 function readBooleanProp(node: VNode, key: string): boolean {
   const value = readProp(node, key)
-  if (typeof value === 'boolean') return value
-  if (value === '' || value === key) return true
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (value === '' || value === key) {
+    return true
+  }
   return false
 }
 
@@ -508,8 +573,12 @@ function readArrayProp<Row>(node: VNode, key: string): Array<Row> {
 }
 
 function resolveRadiusBorder(value: unknown): { radius: number } | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return { radius: value }
-  if (typeof value !== 'string') return undefined
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return { radius: value }
+  }
+  if (typeof value !== 'string') {
+    return undefined
+  }
   const parsed = Number(value)
   return Number.isFinite(parsed) ? { radius: parsed } : undefined
 }
@@ -531,7 +600,9 @@ function toKebabCase(value: string): string {
 function dropUndefined<T extends Record<string, any>>(value: T): T {
   const result = { ...value }
   for (const key of Object.keys(result)) {
-    if (result[key] === undefined) delete result[key]
+    if (result[key] === undefined) {
+      delete result[key]
+    }
   }
   return result
 }

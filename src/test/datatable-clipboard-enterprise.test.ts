@@ -1,25 +1,26 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NovaApp } from '@endge/nova'
+import type { DataTableColumnInput, DataTablePasteResult } from '@/model/types/datatable.types'
+import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 import {
   Nova,
+
   RaphSchedulerType,
   RendererType,
-  type NovaApp,
 } from '@endge/nova'
 import { NovaUIKit, registerNovaUIKit } from '@endge/nova-ui-kit'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createDataTableClipboardFeedbackHidden,
   createDataTableClipboardPasteErrorFeedback,
   createDataTableClipboardPasteFeedback,
 } from '@/model/runtime/DataTableClipboardFeedback'
 import {
+
   NovaDataTableSchema,
-  type DataTableColumnInput,
-  type DataTablePasteResult,
 } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
-import type { DataTableRootNode } from '@/ui/root/DataTableRootNode'
 
 interface EnterpriseRow {
   id: string
@@ -84,7 +85,9 @@ function create2DContextStub(): CanvasRenderingContext2D {
   }
   return new Proxy(state, {
     get(target, prop) {
-      if (!(prop in target)) target[prop] = vi.fn()
+      if (!(prop in target)) {
+        target[prop] = vi.fn()
+      }
       return target[prop]
     },
     set(target, prop, value) {
@@ -101,7 +104,9 @@ function installCanvasMocks(): void {
     configurable: true,
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((type: string) => {
-    if (type === RendererType.Web2D) return create2DContextStub()
+    if (type === RendererType.Web2D) {
+      return create2DContextStub()
+    }
     return null
   })
   vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockImplementation(function getRect(this: HTMLCanvasElement) {
@@ -181,7 +186,7 @@ function mountRoot(app: NovaApp<TestEvents>): DataTableRootNode<EnterpriseRow> {
   return uiRoot.children[0] as DataTableRootNode<EnterpriseRow>
 }
 
-describe('DataTable enterprise clipboard paste', () => {
+describe('dataTable enterprise clipboard paste', () => {
   it('parses and validates a typed TSV matrix through the public root API', async () => {
     const app = createApp()
     const root = mountRoot(app)
@@ -429,7 +434,7 @@ describe('DataTable enterprise clipboard paste', () => {
   })
 })
 
-describe('DataTable clipboard feedback contract', () => {
+describe('dataTable clipboard feedback contract', () => {
   it('defines visible feedback state expected from future root API integration', () => {
     const partialResult: DataTablePasteResult<EnterpriseRow> = {
       committed: 2,
@@ -457,7 +462,6 @@ describe('DataTable clipboard feedback contract', () => {
       reason: 'idle',
       createdAt: 99,
     })
-
   })
 
   it('maps paste errors to visible rejected feedback', () => {

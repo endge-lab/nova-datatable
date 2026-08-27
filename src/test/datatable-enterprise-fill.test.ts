@@ -7,7 +7,7 @@ import {
   parseDataTableTsv,
 } from '@/model/runtime/DataTableFillMatrix'
 
-describe('DataTable enterprise fill matrix', () => {
+describe('dataTable enterprise fill matrix', () => {
   it('repeats source cells over a larger fill target', () => {
     const matrix = createDataTableFillMatrix({
       source: [
@@ -49,7 +49,7 @@ describe('DataTable enterprise fill matrix', () => {
   })
 })
 
-describe('DataTable enterprise clipboard parsing', () => {
+describe('dataTable enterprise clipboard parsing', () => {
   it('parses TSV with quoted tabs and CRLF rows', () => {
     expect(parseDataTableTsv('"A\tB"\t42\r\nC\tD')).toEqual([
       ['A\tB', '42'],

@@ -45,7 +45,9 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
     }
 
     rows.forEach((row, index) => {
-      for (const rule of rules) this.addValue(rule, row, index)
+      for (const rule of rules) {
+        this.addValue(rule, row, index)
+      }
     })
     this.revision += 1
     return this.snapshot()
@@ -55,13 +57,23 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
    * Применяет подготовленное состояние DataTableSummaryEngine.
    */
   applyRowChange(previous: Row | undefined, next: Row | undefined, index = 0): DataTableSummaryResult {
-    if (!previous && !next) return this.snapshot()
-    if (!previous && next) this.rowCount += 1
-    if (previous && !next) this.rowCount = Math.max(0, this.rowCount - 1)
+    if (!previous && !next) {
+      return this.snapshot()
+    }
+    if (!previous && next) {
+      this.rowCount += 1
+    }
+    if (previous && !next) {
+      this.rowCount = Math.max(0, this.rowCount - 1)
+    }
 
     for (const rule of this.rules) {
-      if (previous) this.removeValue(rule, previous, index)
-      if (next) this.addValue(rule, next, index)
+      if (previous) {
+        this.removeValue(rule, previous, index)
+      }
+      if (next) {
+        this.addValue(rule, next, index)
+      }
     }
     this.revision += 1
     return this.snapshot()
@@ -87,14 +99,18 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
    */
   private addValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
     const accumulator = this.accumulators.get(rule.id)
-    if (!accumulator) return
+    if (!accumulator) {
+      return
+    }
     if (rule.aggregate === 'count') {
       accumulator.count += 1
       return
     }
 
     const value = this.resolveNumber(rule, row, index)
-    if (value === undefined) return
+    if (value === undefined) {
+      return
+    }
     accumulator.count += 1
     accumulator.sum += value
     accumulator.min = accumulator.count === 1 ? value : Math.min(accumulator.min, value)
@@ -107,25 +123,32 @@ export class DataTableSummaryEngine<Row extends Record<string, any> = Record<str
    */
   private removeValue(rule: DataTableSummaryRule<Row>, row: Row, index: number): void {
     const accumulator = this.accumulators.get(rule.id)
-    if (!accumulator) return
+    if (!accumulator) {
+      return
+    }
     if (rule.aggregate === 'count') {
       accumulator.count = Math.max(0, accumulator.count - 1)
       return
     }
 
     const value = this.resolveNumber(rule, row, index)
-    if (value === undefined) return
+    if (value === undefined) {
+      return
+    }
 
     accumulator.count = Math.max(0, accumulator.count - 1)
     accumulator.sum -= value
     const nextCount = (accumulator.values.get(value) ?? 0) - 1
-    if (nextCount > 0) accumulator.values.set(value, nextCount)
-    else accumulator.values.delete(value)
+    if (nextCount > 0) {
+      accumulator.values.set(value, nextCount)
+    }
+    else { accumulator.values.delete(value) }
 
     if (accumulator.count === 0) {
       accumulator.min = 0
       accumulator.max = 0
-    } else if (value === accumulator.min || value === accumulator.max) {
+    }
+    else if (value === accumulator.min || value === accumulator.max) {
       accumulator.dirtyExtrema = true
     }
   }
@@ -157,11 +180,21 @@ function createAccumulator(aggregate: DataTableSummaryAggregator): SummaryAccumu
 }
 
 function resolveAccumulatorValue(accumulator: SummaryAccumulator): unknown {
-  if (accumulator.aggregate === 'count') return accumulator.count
-  if (accumulator.aggregate === 'sum') return accumulator.sum
-  if (accumulator.aggregate === 'avg') return accumulator.count === 0 ? 0 : accumulator.sum / accumulator.count
-  if (accumulator.dirtyExtrema) recomputeExtrema(accumulator)
-  if (accumulator.aggregate === 'min') return accumulator.count === 0 ? 0 : accumulator.min
+  if (accumulator.aggregate === 'count') {
+    return accumulator.count
+  }
+  if (accumulator.aggregate === 'sum') {
+    return accumulator.sum
+  }
+  if (accumulator.aggregate === 'avg') {
+    return accumulator.count === 0 ? 0 : accumulator.sum / accumulator.count
+  }
+  if (accumulator.dirtyExtrema) {
+    recomputeExtrema(accumulator)
+  }
+  if (accumulator.aggregate === 'min') {
+    return accumulator.count === 0 ? 0 : accumulator.min
+  }
   return accumulator.count === 0 ? 0 : accumulator.max
 }
 
@@ -176,8 +209,12 @@ function recomputeExtrema(accumulator: SummaryAccumulator): void {
   let min = Number.POSITIVE_INFINITY
   let max = Number.NEGATIVE_INFINITY
   for (const value of accumulator.values.keys()) {
-    if (value < min) min = value
-    if (value > max) max = value
+    if (value < min) {
+      min = value
+    }
+    if (value > max) {
+      max = value
+    }
   }
   accumulator.min = min
   accumulator.max = max

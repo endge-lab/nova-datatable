@@ -1,13 +1,13 @@
 import type {
   DataTableColumnInput,
-  DataTablePinnedColumnSide,
   DataTablePinnedColumns,
+  DataTablePinnedColumnSide,
   DataTableResolvedColumn,
 } from '@/model/types/datatable.types'
 
-export type DataTableColumnGroupChild<Row extends Record<string, any> = Record<string, any>> =
-  | string
-  | DataTableColumnGroup<Row>
+export type DataTableColumnGroupChild<Row extends Record<string, any> = Record<string, any>>
+  = | string
+    | DataTableColumnGroup<Row>
 
 export interface DataTableColumnGroup<Row extends Record<string, any> = Record<string, any>> {
   id: string
@@ -94,14 +94,14 @@ export interface DataTableColumnChooserState<Row extends Record<string, any> = R
   }
 }
 
-export type DataTableColumnChooserAction =
-  | { type: 'toggle-column'; columnId: string; hidden?: boolean }
-  | { type: 'toggle-group'; groupId: string; hidden?: boolean }
-  | { type: 'show-all' }
-  | { type: 'hide-all' }
-  | { type: 'pin-column'; columnId: string; side: DataTablePinnedColumnSide }
-  | { type: 'unpin-column'; columnId: string }
-  | { type: 'set-order'; order: Array<string> }
+export type DataTableColumnChooserAction
+  = | { type: 'toggle-column', columnId: string, hidden?: boolean }
+    | { type: 'toggle-group', groupId: string, hidden?: boolean }
+    | { type: 'show-all' }
+    | { type: 'hide-all' }
+    | { type: 'pin-column', columnId: string, side: DataTablePinnedColumnSide }
+    | { type: 'unpin-column', columnId: string }
+    | { type: 'set-order', order: Array<string> }
 
 interface NormalizedColumn<Row extends Record<string, any> = Record<string, any>> {
   id: string
@@ -312,7 +312,7 @@ function createGroupTreeNode<Row extends Record<string, any>>(
 ): ColumnTreeNode<Row> | null {
   const path = [...groupPath, group.id]
   const children = group.children
-    .map(child => {
+    .map((child) => {
       if (typeof child === 'string') {
         return createColumnTreeNode(child, context, depth + 1, group.id, path)
       }
@@ -320,7 +320,9 @@ function createGroupTreeNode<Row extends Record<string, any>>(
     })
     .filter((node): node is ColumnTreeNode<Row> => !!node)
 
-  if (children.length === 0) return null
+  if (children.length === 0) {
+    return null
+  }
   return {
     id: group.id,
     title: group.title ?? group.id,
@@ -340,7 +342,9 @@ function createColumnTreeNode<Row extends Record<string, any>>(
   groupPath: Array<string>,
 ): ColumnTreeNode<Row> | null {
   const column = context.columns.get(columnId)
-  if (!column) return null
+  if (!column) {
+    return null
+  }
   return {
     id: column.id,
     title: column.title,
@@ -358,8 +362,10 @@ function filterVisibleColumnTree<Row extends Record<string, any>>(
   hidden: Set<string>,
 ): Array<ColumnTreeNode<Row>> {
   return nodes
-    .map(node => {
-      if (node.kind === 'column') return hidden.has(node.id) ? null : node
+    .map((node) => {
+      if (node.kind === 'column') {
+        return hidden.has(node.id) ? null : node
+      }
       const children = filterVisibleColumnTree(node.children, hidden)
       return children.length === 0 ? null : { ...node, children }
     })
@@ -410,7 +416,9 @@ function appendLayoutCells<Row extends Record<string, any>>(
     const startIndex = leaves.length
     appendLayoutCells(node.children, rows, leaves, maxDepth)
     const groupLeaves = leaves.slice(startIndex)
-    if (groupLeaves.length === 0) continue
+    if (groupLeaves.length === 0) {
+      continue
+    }
     rows[node.depth]?.push({
       id: node.id,
       title: node.title,
@@ -427,7 +435,9 @@ function appendLayoutCells<Row extends Record<string, any>>(
     })
   }
 
-  for (const row of rows) row.sort((left, right) => left.startIndex - right.startIndex)
+  for (const row of rows) {
+    row.sort((left, right) => left.startIndex - right.startIndex)
+  }
 }
 
 function createChooserNode<Row extends Record<string, any>>(
@@ -478,12 +488,16 @@ function sortColumnTreeNodes<Row extends Record<string, any>>(
 }
 
 function resolveTreeRank<Row extends Record<string, any>>(node: ColumnTreeNode<Row>): number {
-  if (node.kind === 'column') return node.column?.order ?? Number.MAX_SAFE_INTEGER
+  if (node.kind === 'column') {
+    return node.column?.order ?? Number.MAX_SAFE_INTEGER
+  }
   return Math.min(...node.children.map(resolveTreeRank))
 }
 
 function resolveMaxDepth<Row extends Record<string, any>>(nodes: Array<ColumnTreeNode<Row>>): number {
-  if (nodes.length === 0) return 0
+  if (nodes.length === 0) {
+    return 0
+  }
   return Math.max(...nodes.map(node => (
     node.children.length > 0 ? resolveMaxDepth(node.children) : node.depth
   )))
@@ -499,8 +513,12 @@ function resolveColumnOrder(allColumnIds: Array<string>, order: Array<string> | 
 function resolveColumnWidth<Row extends Record<string, any>>(
   column: DataTableColumnInput<Row> | DataTableResolvedColumn<Row>,
 ): number {
-  if ('resolvedWidth' in column) return column.resolvedWidth
-  if (typeof column.width === 'number') return column.width
+  if ('resolvedWidth' in column) {
+    return column.resolvedWidth
+  }
+  if (typeof column.width === 'number') {
+    return column.width
+  }
   return DEFAULT_COLUMN_WIDTH
 }
 
@@ -509,16 +527,24 @@ function resolvePinnedRegion(
   columnPinned: DataTablePinnedColumnSide | undefined,
   pinned: Required<DataTablePinnedColumns>,
 ): DataTableColumnSystemPinRegion {
-  if (pinned.left.includes(columnId)) return 'left'
-  if (pinned.right.includes(columnId)) return 'right'
+  if (pinned.left.includes(columnId)) {
+    return 'left'
+  }
+  if (pinned.right.includes(columnId)) {
+    return 'right'
+  }
   return columnPinned ?? 'center'
 }
 
 function resolveGroupPinnedRegion(regions: Array<DataTableColumnSystemPinRegion>): DataTableColumnSystemPinRegion {
   const normalized = new Set(regions)
   normalized.delete('mixed')
-  if (normalized.size === 0) return 'center'
-  if (normalized.size === 1) return [...normalized][0] ?? 'center'
+  if (normalized.size === 0) {
+    return 'center'
+  }
+  if (normalized.size === 1) {
+    return [...normalized][0] ?? 'center'
+  }
   return 'mixed'
 }
 
@@ -527,7 +553,9 @@ function resolveOrphanColumnIds<Row extends Record<string, any>>(
   groups: Array<DataTableColumnGroup<Row>>,
 ): Array<string> {
   const grouped = new Set<string>()
-  for (const group of groups) collectGroupColumnIds(group, grouped)
+  for (const group of groups) {
+    collectGroupColumnIds(group, grouped)
+  }
   return allColumnIds.filter(id => !grouped.has(id))
 }
 
@@ -536,8 +564,10 @@ function collectGroupColumnIds<Row extends Record<string, any>>(
   target: Set<string>,
 ): void {
   for (const child of group.children) {
-    if (typeof child === 'string') target.add(child)
-    else collectGroupColumnIds(child, target)
+    if (typeof child === 'string') {
+      target.add(child)
+    }
+    else { collectGroupColumnIds(child, target) }
   }
 }
 
@@ -556,9 +586,13 @@ function findChooserNode<Row extends Record<string, any>>(
   id: string,
 ): DataTableColumnChooserNode<Row> | null {
   for (const node of nodes) {
-    if (node.id === id) return node
+    if (node.id === id) {
+      return node
+    }
     const child = findChooserNode(node.children, id)
-    if (child) return child
+    if (child) {
+      return child
+    }
   }
   return null
 }
@@ -566,7 +600,9 @@ function findChooserNode<Row extends Record<string, any>>(
 function collectChooserColumnIds<Row extends Record<string, any>>(
   node: DataTableColumnChooserNode<Row>,
 ): Array<string> {
-  if (node.kind === 'column') return node.columnId ? [node.columnId] : []
+  if (node.kind === 'column') {
+    return node.columnId ? [node.columnId] : []
+  }
   return node.children.flatMap(collectChooserColumnIds)
 }
 
@@ -578,8 +614,10 @@ function applyHiddenToggle(
   const next = new Set(current)
   const shouldHide = hidden ?? columnIds.some(columnId => !next.has(columnId))
   for (const columnId of columnIds) {
-    if (shouldHide) next.add(columnId)
-    else next.delete(columnId)
+    if (shouldHide) {
+      next.add(columnId)
+    }
+    else { next.delete(columnId) }
   }
   return [...next]
 }
@@ -591,7 +629,11 @@ function applyPinnedColumn(
 ): Required<DataTablePinnedColumns> {
   const left = current.left.filter(id => id !== columnId)
   const right = current.right.filter(id => id !== columnId)
-  if (side === 'left') left.push(columnId)
-  if (side === 'right') right.push(columnId)
+  if (side === 'left') {
+    left.push(columnId)
+  }
+  if (side === 'right') {
+    right.push(columnId)
+  }
   return { left, right }
 }

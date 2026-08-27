@@ -111,13 +111,17 @@ function cloneCommitDeltas<Row extends Record<string, any>>(
 }
 
 function cloneCommitValue<T>(value: T): T {
-  if (value === null || value === undefined || typeof value !== 'object') return value
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value
+  }
   try {
     return structuredClone(value) as T
-  } catch {
+  }
+  catch {
     try {
       return JSON.parse(JSON.stringify(value)) as T
-    } catch {
+    }
+    catch {
       return Array.isArray(value) ? ([...value] as T) : ({ ...(value as Record<string, unknown>) } as T)
     }
   }

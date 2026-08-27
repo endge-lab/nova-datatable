@@ -1,4 +1,3 @@
-import { resolveDataTableValue } from '@/model/runtime/datatable-columns'
 import type {
   DataTableColumnInput,
   DataTableFilterConfig,
@@ -8,18 +7,19 @@ import type {
   DataTableResolvedColumn,
   DataTableStoreApi,
 } from '@/model/types/datatable.types'
+import { resolveDataTableValue } from '@/model/runtime/datatable-columns'
 
-export type DataTableFilterMenuReason =
-  | 'idle'
-  | 'open'
-  | 'close'
-  | 'operator'
-  | 'value'
-  | 'search'
-  | 'set-values'
-  | 'apply'
-  | 'clear'
-  | 'reset'
+export type DataTableFilterMenuReason
+  = | 'idle'
+    | 'open'
+    | 'close'
+    | 'operator'
+    | 'value'
+    | 'search'
+    | 'set-values'
+    | 'apply'
+    | 'clear'
+    | 'reset'
 
 export interface DataTableSetFilterValue {
   key: string
@@ -57,8 +57,8 @@ export interface DataTableFilterMenuState {
   reason: DataTableFilterMenuReason
 }
 
-export type DataTableFilterMenuAction =
-  | {
+export type DataTableFilterMenuAction
+  = | {
     type: 'open'
     columnId: string
     filter?: DataTableFilterConfig | DataTableFilterPreset | string
@@ -67,14 +67,14 @@ export type DataTableFilterMenuAction =
     search?: string
   }
   | { type: 'close' }
-  | { type: 'set-operator'; operator: DataTableFilterOperator }
-  | { type: 'set-value'; value: unknown }
-  | { type: 'set-search'; search: string }
-  | { type: 'toggle-value'; value: unknown; selected?: boolean }
-  | { type: 'select-values'; values: Array<unknown> }
+  | { type: 'set-operator', operator: DataTableFilterOperator }
+  | { type: 'set-value', value: unknown }
+  | { type: 'set-search', search: string }
+  | { type: 'toggle-value', value: unknown, selected?: boolean }
+  | { type: 'select-values', values: Array<unknown> }
   | { type: 'apply' }
   | { type: 'clear' }
-  | { type: 'reset'; state?: DataTableFilterMenuState }
+  | { type: 'reset', state?: DataTableFilterMenuState }
 
 const DEFAULT_FILTER_OPERATORS: Array<DataTableFilterOperator> = ['contains', 'equals', 'startsWith', 'endsWith']
 
@@ -102,16 +102,36 @@ export function reduceDataTableFilterMenuAction(
   state: DataTableFilterMenuState,
   action: DataTableFilterMenuAction,
 ): DataTableFilterMenuState {
-  if (action.type === 'reset') return action.state ? cloneFilterMenuState(action.state, 'reset') : createDataTableFilterMenuState()
-  if (action.type === 'open') return openFilterMenu(action)
-  if (action.type === 'close') return cloneFilterMenuState({ ...state, open: false }, 'close')
-  if (action.type === 'set-operator') return setFilterMenuOperator(state, action.operator)
-  if (action.type === 'set-value') return setFilterMenuValue(state, action.value, 'value')
-  if (action.type === 'set-search') return cloneFilterMenuState({ ...state, search: action.search }, 'search')
-  if (action.type === 'toggle-value') return toggleFilterMenuValue(state, action.value, action.selected)
-  if (action.type === 'select-values') return setFilterMenuSelectedValues(state, action.values)
-  if (action.type === 'apply') return applyFilterMenu(state)
-  if (action.type === 'clear') return clearFilterMenu(state)
+  if (action.type === 'reset') {
+    return action.state ? cloneFilterMenuState(action.state, 'reset') : createDataTableFilterMenuState()
+  }
+  if (action.type === 'open') {
+    return openFilterMenu(action)
+  }
+  if (action.type === 'close') {
+    return cloneFilterMenuState({ ...state, open: false }, 'close')
+  }
+  if (action.type === 'set-operator') {
+    return setFilterMenuOperator(state, action.operator)
+  }
+  if (action.type === 'set-value') {
+    return setFilterMenuValue(state, action.value, 'value')
+  }
+  if (action.type === 'set-search') {
+    return cloneFilterMenuState({ ...state, search: action.search }, 'search')
+  }
+  if (action.type === 'toggle-value') {
+    return toggleFilterMenuValue(state, action.value, action.selected)
+  }
+  if (action.type === 'select-values') {
+    return setFilterMenuSelectedValues(state, action.values)
+  }
+  if (action.type === 'apply') {
+    return applyFilterMenu(state)
+  }
+  if (action.type === 'clear') {
+    return clearFilterMenu(state)
+  }
   return state
 }
 
@@ -121,22 +141,28 @@ export function reduceDataTableFilterMenuAction(
 export function resolveDataTableSetFilterValues<Row extends Record<string, any>>(
   input: DataTableSetFilterValuesInput<Row>,
 ): Array<DataTableSetFilterValue> {
-  const counts = new Map<string, { value: unknown; count: number; empty: boolean }>()
+  const counts = new Map<string, { value: unknown, count: number, empty: boolean }>()
   const selected = new Set([...(input.selected ?? [])].map(createDataTableSetFilterValueKey))
   const limit = Math.max(0, input.limit ?? resolveSourceRowCount(input))
 
   for (let index = 0; index < limit; index += 1) {
     const row = input.rows ? input.rows[index] : input.store?.getRowAt(index)
-    if (!row) continue
+    if (!row) {
+      continue
+    }
 
     const value = resolveDataTableValue(row, index, input.column)
     const empty = isEmptySetFilterValue(value)
-    if (empty && input.includeEmpty === false) continue
+    if (empty && input.includeEmpty === false) {
+      continue
+    }
 
     const key = createDataTableSetFilterValueKey(value)
     const current = counts.get(key)
-    if (current) current.count += 1
-    else counts.set(key, { value, count: 1, empty })
+    if (current) {
+      current.count += 1
+    }
+    else { counts.set(key, { value, count: 1, empty }) }
   }
 
   const search = normalizeSearch(input.search)
@@ -158,11 +184,19 @@ export function resolveDataTableSetFilterValues<Row extends Record<string, any>>
  * Создает стабильный ключ для сравнения set-filter значений без ссылочного равенства.
  */
 export function createDataTableSetFilterValueKey(value: unknown): string {
-  if (value === null) return 'null:null'
-  if (value === undefined) return 'undefined:undefined'
+  if (value === null) {
+    return 'null:null'
+  }
+  if (value === undefined) {
+    return 'undefined:undefined'
+  }
   const type = typeof value
-  if (type === 'object') return `object:${stableStringify(value)}`
-  if (type === 'number' && Number.isNaN(value)) return 'number:NaN'
+  if (type === 'object') {
+    return `object:${stableStringify(value)}`
+  }
+  if (type === 'number' && Number.isNaN(value)) {
+    return 'number:NaN'
+  }
   return `${type}:${String(value)}`
 }
 
@@ -177,10 +211,18 @@ export function resolveDataTableFilterOperators(
   }
 
   const preset = resolveFilterPreset(filter)
-  if (preset === 'number') return ['equals', 'gt', 'gte', 'lt', 'lte', 'between']
-  if (preset === 'date') return ['equals', 'gt', 'gte', 'lt', 'lte', 'between']
-  if (preset === 'set') return ['in', 'notIn']
-  if (preset === 'boolean') return ['is', 'isNot']
+  if (preset === 'number') {
+    return ['equals', 'gt', 'gte', 'lt', 'lte', 'between']
+  }
+  if (preset === 'date') {
+    return ['equals', 'gt', 'gte', 'lt', 'lte', 'between']
+  }
+  if (preset === 'set') {
+    return ['in', 'notIn']
+  }
+  if (preset === 'boolean') {
+    return ['is', 'isNot']
+  }
   return [...DEFAULT_FILTER_OPERATORS]
 }
 
@@ -285,10 +327,10 @@ function createFilterMenuState(
 ): DataTableFilterMenuState {
   const draftRule = input.columnId
     ? {
-      columnId: input.columnId,
-      operator: input.operator,
-      value: cloneFilterValue(input.value),
-    }
+        columnId: input.columnId,
+        operator: input.operator,
+        value: cloneFilterValue(input.value),
+      }
     : null
   const valid = !!draftRule && isValidFilterValue(input.operator, input.value)
   const normalizedDraftRule = valid && draftRule ? draftRule : null
@@ -336,7 +378,9 @@ function resolveDefaultFilterOperator(
   filter: DataTableFilterConfig | DataTableFilterPreset | string | undefined,
   operators: Array<DataTableFilterOperator>,
 ): DataTableFilterOperator {
-  if (filter && typeof filter === 'object' && filter.defaultOperator) return filter.defaultOperator
+  if (filter && typeof filter === 'object' && filter.defaultOperator) {
+    return filter.defaultOperator
+  }
   return operators[0] ?? 'contains'
 }
 
@@ -344,35 +388,59 @@ function resolveDefaultFilterValue(
   filter: DataTableFilterConfig | DataTableFilterPreset | string | undefined,
   operator: DataTableFilterOperator,
 ): unknown {
-  if (filter && typeof filter === 'object' && filter.defaultValue !== undefined) return cloneFilterValue(filter.defaultValue)
-  if (isSetOperator(operator)) return []
-  if (operator === 'between') return ['', '']
+  if (filter && typeof filter === 'object' && filter.defaultValue !== undefined) {
+    return cloneFilterValue(filter.defaultValue)
+  }
+  if (isSetOperator(operator)) {
+    return []
+  }
+  if (operator === 'between') {
+    return ['', '']
+  }
 
   const options = filter && typeof filter === 'object' && Array.isArray(filter.options) ? filter.options : []
-  if (options.length > 0) return options[0]
-  if (resolveFilterPreset(filter) === 'number') return 0
-  if (resolveFilterPreset(filter) === 'boolean') return true
+  if (options.length > 0) {
+    return options[0]
+  }
+  if (resolveFilterPreset(filter) === 'number') {
+    return 0
+  }
+  if (resolveFilterPreset(filter) === 'boolean') {
+    return true
+  }
   return ''
 }
 
 function resolveFilterPreset(filter: DataTableFilterConfig | DataTableFilterPreset | string | undefined): string | undefined {
-  if (!filter) return undefined
-  if (typeof filter === 'string') return filter
+  if (!filter) {
+    return undefined
+  }
+  if (typeof filter === 'string') {
+    return filter
+  }
   return filter.type
 }
 
 function normalizeFilterValueForOperator(operator: DataTableFilterOperator, value: unknown): unknown {
-  if (isSetOperator(operator)) return normalizeSetFilterSelection(operator, value)
+  if (isSetOperator(operator)) {
+    return normalizeSetFilterSelection(operator, value)
+  }
   if (operator === 'between') {
-    if (Array.isArray(value)) return [value[0] ?? '', value[1] ?? '']
+    if (Array.isArray(value)) {
+      return [value[0] ?? '', value[1] ?? '']
+    }
     return [value ?? '', value ?? '']
   }
-  if (Array.isArray(value)) return value[0] ?? ''
+  if (Array.isArray(value)) {
+    return value[0] ?? ''
+  }
   return value
 }
 
 function normalizeSetFilterSelection(operator: DataTableFilterOperator, value: unknown): Array<unknown> {
-  if (!isSetOperator(operator)) return []
+  if (!isSetOperator(operator)) {
+    return []
+  }
   return Array.isArray(value) ? [...value] : value === undefined ? [] : [value]
 }
 
@@ -392,11 +460,15 @@ function isSetOperator(operator: DataTableFilterOperator): boolean {
 }
 
 function isValidFilterValue(operator: DataTableFilterOperator, value: unknown): boolean {
-  if (isSetOperator(operator)) return Array.isArray(value) && value.length > 0
+  if (isSetOperator(operator)) {
+    return Array.isArray(value) && value.length > 0
+  }
   if (operator === 'between') {
     return Array.isArray(value) && value.length >= 2 && !isBlankValue(value[0]) && !isBlankValue(value[1])
   }
-  if (operator === 'is' || operator === 'isNot') return value !== undefined
+  if (operator === 'is' || operator === 'isNot') {
+    return value !== undefined
+  }
   return !isBlankValue(value)
 }
 
@@ -409,7 +481,9 @@ function isEmptySetFilterValue(value: unknown): boolean {
 }
 
 function areFilterRulesEqual(left: DataTableFilterRule | null, right: DataTableFilterRule | null): boolean {
-  if (!left || !right) return left === right
+  if (!left || !right) {
+    return left === right
+  }
   return left.columnId === right.columnId
     && left.operator === right.operator
     && stableStringify(left.value) === stableStringify(right.value)
@@ -418,7 +492,9 @@ function areFilterRulesEqual(left: DataTableFilterRule | null, right: DataTableF
 function resolveSourceRowCount<Row extends Record<string, any>>(
   input: DataTableSetFilterValuesInput<Row>,
 ): number {
-  if (input.rows) return input.rows.length
+  if (input.rows) {
+    return input.rows.length
+  }
   return input.store?.rowCount ?? 0
 }
 
@@ -431,15 +507,25 @@ function sortSetFilterValues(
   sort: DataTableSetFilterValuesInput['sort'],
 ): Array<DataTableSetFilterValue> {
   const next = [...values]
-  if (sort === false) return next
-  if (typeof sort === 'function') return next.sort(sort)
-  if (sort === 'count-desc') return next.sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+  if (sort === false) {
+    return next
+  }
+  if (typeof sort === 'function') {
+    return next.sort(sort)
+  }
+  if (sort === 'count-desc') {
+    return next.sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+  }
   return next.sort((left, right) => left.label.localeCompare(right.label))
 }
 
 function formatSetFilterValueLabel(value: unknown): string {
-  if (value === undefined || value === null || value === '') return '(empty)'
-  if (typeof value === 'object') return stableStringify(value)
+  if (value === undefined || value === null || value === '') {
+    return '(empty)'
+  }
+  if (typeof value === 'object') {
+    return stableStringify(value)
+  }
   return String(value)
 }
 
@@ -463,15 +549,25 @@ function formatFilterOperator(operator: DataTableFilterOperator): string {
 }
 
 function formatFilterValue(value: unknown): string {
-  if (Array.isArray(value)) return value.map(formatFilterValue).join(', ')
-  if (value === undefined || value === null || value === '') return 'empty'
-  if (typeof value === 'object') return stableStringify(value)
+  if (Array.isArray(value)) {
+    return value.map(formatFilterValue).join(', ')
+  }
+  if (value === undefined || value === null || value === '') {
+    return 'empty'
+  }
+  if (typeof value === 'object') {
+    return stableStringify(value)
+  }
   return String(value)
 }
 
 function stableStringify(value: unknown): string {
-  if (!value || typeof value !== 'object') return String(JSON.stringify(value))
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (!value || typeof value !== 'object') {
+    return String(JSON.stringify(value))
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
   const record = value as Record<string, unknown>
   const keys = Object.keys(record).sort()
   return `{${keys.map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(',')}}`

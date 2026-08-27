@@ -52,7 +52,9 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
     const signature = JSON.stringify(query)
     const queryChanged = signature !== this.querySignature
     const subscribeChanged = options.subscribe !== !!this.unsubscribe
-    if (!queryChanged && !subscribeChanged) return false
+    if (!queryChanged && !subscribeChanged) {
+      return false
+    }
 
     if (!queryChanged) {
       this.syncSubscription(options.subscribe)
@@ -74,7 +76,9 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    */
   async ensureRange(range: DataTableRange): Promise<boolean> {
     const query = this.query
-    if (!query) return false
+    if (!query) {
+      return false
+    }
     const revision = this.revision
     const requestId = ++this.requestId
     const abortController = typeof AbortController !== 'undefined' ? new AbortController() : null
@@ -88,15 +92,23 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
         signal: abortController?.signal,
       })
       const fresh = revision === this.revision && !abortController?.signal.aborted
-      if (!fresh) this.staleResponsesIgnored += 1
-      else this.cacheMisses += 1
+      if (!fresh) {
+        this.staleResponsesIgnored += 1
+      }
+      else { this.cacheMisses += 1 }
       return fresh
-    } catch (error) {
+    }
+    catch (error) {
       this.error = error instanceof Error ? error.message : 'Range request failed'
       throw error
-    } finally {
-      if (this.abortController === abortController) this.abortController = null
-      if (revision === this.revision) this.loading = false
+    }
+    finally {
+      if (this.abortController === abortController) {
+        this.abortController = null
+      }
+      if (revision === this.revision) {
+        this.loading = false
+      }
     }
   }
 
@@ -105,7 +117,9 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
    */
   async loadSummary(): Promise<DataTableSummaryState | null> {
     const query = this.query
-    if (!query) return null
+    if (!query) {
+      return null
+    }
     const revision = this.revision
     const requestId = ++this.summaryRequestId
     const loadingState = {
@@ -117,7 +131,9 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
     }
     this.summary = loadingState
     const values = await this.store.loadSummary(query)
-    if (revision !== this.revision || requestId !== this.summaryRequestId) return this.summary
+    if (revision !== this.revision || requestId !== this.summaryRequestId) {
+      return this.summary
+    }
     this.summary = {
       values: values ?? {},
       rowCount: this.store.rowCount,
@@ -131,7 +147,7 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
   /**
    * Загружает distinct filter values через server-side adapter.
    */
-  async loadFilterValues(columnId: string, cursor?: string): Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined> {
+  async loadFilterValues(columnId: string, cursor?: string): Promise<{ values: Array<unknown>, cursor?: string, hasMore?: boolean } | undefined> {
     return this.store.loadFilterValues(columnId, this.query ?? undefined, cursor)
   }
 
@@ -189,7 +205,9 @@ export class DataTableServerRowModel<Row extends Record<string, any> = Record<st
   private syncSubscription(enabled: boolean): void {
     this.unsubscribe?.()
     this.unsubscribe = undefined
-    if (!enabled || !this.query) return
+    if (!enabled || !this.query) {
+      return
+    }
     this.unsubscribe = this.store.subscribe(this.query, this.emitDelta)
   }
 }
@@ -214,7 +232,9 @@ function cloneQuery(query: DataTableQueryState): DataTableQueryState {
 }
 
 function cloneFilterExpression<T extends DataTableQueryState['filters']>(filters: T): T {
-  if (Array.isArray(filters)) return filters.map(rule => ({ ...rule })) as T
+  if (Array.isArray(filters)) {
+    return filters.map(rule => ({ ...rule })) as T
+  }
   return {
     logic: filters.logic,
     rules: filters.rules.map(rule => ('logic' in rule ? cloneFilterExpression(rule) : { ...rule })),

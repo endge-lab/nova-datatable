@@ -13,37 +13,37 @@ import type {
 } from '@/model/types/datatable.types'
 
 export type DataTableAccessibilityPoliteness = 'off' | 'polite' | 'assertive'
-export type DataTableAccessibilityReason =
-  | 'idle'
-  | 'focus'
-  | 'selection'
-  | 'sort'
-  | 'filter'
-  | 'search'
-  | 'viewport'
-  | 'columns'
-  | 'grouping'
-  | 'loading'
-  | 'clipboard'
-  | 'custom'
+export type DataTableAccessibilityReason
+  = | 'idle'
+    | 'focus'
+    | 'selection'
+    | 'sort'
+    | 'filter'
+    | 'search'
+    | 'viewport'
+    | 'columns'
+    | 'grouping'
+    | 'loading'
+    | 'clipboard'
+    | 'custom'
 
 export interface DataTableAccessibilityColumn {
   id: string
   title?: string
 }
 
-export type DataTableAccessibilityOperation =
-  | { type: 'focus'; activeCell: DataTableSelectionAnchor | null }
-  | { type: 'selection'; selection: DataTableSelectionState | null }
-  | { type: 'sort'; sort: DataTableSortState }
-  | { type: 'filter'; filters: DataTableFilterState | DataTableFilterExpression }
-  | { type: 'search'; search: DataTableSearchState }
-  | { type: 'viewport'; viewport: Pick<DataTableViewport, 'rowRange' | 'centerColumnRange'> }
-  | { type: 'columns'; visibleColumnCount: number; hiddenColumnCount: number }
-  | { type: 'grouping'; expanded: 'all' | 'none' | Array<string> }
-  | { type: 'loading'; loading: boolean }
-  | { type: 'clipboard'; message: string; assertive?: boolean }
-  | { type: 'custom'; message: string; politeness?: DataTableAccessibilityPoliteness }
+export type DataTableAccessibilityOperation
+  = | { type: 'focus', activeCell: DataTableSelectionAnchor | null }
+    | { type: 'selection', selection: DataTableSelectionState | null }
+    | { type: 'sort', sort: DataTableSortState }
+    | { type: 'filter', filters: DataTableFilterState | DataTableFilterExpression }
+    | { type: 'search', search: DataTableSearchState }
+    | { type: 'viewport', viewport: Pick<DataTableViewport, 'rowRange' | 'centerColumnRange'> }
+    | { type: 'columns', visibleColumnCount: number, hiddenColumnCount: number }
+    | { type: 'grouping', expanded: 'all' | 'none' | Array<string> }
+    | { type: 'loading', loading: boolean }
+    | { type: 'clipboard', message: string, assertive?: boolean }
+    | { type: 'custom', message: string, politeness?: DataTableAccessibilityPoliteness }
 
 export interface DataTableAccessibilityLiveMessage {
   id: string
@@ -98,7 +98,9 @@ const DEFAULT_TABLE_ID = 'nova-datatable'
 export function normalizeDataTableAccessibility(
   accessibility: false | DataTableAccessibilityOptions | undefined,
 ): false | DataTableResolvedAccessibilityOptions {
-  if (accessibility === false) return false
+  if (accessibility === false) {
+    return false
+  }
   return {
     enabled: accessibility?.enabled ?? false,
     mode: accessibility?.mode ?? 'grid',
@@ -146,7 +148,9 @@ function createLiveMessage(
     lastAction?: string
   },
 ): string {
-  if (input.editing && options.announceEdits) return 'Cell editor opened'
+  if (input.editing && options.announceEdits) {
+    return 'Cell editor opened'
+  }
   if (input.selection && options.announceSelection) {
     return `Selection changed: ${input.selection.ranges.length} range${input.selection.ranges.length === 1 ? '' : 's'}`
   }
@@ -223,9 +227,15 @@ function resolveLiveMessageReason(operation: DataTableAccessibilityOperation): D
 }
 
 function resolvePoliteness(operation: DataTableAccessibilityOperation): DataTableAccessibilityPoliteness {
-  if (operation.type === 'custom') return operation.politeness ?? 'polite'
-  if (operation.type === 'clipboard') return operation.assertive ? 'assertive' : 'polite'
-  if (operation.type === 'loading') return operation.loading ? 'polite' : 'off'
+  if (operation.type === 'custom') {
+    return operation.politeness ?? 'polite'
+  }
+  if (operation.type === 'clipboard') {
+    return operation.assertive ? 'assertive' : 'polite'
+  }
+  if (operation.type === 'loading') {
+    return operation.loading ? 'polite' : 'off'
+  }
   return 'polite'
 }
 
@@ -233,16 +243,36 @@ function formatLiveMessage(
   operation: DataTableAccessibilityOperation,
   columns: Array<DataTableAccessibilityColumn>,
 ): string {
-  if (operation.type === 'focus') return formatFocusSummary(operation.activeCell, columns)
-  if (operation.type === 'selection') return formatSelectionSummary(operation.selection, columns)
-  if (operation.type === 'sort') return formatSortSummary(operation.sort, columns) || 'Sorting cleared'
-  if (operation.type === 'filter') return formatFilterSummary(operation.filters) || 'Filters cleared'
-  if (operation.type === 'search') return formatSearchSummary(operation.search)
-  if (operation.type === 'viewport') return formatViewportSummary(operation.viewport)
-  if (operation.type === 'columns') return formatColumnsSummary(operation.visibleColumnCount, operation.hiddenColumnCount)
-  if (operation.type === 'grouping') return formatGroupingSummary(operation.expanded)
-  if (operation.type === 'loading') return operation.loading ? 'Loading rows' : ''
-  if (operation.type === 'clipboard') return operation.message
+  if (operation.type === 'focus') {
+    return formatFocusSummary(operation.activeCell, columns)
+  }
+  if (operation.type === 'selection') {
+    return formatSelectionSummary(operation.selection, columns)
+  }
+  if (operation.type === 'sort') {
+    return formatSortSummary(operation.sort, columns) || 'Sorting cleared'
+  }
+  if (operation.type === 'filter') {
+    return formatFilterSummary(operation.filters) || 'Filters cleared'
+  }
+  if (operation.type === 'search') {
+    return formatSearchSummary(operation.search)
+  }
+  if (operation.type === 'viewport') {
+    return formatViewportSummary(operation.viewport)
+  }
+  if (operation.type === 'columns') {
+    return formatColumnsSummary(operation.visibleColumnCount, operation.hiddenColumnCount)
+  }
+  if (operation.type === 'grouping') {
+    return formatGroupingSummary(operation.expanded)
+  }
+  if (operation.type === 'loading') {
+    return operation.loading ? 'Loading rows' : ''
+  }
+  if (operation.type === 'clipboard') {
+    return operation.message
+  }
   return operation.message
 }
 
@@ -250,7 +280,9 @@ function formatFocusSummary(
   activeCell: DataTableSelectionAnchor | null,
   columns: Array<DataTableAccessibilityColumn>,
 ): string {
-  if (!activeCell) return ''
+  if (!activeCell) {
+    return ''
+  }
   return `Focus row ${activeCell.rowIndex + 1}, column ${resolveColumnTitle(columns, activeCell.columnId)}`
 }
 
@@ -258,11 +290,21 @@ function formatSelectionSummary(
   selection: DataTableSelectionState | null,
   columns: Array<DataTableAccessibilityColumn>,
 ): string {
-  if (!selection) return 'Selection cleared'
-  if (selection.mode === 'cell' && selection.activeCell) return formatFocusSummary(selection.activeCell, columns)
-  if (selection.mode === 'row' && selection.rowIndex !== undefined) return `Row ${selection.rowIndex + 1} selected`
-  if (selection.mode === 'column' && selection.columnId) return `Column ${resolveColumnTitle(columns, selection.columnId)} selected`
-  if (selection.ranges.length > 0) return `${selection.ranges.length} selection ranges`
+  if (!selection) {
+    return 'Selection cleared'
+  }
+  if (selection.mode === 'cell' && selection.activeCell) {
+    return formatFocusSummary(selection.activeCell, columns)
+  }
+  if (selection.mode === 'row' && selection.rowIndex !== undefined) {
+    return `Row ${selection.rowIndex + 1} selected`
+  }
+  if (selection.mode === 'column' && selection.columnId) {
+    return `Column ${resolveColumnTitle(columns, selection.columnId)} selected`
+  }
+  if (selection.ranges.length > 0) {
+    return `${selection.ranges.length} selection ranges`
+  }
   return 'Selection updated'
 }
 
@@ -270,8 +312,10 @@ function formatSortSummary(
   sort: DataTableSortState,
   columns: Array<DataTableAccessibilityColumn>,
 ): string {
-  if (sort.length === 0) return ''
-  const rules = sort.map(rule => {
+  if (sort.length === 0) {
+    return ''
+  }
+  const rules = sort.map((rule) => {
     const direction = rule.direction === 'asc' ? 'ascending' : 'descending'
     return `${resolveColumnTitle(columns, rule.columnId)} ${direction}`
   })
@@ -280,15 +324,23 @@ function formatSortSummary(
 
 function formatFilterSummary(filters: DataTableFilterState | DataTableFilterExpression): string {
   const count = countFilterRules(filters)
-  if (count === 0) return ''
+  if (count === 0) {
+    return ''
+  }
   return `${count} ${count === 1 ? 'filter' : 'filters'} applied`
 }
 
 function formatSearchSummary(search: DataTableSearchState): string {
   const text = search.query.text.trim()
-  if (!text) return 'Search cleared'
-  if (search.loading) return `Searching "${text}"`
-  if (search.total === 0) return `No results for "${text}"`
+  if (!text) {
+    return 'Search cleared'
+  }
+  if (search.loading) {
+    return `Searching "${text}"`
+  }
+  if (search.total === 0) {
+    return `No results for "${text}"`
+  }
   const active = search.activeIndex >= 0 ? search.activeIndex + 1 : 0
   return `Search "${text}": ${active} of ${search.total}`
 }
@@ -302,19 +354,29 @@ function formatViewportSummary(viewport: Pick<DataTableViewport, 'rowRange' | 'c
 }
 
 function formatColumnsSummary(visibleColumnCount: number, hiddenColumnCount: number): string {
-  if (hiddenColumnCount <= 0) return `${visibleColumnCount} columns visible`
+  if (hiddenColumnCount <= 0) {
+    return `${visibleColumnCount} columns visible`
+  }
   return `${visibleColumnCount} columns visible, ${hiddenColumnCount} hidden`
 }
 
 function formatGroupingSummary(expanded: 'all' | 'none' | Array<string>): string {
-  if (expanded === 'all') return 'All groups expanded'
-  if (expanded === 'none') return 'All groups collapsed'
+  if (expanded === 'all') {
+    return 'All groups expanded'
+  }
+  if (expanded === 'none') {
+    return 'All groups collapsed'
+  }
   return `${expanded.length} groups expanded`
 }
 
 function countFilterRules(filters: DataTableFilterState | DataTableFilterExpression | DataTableFilterRule): number {
-  if (Array.isArray(filters)) return filters.length
-  if ('logic' in filters) return filters.rules.reduce((count, rule) => count + countFilterRules(rule), 0)
+  if (Array.isArray(filters)) {
+    return filters.length
+  }
+  if ('logic' in filters) {
+    return filters.rules.reduce((count, rule) => count + countFilterRules(rule), 0)
+  }
   return 1
 }
 
@@ -323,5 +385,5 @@ function resolveColumnTitle(columns: Array<DataTableAccessibilityColumn>, column
 }
 
 function sanitizeAriaIdPart(value: string): string {
-  return value.trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'datatable'
+  return value.trim().replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'datatable'
 }

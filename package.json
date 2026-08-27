@@ -1,17 +1,17 @@
 {
   "name": "@endge/nova-datatable",
-  "private": false,
-  "version": "0.16.6",
   "type": "module",
-  "module": "./dist/nova-datatable.js",
-  "types": "./dist/main.d.ts",
+  "version": "0.16.7",
+  "private": false,
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/main.d.ts",
       "import": "./dist/nova-datatable.js"
     }
   },
-  "sideEffects": false,
+  "module": "./dist/nova-datatable.js",
+  "types": "./dist/main.d.ts",
   "files": [
     "dist"
   ],

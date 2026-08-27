@@ -93,7 +93,11 @@ function formatPasteFeedbackMessage<Row extends Record<string, any>>(
   rejected: boolean,
   partial: boolean,
 ): string {
-  if (rejected) return `Paste rejected: ${result.invalid.length} invalid cells`
-  if (partial) return `Pasted ${result.committed} cells, skipped ${result.skipped}`
+  if (rejected) {
+    return `Paste rejected: ${result.invalid.length} invalid cells`
+  }
+  if (partial) {
+    return `Pasted ${result.committed} cells, skipped ${result.skipped}`
+  }
   return `Pasted ${result.committed} cells`
 }

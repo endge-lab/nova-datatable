@@ -51,27 +51,27 @@ export interface DataTableServerHardeningMetrics {
   averageLatencyMs: number
 }
 
-export type DataTableServerHardeningResult<T> =
+export type DataTableServerHardeningResult<T>
+  = | {
+    status: 'success'
+    value: T
+    token: DataTableServerHardeningRequestToken
+    attempts: number
+    fromCache: boolean
+  }
   | {
-      status: 'success'
-      value: T
-      token: DataTableServerHardeningRequestToken
-      attempts: number
-      fromCache: boolean
-    }
+    status: 'stale'
+    token: DataTableServerHardeningRequestToken
+    attempts: number
+    fromCache: false
+  }
   | {
-      status: 'stale'
-      token: DataTableServerHardeningRequestToken
-      attempts: number
-      fromCache: false
-    }
-  | {
-      status: 'error'
-      error: unknown
-      token: DataTableServerHardeningRequestToken
-      attempts: number
-      fromCache: false
-    }
+    status: 'error'
+    error: unknown
+    token: DataTableServerHardeningRequestToken
+    attempts: number
+    fromCache: false
+  }
 
 interface DataTableServerCacheEntry<T> {
   value: T
@@ -89,6 +89,7 @@ export class DataTableServerHardening {
   private readonly retry: Required<Omit<DataTableServerHardeningRetryOptions, 'shouldRetry'>> & {
     shouldRetry?: DataTableServerHardeningRetryOptions['shouldRetry']
   }
+
   private readonly cacheOptions: Required<DataTableServerHardeningCacheOptions> | false
   private readonly cache = new Map<string, DataTableServerCacheEntry<unknown>>()
   private readonly activeByKind = new Map<DataTableServerHardeningRequestKind, number>()
@@ -145,7 +146,9 @@ export class DataTableServerHardening {
    * Создает новый request token и помечает предыдущий запрос kind устаревшим.
    */
   begin(kind: DataTableServerHardeningRequestKind, cacheKey?: string, abortPrevious = true): DataTableServerHardeningRequestToken {
-    if (abortPrevious) this.abortKind(kind)
+    if (abortPrevious) {
+      this.abortKind(kind)
+    }
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined
     const token = {
       kind,
@@ -155,7 +158,9 @@ export class DataTableServerHardening {
       signal: controller?.signal,
     }
     this.activeByKind.set(kind, token.requestId)
-    if (controller) this.controllersByKind.set(kind, controller)
+    if (controller) {
+      this.controllersByKind.set(kind, controller)
+    }
     return token
   }
 
@@ -202,7 +207,8 @@ export class DataTableServerHardening {
             this.writeCache(options.cacheKey, value, options.cacheTtlMs)
           }
           return { status: 'success', value, token, attempts, fromCache: false }
-        } catch (error) {
+        }
+        catch (error) {
           if (this.isStale(token)) {
             this.metricsState.stale += 1
             return { status: 'stale', token, attempts, fromCache: false }
@@ -221,7 +227,8 @@ export class DataTableServerHardening {
           return { status: 'error', error, token, attempts, fromCache: false }
         }
       }
-    } finally {
+    }
+    finally {
       this.metricsState.inFlight = Math.max(0, this.metricsState.inFlight - 1)
       if (this.activeByKind.get(kind) === token.requestId) {
         this.controllersByKind.delete(kind)
@@ -237,7 +244,9 @@ export class DataTableServerHardening {
    */
   bumpRevision(): number {
     this.revision += 1
-    for (const controller of this.controllersByKind.values()) controller.abort()
+    for (const controller of this.controllersByKind.values()) {
+      controller.abort()
+    }
     this.controllersByKind.clear()
     this.activeByKind.clear()
     return this.revision
@@ -273,7 +282,9 @@ export class DataTableServerHardening {
    */
   private abortKind(kind: DataTableServerHardeningRequestKind): void {
     const controller = this.controllersByKind.get(kind)
-    if (!controller) return
+    if (!controller) {
+      return
+    }
     controller.abort()
     this.controllersByKind.delete(kind)
     this.activeByKind.delete(kind)
@@ -295,8 +306,10 @@ export class DataTableServerHardening {
   /**
    * Читает cache entry с учетом TTL и eviction stale entries.
    */
-  private readCache<T>(cacheKey: string): { hit: true; value: T } | { hit: false; value?: undefined } {
-    if (!this.cacheOptions) return { hit: false }
+  private readCache<T>(cacheKey: string): { hit: true, value: T } | { hit: false, value?: undefined } {
+    if (!this.cacheOptions) {
+      return { hit: false }
+    }
     this.evictExpired()
     const entry = this.cache.get(cacheKey) as DataTableServerCacheEntry<T> | undefined
     if (!entry) {
@@ -312,7 +325,9 @@ export class DataTableServerHardening {
    * Записывает успешный result в cache.
    */
   private writeCache<T>(cacheKey: string, value: T, ttlMs: number | undefined): void {
-    if (!this.cacheOptions) return
+    if (!this.cacheOptions) {
+      return
+    }
     const ttl = Math.max(0, Math.floor(ttlMs ?? this.cacheOptions.ttlMs))
     const createdAt = this.now()
     this.cache.set(cacheKey, {
@@ -331,7 +346,9 @@ export class DataTableServerHardening {
   private evictExpired(): void {
     const now = this.now()
     for (const [key, entry] of this.cache) {
-      if (entry.expiresAt > now) continue
+      if (entry.expiresAt > now) {
+        continue
+      }
       this.cache.delete(key)
       this.metricsState.cacheEvictions += 1
     }
@@ -341,11 +358,15 @@ export class DataTableServerHardening {
    * Ограничивает размер cache самым старым entry.
    */
   private evictOverflow(): void {
-    if (!this.cacheOptions) return
+    if (!this.cacheOptions) {
+      return
+    }
     while (this.cache.size > this.cacheOptions.maxEntries) {
       const oldest = [...this.cache.entries()]
         .sort((left, right) => left[1].createdAt - right[1].createdAt)[0]
-      if (!oldest) return
+      if (!oldest) {
+        return
+      }
       this.cache.delete(oldest[0])
       this.metricsState.cacheEvictions += 1
     }

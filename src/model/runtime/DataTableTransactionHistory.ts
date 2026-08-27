@@ -24,7 +24,9 @@ const DEFAULT_HISTORY_SOURCES: Array<DataTableCommitSource> = [
 export function normalizeDataTableHistory(
   history: false | DataTableHistoryOptions | undefined,
 ): false | DataTableResolvedHistoryOptions {
-  if (history === false) return false
+  if (history === false) {
+    return false
+  }
   return {
     enabled: history?.enabled ?? true,
     maxEntries: Math.max(1, Math.floor(history?.maxEntries ?? 100)),
@@ -51,7 +53,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    */
   configure(options: false | DataTableResolvedHistoryOptions): void {
     this.options = options
-    if (options === false || !options.enabled) this.clear()
+    if (options === false || !options.enabled) {
+      this.clear()
+    }
   }
 
   /**
@@ -59,15 +63,19 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    */
   commit(
     deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>,
-    options: { source: DataTableCommitSource; label?: string; record?: boolean; status?: DataTableTransaction<Row>['status'] },
+    options: { source: DataTableCommitSource, label?: string, record?: boolean, status?: DataTableTransaction<Row>['status'] },
   ): DataTableTransaction<Row> | null {
     const items = Array.isArray(deltas) ? deltas : [deltas]
-    if (items.length === 0) return null
+    if (items.length === 0) {
+      return null
+    }
 
     const inverseDeltas = createInverseDataTableDeltas(this.store, items)
     this.store.applyDeltaBatch(items)
 
-    if (!this.shouldRecord(options.source, options.record)) return null
+    if (!this.shouldRecord(options.source, options.record)) {
+      return null
+    }
     const transaction = this.createTransaction(items, inverseDeltas, options)
     this.push(transaction)
     return transaction
@@ -77,7 +85,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    * Записывает уже примененную transaction.
    */
   record(transaction: DataTableTransaction<Row>): void {
-    if (!this.shouldRecord(transaction.source, true)) return
+    if (!this.shouldRecord(transaction.source, true)) {
+      return
+    }
     this.push(transaction)
   }
 
@@ -86,7 +96,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    */
   undo(): boolean {
     const transaction = this.undoStack.pop()
-    if (!transaction) return false
+    if (!transaction) {
+      return false
+    }
     this.store.applyDeltaBatch(transaction.inverseDeltas)
     this.redoStack.push({ ...transaction, status: 'reverted' })
     return true
@@ -97,7 +109,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    */
   redo(): boolean {
     const transaction = this.redoStack.pop()
-    if (!transaction) return false
+    if (!transaction) {
+      return false
+    }
     this.store.applyDeltaBatch(transaction.deltas)
     this.undoStack.push({ ...transaction, status: 'committed' })
     return true
@@ -144,7 +158,7 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
   createTransaction(
     deltas: Array<DataTableDelta<Row>>,
     inverseDeltas: Array<DataTableDelta<Row>>,
-    options: { source: DataTableCommitSource; label?: string; status?: DataTableTransaction<Row>['status'] },
+    options: { source: DataTableCommitSource, label?: string, status?: DataTableTransaction<Row>['status'] },
   ): DataTableTransaction<Row> {
     this.idCounter += 1
     return {
@@ -162,7 +176,9 @@ export class DataTableTransactionHistory<Row extends Record<string, any> = Recor
    * Проверяет, нужно ли записывать источник в history.
    */
   private shouldRecord(source: DataTableCommitSource, record: boolean | undefined): boolean {
-    if (record === false || this.options === false || !this.options.enabled) return false
+    if (record === false || this.options === false || !this.options.enabled) {
+      return false
+    }
     return this.options.include.includes(source)
   }
 
@@ -209,10 +225,14 @@ class DataTableInverseModel<Row extends Record<string, any>> {
   constructor(store: DataTableStoreApi<Row>) {
     for (let index = 0; index < store.rowCount; index += 1) {
       const rowId = store.getRowIdAt(index)
-      if (rowId === undefined) continue
+      if (rowId === undefined) {
+        continue
+      }
       const row = store.getRow(rowId) ?? store.getRowAt(index)
       this.order.push(rowId)
-      if (row) this.rowsById.set(rowId, cloneRow(row))
+      if (row) {
+        this.rowsById.set(rowId, cloneRow(row))
+      }
     }
   }
 
@@ -267,27 +287,36 @@ class DataTableInverseModel<Row extends Record<string, any>> {
   apply(delta: DataTableDelta<Row>): void {
     if (delta.type === 'setCell') {
       this.patchRow(delta.rowId, { [delta.columnId]: delta.value } as Partial<Row>)
-    } else if (delta.type === 'patch') {
+    }
+    else if (delta.type === 'patch') {
       this.patchRow(delta.rowId, delta.patch)
-    } else if (delta.type === 'insert') {
+    }
+    else if (delta.type === 'insert') {
       this.insertRows(delta.index, delta.rows)
-    } else if (delta.type === 'remove') {
+    }
+    else if (delta.type === 'remove') {
       this.removeRows(delta.rowIds)
-    } else if (delta.type === 'move') {
+    }
+    else if (delta.type === 'move') {
       this.moveRow(delta.rowId, delta.toIndex)
-    } else if (delta.type === 'replaceRange') {
+    }
+    else if (delta.type === 'replaceRange') {
       this.replaceRange(delta.start, delta.rows)
     }
   }
 
   private patchRow(rowId: DataTableRowId, patch: Partial<Row>): void {
     const row = this.rowsById.get(rowId)
-    if (!row) return
+    if (!row) {
+      return
+    }
     this.rowsById.set(rowId, { ...row, ...patch })
   }
 
   private insertRows(index: number | undefined, rows: Array<Row>): void {
-    if (rows.length === 0) return
+    if (rows.length === 0) {
+      return
+    }
     const start = clampHistoryIndex(index ?? this.order.length, 0, this.order.length)
     const rowIds = rows.map((row, offset) => this.resolveRowId(row, start + offset))
     this.order.splice(start, 0, ...rowIds)
@@ -297,27 +326,39 @@ class DataTableInverseModel<Row extends Record<string, any>> {
   }
 
   private removeRows(rowIds: Array<DataTableRowId>): void {
-    if (rowIds.length === 0) return
+    if (rowIds.length === 0) {
+      return
+    }
     const removeSet = new Set(rowIds)
     this.order = this.order.filter(rowId => !removeSet.has(rowId))
-    for (const rowId of rowIds) this.rowsById.delete(rowId)
+    for (const rowId of rowIds) {
+      this.rowsById.delete(rowId)
+    }
   }
 
   private moveRow(rowId: DataTableRowId, toIndex: number): void {
     const fromIndex = this.order.indexOf(rowId)
-    if (fromIndex < 0) return
+    if (fromIndex < 0) {
+      return
+    }
     const [row] = this.order.splice(fromIndex, 1)
-    if (row === undefined) return
+    if (row === undefined) {
+      return
+    }
     this.order.splice(clampHistoryIndex(toIndex, 0, this.order.length), 0, row)
   }
 
   private replaceRange(start: number, rows: Array<Row>): void {
-    if (rows.length === 0) return
+    if (rows.length === 0) {
+      return
+    }
     const safeStart = clampHistoryIndex(start, 0, this.order.length)
     const rowIds = rows.map((row, offset) => this.resolveRowId(row, safeStart + offset))
     const removed = this.order.splice(safeStart, rows.length, ...rowIds)
     for (const rowId of removed) {
-      if (!this.order.includes(rowId)) this.rowsById.delete(rowId)
+      if (!this.order.includes(rowId)) {
+        this.rowsById.delete(rowId)
+      }
     }
     rows.forEach((row, offset) => {
       this.rowsById.set(rowIds[offset]!, cloneRow(row))
@@ -344,7 +385,9 @@ function createInverseDeltaGroup<Row extends Record<string, any>>(
     const rowIds = delta.rows.map((row, rowIndex) => model.resolveRowId(row, start + rowIndex))
     return rowIds.length > 0 ? [{ type: 'remove', rowIds }] : []
   }
-  if (delta.type === 'remove') return createRemoveInverse(delta.rowIds, model)
+  if (delta.type === 'remove') {
+    return createRemoveInverse(delta.rowIds, model)
+  }
   if (delta.type === 'move') {
     const fromIndex = model.getRowIndex(delta.rowId)
     return fromIndex === undefined ? [] : [{ type: 'move', rowId: delta.rowId, toIndex: fromIndex }]
@@ -357,24 +400,29 @@ function createRemoveInverse<Row extends Record<string, any>>(
   model: DataTableInverseModel<Row>,
 ): Array<DataTableDelta<Row>> {
   const rows = rowIds
-    .map(rowId => {
+    .map((rowId) => {
       const row = model.getRow(rowId)
       const rowIndex = model.getRowIndex(rowId)
       return row && rowIndex !== undefined ? { row, rowIndex } : null
     })
-    .filter((row): row is { row: Row; rowIndex: number } => !!row)
+    .filter((row): row is { row: Row, rowIndex: number } => !!row)
     .sort((first, second) => first.rowIndex - second.rowIndex)
   const inverse: Array<DataTableDelta<Row>> = []
-  let group: { index: number; rows: Array<Row> } | null = null
+  let group: { index: number, rows: Array<Row> } | null = null
   for (const row of rows) {
     if (!group || row.rowIndex !== group.index + group.rows.length) {
-      if (group) inverse.push({ type: 'insert', index: group.index, rows: group.rows.map(cloneRow) })
+      if (group) {
+        inverse.push({ type: 'insert', index: group.index, rows: group.rows.map(cloneRow) })
+      }
       group = { index: row.rowIndex, rows: [row.row] }
-    } else {
+    }
+    else {
       group.rows.push(row.row)
     }
   }
-  if (group) inverse.push({ type: 'insert', index: group.index, rows: group.rows.map(cloneRow) })
+  if (group) {
+    inverse.push({ type: 'insert', index: group.index, rows: group.rows.map(cloneRow) })
+  }
   return inverse
 }
 
@@ -387,33 +435,51 @@ function createReplaceRangeInverse<Row extends Record<string, any>>(
   const rows: Array<Row> = []
   for (let offset = 0; offset < previousCount; offset += 1) {
     const row = model.getRowAt(start + offset)
-    if (row) rows.push(row)
+    if (row) {
+      rows.push(row)
+    }
   }
   const inverse: Array<DataTableDelta<Row>> = []
-  if (rows.length > 0) inverse.push({ type: 'replaceRange', start, rows: rows.map(cloneRow) })
+  if (rows.length > 0) {
+    inverse.push({ type: 'replaceRange', start, rows: rows.map(cloneRow) })
+  }
   if (delta.rows.length > previousCount) {
     const rowIds = delta.rows.slice(previousCount).map((row, offset) => model.resolveRowId(row, start + previousCount + offset))
-    if (rowIds.length > 0) inverse.push({ type: 'remove', rowIds })
+    if (rowIds.length > 0) {
+      inverse.push({ type: 'remove', rowIds })
+    }
   }
   return inverse
 }
 
 function normalizeHistorySources(include: Array<DataTableCommitSource> | undefined): Array<DataTableCommitSource> {
-  if (!include || include.length === 0) return [...DEFAULT_HISTORY_SOURCES]
+  if (!include || include.length === 0) {
+    return [...DEFAULT_HISTORY_SOURCES]
+  }
   const result: Array<DataTableCommitSource> = []
   for (const source of include) {
-    if (result.includes(source)) continue
+    if (result.includes(source)) {
+      continue
+    }
     result.push(source)
   }
   return result
 }
 
 function cloneDeltas<Row extends Record<string, any>>(deltas: Array<DataTableDelta<Row>>): Array<DataTableDelta<Row>> {
-  return deltas.map(delta => {
-    if (delta.type === 'patch') return { ...delta, patch: { ...delta.patch } }
-    if (delta.type === 'insert') return { ...delta, rows: delta.rows.map(cloneRow) }
-    if (delta.type === 'remove') return { ...delta, rowIds: [...delta.rowIds] }
-    if (delta.type === 'replaceRange') return { ...delta, rows: delta.rows.map(cloneRow) }
+  return deltas.map((delta) => {
+    if (delta.type === 'patch') {
+      return { ...delta, patch: { ...delta.patch } }
+    }
+    if (delta.type === 'insert') {
+      return { ...delta, rows: delta.rows.map(cloneRow) }
+    }
+    if (delta.type === 'remove') {
+      return { ...delta, rowIds: [...delta.rowIds] }
+    }
+    if (delta.type === 'replaceRange') {
+      return { ...delta, rows: delta.rows.map(cloneRow) }
+    }
     return { ...delta }
   })
 }

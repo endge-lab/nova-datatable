@@ -34,9 +34,9 @@ export interface DataTableDetailEntry<Row extends Record<string, any> = Record<s
   depth: number
 }
 
-export type DataTableDetailFlattenedRow<Row extends Record<string, any> = Record<string, any>> =
-  | DataTableDetailDataEntry<Row>
-  | DataTableDetailEntry<Row>
+export type DataTableDetailFlattenedRow<Row extends Record<string, any> = Record<string, any>>
+  = | DataTableDetailDataEntry<Row>
+    | DataTableDetailEntry<Row>
 
 export interface DataTableDetailFlattenResult<Row extends Record<string, any> = Record<string, any>> {
   rows: Array<DataTableDetailFlattenedRow<Row>>
@@ -61,8 +61,12 @@ export class DataTableDetailExpansionController {
    * Проверяет, раскрыта ли detail row для исходной строки.
    */
   isExpanded(rowId: DataTableRowId): boolean {
-    if (this.expanded === 'all') return true
-    if (this.expanded === 'none') return false
+    if (this.expanded === 'all') {
+      return true
+    }
+    if (this.expanded === 'none') {
+      return false
+    }
     return this.expanded.has(rowId)
   }
 
@@ -70,9 +74,13 @@ export class DataTableDetailExpansionController {
    * Раскрывает detail row для одной или нескольких строк.
    */
   expand(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'all') return
+    if (this.expanded === 'all') {
+      return
+    }
     const set = this.expanded === 'none' ? new Set<DataTableRowId>() : new Set(this.expanded)
-    for (const rowId of toArray(rowIds)) set.add(rowId)
+    for (const rowId of toArray(rowIds)) {
+      set.add(rowId)
+    }
     this.expanded = set
   }
 
@@ -80,13 +88,17 @@ export class DataTableDetailExpansionController {
    * Сворачивает detail row для одной или нескольких строк.
    */
   collapse(rowIds: DataTableRowId | ReadonlyArray<DataTableRowId>): void {
-    if (this.expanded === 'none') return
+    if (this.expanded === 'none') {
+      return
+    }
     if (this.expanded === 'all') {
       this.expanded = 'none'
       return
     }
     const set = new Set(this.expanded)
-    for (const rowId of toArray(rowIds)) set.delete(rowId)
+    for (const rowId of toArray(rowIds)) {
+      set.delete(rowId)
+    }
     this.expanded = set.size === 0 ? 'none' : set
   }
 
@@ -95,8 +107,10 @@ export class DataTableDetailExpansionController {
    */
   toggle(rowId: DataTableRowId): boolean {
     const next = !this.isExpanded(rowId)
-    if (next) this.expand(rowId)
-    else this.collapse(rowId)
+    if (next) {
+      this.expand(rowId)
+    }
+    else { this.collapse(rowId) }
     return next
   }
 
@@ -125,7 +139,9 @@ export class DataTableDetailExpansionController {
    * Возвращает сериализуемый snapshot состояния detail rows.
    */
   snapshot(): 'all' | 'none' | Array<DataTableRowId> {
-    if (this.expanded === 'all' || this.expanded === 'none') return this.expanded
+    if (this.expanded === 'all' || this.expanded === 'none') {
+      return this.expanded
+    }
     return [...this.expanded]
   }
 }
@@ -158,7 +174,9 @@ export function flattenDataTableDetailRows<Row extends Record<string, any>>(
 
     rows.push(dataEntry)
 
-    if (!detailExpanded || row.kind !== 'data' || rowId === undefined) return
+    if (!detailExpanded || row.kind !== 'data' || rowId === undefined) {
+      return
+    }
 
     const detail: DataTableDetailEntry<Row> = {
       kind: 'detail',
@@ -186,9 +204,15 @@ export function flattenDataTableDetailRows<Row extends Record<string, any>>(
  * Проверяет раскрытие detail row в сериализуемом состоянии.
  */
 export function isDataTableDetailRowExpanded(state: DataTableDetailExpansionState, rowId: DataTableRowId): boolean {
-  if (state === 'all') return true
-  if (state === 'none') return false
-  if (Array.isArray(state)) return state.includes(rowId)
+  if (state === 'all') {
+    return true
+  }
+  if (state === 'none') {
+    return false
+  }
+  if (Array.isArray(state)) {
+    return state.includes(rowId)
+  }
   return (state as ReadonlySet<DataTableRowId>).has(rowId)
 }
 
@@ -201,7 +225,9 @@ function normalizeHeight(height: number | undefined): number {
 }
 
 function normalizeExpansionState(state: DataTableDetailExpansionState): 'all' | 'none' | Set<DataTableRowId> {
-  if (state === 'all' || state === 'none') return state
+  if (state === 'all' || state === 'none') {
+    return state
+  }
   return new Set(Array.isArray(state) ? state : [...(state as ReadonlySet<DataTableRowId>)])
 }
 

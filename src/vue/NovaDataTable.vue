@@ -1,76 +1,19 @@
 <script setup lang="ts">
-import { computed, defineComponent, nextTick, ref, useSlots, watch } from 'vue'
+import type { NovaAppCreateOptions, NovaRendererConfigInput, NovaSchemaPlugin } from '@endge/nova'
+import type { NovaCanvasReadyPayload } from '@endge/nova-vue'
+import type { DataTableAccessibilityOptions, DataTableAccessibilityState, DataTableCellContext, DataTableClipboardOptions, DataTableColumnGroupInput, DataTableColumnInput, DataTableColumnReorderPayload, DataTableColumnResizePayload, DataTableColumnState, DataTableDetailRowsOptions, DataTableDomEditorContext, DataTableEditCommitPayload, DataTableEditError, DataTableEditingOptions, DataTableEditingState, DataTableFillDirection, DataTableFillHandleOptions, DataTableFilterExpression, DataTableFilterState, DataTableGroupingState, DataTableGroupNode, DataTableGroupRule, DataTableGroupTemplate, DataTableHistoryOptions, DataTableHistoryState, DataTableInteractionOptions, DataTableKeyboardAction, DataTableKeyboardNavigationOptions, DataTablePerformanceOptions, DataTablePersistedState, DataTablePinnedColumns, DataTablePinnedRows, DataTableQueryState, DataTableResolvedColumnState, DataTableRootOptions, DataTableRowKey, DataTableRowReorderPayload, DataTableScrollbarLayerTemplate, DataTableScrollbarOptions, DataTableSearchState, DataTableSelectionAnchor, DataTableSelectionOptions, DataTableSelectionRange, DataTableSelectionState, DataTableSortState, DataTableStatePersistenceOptions, DataTableStoreApi, DataTableSummaryState, DataTableTemplate, DataTableTextPerformanceMode, DataTableTextSelectionOptions, DataTableTooltipOptions, DataTableTransaction, DataTableViewOptions, DataTableViewport, DataTableViewState, DataTableZoomOptions, DataTableZoomState, NovaDataTableRef } from '@/model/types/datatable.types'
 import {
   Nova,
+
   RaphSchedulerType,
   RendererType,
-  type NovaAppCreateOptions,
-  type NovaRendererConfigInput,
-  type NovaSchemaPlugin,
 } from '@endge/nova'
-import { NovaCanvas, type NovaCanvasReadyPayload } from '@endge/nova-vue'
 import { registerNovaUIKit } from '@endge/nova-ui-kit'
+import { NovaCanvas } from '@endge/nova-vue'
+import { computed, defineComponent, nextTick, ref, useSlots, watch } from 'vue'
 import {
-  type DataTableCellContext,
-  type DataTableAccessibilityOptions,
-  type DataTableAccessibilityState,
-  type DataTableColumnResizePayload,
-  type DataTableColumnInput,
-  type DataTableColumnGroupInput,
-  type DataTableColumnState,
-  type DataTableDetailRowsOptions,
-  type DataTableDomEditorContext,
-  type DataTableEditingOptions,
-  type DataTableEditingState,
-  type DataTableEditCommitPayload,
-  type DataTableEditError,
-  type DataTableInteractionOptions,
-  type DataTableClipboardOptions,
-  type DataTablePinnedColumns,
-  type DataTablePinnedRows,
-  type DataTablePerformanceOptions,
-  type DataTableTextPerformanceMode,
-  type DataTableColumnReorderPayload,
-  type DataTableFilterExpression,
-  type DataTableFilterState,
-  type DataTableGroupingState,
-  type DataTableGroupNode,
-  type DataTableGroupRule,
-  type DataTableGroupTemplate,
-  type DataTableQueryState,
-  type DataTableRowReorderPayload,
-  type DataTableRowKey,
-  type DataTableKeyboardAction,
-  type DataTableKeyboardNavigationOptions,
-  type DataTableFillDirection,
-  type DataTableFillHandleOptions,
-  type DataTableHistoryOptions,
-  type DataTableHistoryState,
-  type DataTablePersistedState,
-  type DataTableResolvedColumnState,
-  type DataTableRootOptions,
-  type DataTableScrollbarLayerTemplate,
-  type DataTableScrollbarOptions,
-  type DataTableSearchState,
-  type DataTableSelectionAnchor,
-  type DataTableSelectionRange,
-  type DataTableSelectionOptions,
-  type DataTableSelectionState,
-  type DataTableSortState,
-  type DataTableSummaryState,
-  type DataTableStoreApi,
-  type DataTableStatePersistenceOptions,
-  type DataTableTemplate,
-  type DataTableTextSelectionOptions,
-  type DataTableTooltipOptions,
-  type DataTableTransaction,
-  type DataTableViewOptions,
-  type DataTableViewState,
-  type DataTableViewport,
-  type DataTableZoomOptions,
-  type DataTableZoomState,
+
   NovaDataTableSchema,
-  type NovaDataTableRef,
 } from '@/model/types/datatable.types'
 import { registerNovaDataTable } from '@/ui/root/datatable-root.registry'
 import { compileDataTableDslNodes, createSlotTemplate } from '@/vue/datatable-slot-templates'
@@ -146,7 +89,7 @@ interface DataTableVueProps {
   maxDpr?: number
   renderer?: RendererType | 'webgl' | 'web2d' | '2d'
   loop?: boolean
-  devtools?: boolean | { id?: string; label?: string }
+  devtools?: boolean | { id?: string, label?: string }
 }
 
 const props = withDefaults(defineProps<DataTableVueProps>(), {
@@ -300,7 +243,9 @@ const rootPinnedRows = computed(() => ({
   ],
 }))
 const rootView = computed<DataTableViewOptions | undefined>(() => {
-  if (!compiledDsl.value.grouping) return props.view
+  if (!compiledDsl.value.grouping) {
+    return props.view
+  }
   return {
     ...(props.view ?? {}),
     grouping: props.view?.grouping ?? compiledDsl.value.grouping,
@@ -324,31 +269,45 @@ const rootGrandFooterTemplate = computed(() => props.grandFooterTemplate ?? comp
 const rootPinnedBottomTemplate = computed(() => props.pinnedBottomTemplate ?? compiledDsl.value.pinnedBottomTemplate)
 const devtools = computed(() => props.devtools)
 const rootEditing = computed<false | DataTableEditingOptions<BaseRow>>(() => {
-  if (props.editing === false) return false
+  if (props.editing === false) {
+    return false
+  }
   return {
     ...(props.editing ?? {}),
-    onEditStart: state => {
-      if (props.editing && props.editing !== false) props.editing.onEditStart?.(state)
+    onEditStart: (state) => {
+      if (props.editing && props.editing !== false) {
+        props.editing.onEditStart?.(state)
+      }
       emit('edit-start', state)
     },
-    onEditCommit: async payload => {
-      if (props.editing && props.editing !== false) await props.editing.onEditCommit?.(payload)
+    onEditCommit: async (payload) => {
+      if (props.editing && props.editing !== false) {
+        await props.editing.onEditCommit?.(payload)
+      }
       emit('edit-commit', payload)
     },
-    onEditCancel: state => {
-      if (props.editing && props.editing !== false) props.editing.onEditCancel?.(state)
+    onEditCancel: (state) => {
+      if (props.editing && props.editing !== false) {
+        props.editing.onEditCancel?.(state)
+      }
       emit('edit-cancel', state)
     },
-    onEditError: error => {
-      if (props.editing && props.editing !== false) props.editing.onEditError?.(error)
+    onEditError: (error) => {
+      if (props.editing && props.editing !== false) {
+        props.editing.onEditError?.(error)
+      }
       emit('edit-error', error)
     },
   }
 })
 const activeEditorType = computed(() => {
   const editor = editingState.value?.column.editor
-  if (typeof editor === 'string') return editor
-  if (typeof editor === 'object') return editor.type
+  if (typeof editor === 'string') {
+    return editor
+  }
+  if (typeof editor === 'object') {
+    return editor.type
+  }
   return 'text'
 })
 const activeEditorOptions = computed(() => {
@@ -379,7 +338,9 @@ const editorControlStyle = computed(() => ({
 }))
 const editorLayerStyle = computed(() => {
   const rect = editingState.value?.rect
-  if (!rect) return {}
+  if (!rect) {
+    return {}
+  }
   return {
     left: `${rect.x}px`,
     top: `${rect.y}px`,
@@ -389,7 +350,9 @@ const editorLayerStyle = computed(() => {
 })
 const editorContext = computed<DataTableDomEditorContext<BaseRow> | null>(() => {
   const state = editingState.value
-  if (!state) return null
+  if (!state) {
+    return null
+  }
   return {
     ...state,
     draft: editorDraft.value,
@@ -426,7 +389,9 @@ const appOptions = computed<Partial<NovaAppCreateOptions>>(() => ({
 
 function resolveRendererConfig(performance: DataTablePerformanceOptions | undefined): NovaRendererConfigInput | undefined {
   const text = performance?.text
-  if (!text) return undefined
+  if (!text) {
+    return undefined
+  }
 
   const mode = text.mode ?? 'balanced'
   const rasterBudgetMs = resolveTextRasterBudgetMs(mode, text.maxTextRasterPerFrame)
@@ -471,14 +436,18 @@ function resolveRendererConfig(performance: DataTablePerformanceOptions | undefi
 }
 
 function resolveTextRasterBudgetMs(mode: DataTableTextPerformanceMode, maxTextRasterPerFrame: number | undefined): number {
-  if (mode === 'quality') return 12
+  if (mode === 'quality') {
+    return 12
+  }
   const normalized = Math.max(50, Math.min(20_000, Math.floor(Number.isFinite(maxTextRasterPerFrame) ? Number(maxTextRasterPerFrame) : 1_000)))
   return Math.max(1, Math.min(16, normalized / 250))
 }
 
 function resolveRendererType(renderer: DataTableVueProps['renderer']): RendererType {
   const rendererValue = String(renderer)
-  if (rendererValue === RendererType.Web2D || rendererValue === 'web2d' || rendererValue === '2d') return RendererType.Web2D
+  if (rendererValue === RendererType.Web2D || rendererValue === 'web2d' || rendererValue === '2d') {
+    return RendererType.Web2D
+  }
   return RendererType.WebGL
 }
 
@@ -658,7 +627,9 @@ async function onEditorKeydown(event: KeyboardEvent): Promise<void> {
 }
 
 async function onEditorBlur(): Promise<void> {
-  if (!resolveEditingOption('commitOnBlur', true)) return
+  if (!resolveEditingOption('commitOnBlur', true)) {
+    return
+  }
   await commitEditor()
 }
 
@@ -667,16 +638,20 @@ function resolveEditingOption<Key extends keyof DataTableEditingOptions<BaseRow>
   fallback: NonNullable<DataTableEditingOptions<BaseRow>[Key]>,
 ): NonNullable<DataTableEditingOptions<BaseRow>[Key]> {
   const editing = props.editing
-  if (!editing || editing === false || editing[key] === undefined) return fallback
+  if (!editing || editing === false || editing[key] === undefined) {
+    return fallback
+  }
   return editing[key] as NonNullable<DataTableEditingOptions<BaseRow>[Key]>
 }
 
-function normalizeSelectOptions(options: unknown): Array<{ label: string; value: unknown }> {
+function normalizeSelectOptions(options: unknown): Array<{ label: string, value: unknown }> {
   const values = typeof options === 'object' && options && 'options' in options
     ? (options as { options?: unknown }).options
     : options
-  if (!Array.isArray(values)) return []
-  return values.map(item => {
+  if (!Array.isArray(values)) {
+    return []
+  }
+  return values.map((item) => {
     if (typeof item === 'object' && item && 'value' in item) {
       return {
         label: String((item as { label?: unknown }).label ?? (item as { value: unknown }).value),
@@ -690,11 +665,15 @@ function normalizeSelectOptions(options: unknown): Array<{ label: string; value:
   })
 }
 
-watch(editingState, state => {
-  if (!state) return
+watch(editingState, (state) => {
+  if (!state) {
+    return
+  }
   nextTick(() => {
     const element = editorElement.value
-    if (!element) return
+    if (!element) {
+      return
+    }
     element.focus()
     if (resolveEditingOption('selectTextOnStart', true) && 'select' in element && typeof element.select === 'function') {
       element.select()

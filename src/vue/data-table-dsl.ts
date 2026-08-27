@@ -1,4 +1,5 @@
-import { defineComponent, type ComponentObjectPropsOptions } from 'vue'
+import type { ComponentObjectPropsOptions } from 'vue'
+import { defineComponent } from 'vue'
 
 const primitiveProps = [
   'x',

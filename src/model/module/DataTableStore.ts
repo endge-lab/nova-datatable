@@ -66,7 +66,9 @@ implements DataTableStoreApi<Row> {
       options.rows?.length ?? 0,
     )
 
-    if (options.rows) this.setRows(options.rows)
+    if (options.rows) {
+      this.setRows(options.rows)
+    }
   }
 
   /**
@@ -87,7 +89,9 @@ implements DataTableStoreApi<Row> {
    * Возвращает загруженные строки плотным массивом.
    */
   getRows(): Array<Row> {
-    if (this.denseRows) return [...this.denseRows]
+    if (this.denseRows) {
+      return [...this.denseRows]
+    }
     return this.loadedEntries().map(entry => entry.row)
   }
 
@@ -102,11 +106,17 @@ implements DataTableStoreApi<Row> {
    * Возвращает строку по индексу.
    */
   getRowAt(index: number): Row | undefined {
-    if (index < 0 || index >= this.rowCount) return undefined
-    if (this.denseRows) return this.denseRows[index]
+    if (index < 0 || index >= this.rowCount) {
+      return undefined
+    }
+    if (this.denseRows) {
+      return this.denseRows[index]
+    }
 
     const current = this.readRowAt(index)
-    if (current) return current
+    if (current) {
+      return current
+    }
 
     const sourceRow = this.source?.getRow?.(index)
     if (sourceRow) {
@@ -124,7 +134,9 @@ implements DataTableStoreApi<Row> {
       return row ? this.resolveRowId(row, index) : undefined
     }
     const cached = this.readRowIdAt(index)
-    if (cached !== undefined) return cached
+    if (cached !== undefined) {
+      return cached
+    }
     const row = this.getRowAt(index)
     return row ? this.resolveRowId(row, index) : undefined
   }
@@ -182,7 +194,9 @@ implements DataTableStoreApi<Row> {
     rows.forEach((row, offset) => this.placeRow(safeStart + offset, row))
     const previousCount = this.estimatedRowCount
     this.estimatedRowCount = Math.max(this.estimatedRowCount, safeStart + rows.length)
-    if (this.estimatedRowCount !== previousCount) this.markStructuralDirty()
+    if (this.estimatedRowCount !== previousCount) {
+      this.markStructuralDirty()
+    }
     this.bumpData(this.estimatedRowCount !== previousCount)
   }
 
@@ -197,7 +211,9 @@ implements DataTableStoreApi<Row> {
    * Вставляет несколько строк в указанную позицию или в конец.
    */
   insertMany(rows: Array<Row>, index = this.rowCount): void {
-    if (rows.length === 0) return
+    if (rows.length === 0) {
+      return
+    }
 
     const safeIndex = clampInteger(index, 0, this.rowCount)
     if (this.denseRows) {
@@ -235,11 +251,15 @@ implements DataTableStoreApi<Row> {
   move(rowId: DataTableRowId, toIndex: number): void {
     const location = this.locationById.get(rowId)
     const row = this.rowById.get(rowId)
-    if (location === undefined || !row) return
+    if (location === undefined || !row) {
+      return
+    }
 
     const fromIndex = location
     const safeTo = clampInteger(toIndex, 0, Math.max(0, this.rowCount - 1))
-    if (fromIndex === safeTo) return
+    if (fromIndex === safeTo) {
+      return
+    }
 
     if (this.denseRows) {
       const [movedRow] = this.denseRows.splice(fromIndex, 1)
@@ -252,10 +272,16 @@ implements DataTableStoreApi<Row> {
       return
     }
 
-    const shifted = this.loadedEntries().map(entry => {
-      if (entry.rowId === rowId) return { ...entry, index: safeTo }
-      if (fromIndex < safeTo && entry.index > fromIndex && entry.index <= safeTo) return { ...entry, index: entry.index - 1 }
-      if (fromIndex > safeTo && entry.index >= safeTo && entry.index < fromIndex) return { ...entry, index: entry.index + 1 }
+    const shifted = this.loadedEntries().map((entry) => {
+      if (entry.rowId === rowId) {
+        return { ...entry, index: safeTo }
+      }
+      if (fromIndex < safeTo && entry.index > fromIndex && entry.index <= safeTo) {
+        return { ...entry, index: entry.index - 1 }
+      }
+      if (fromIndex > safeTo && entry.index >= safeTo && entry.index < fromIndex) {
+        return { ...entry, index: entry.index + 1 }
+      }
       return entry
     })
     this.reindexLoadedEntries(shifted)
@@ -268,7 +294,9 @@ implements DataTableStoreApi<Row> {
    */
   patch(rowId: DataTableRowId, patch: Partial<Row>): void {
     const row = this.rowById.get(rowId)
-    if (!row) return
+    if (!row) {
+      return
+    }
 
     let changed = false
     for (const columnId in patch) {
@@ -276,7 +304,9 @@ implements DataTableStoreApi<Row> {
       this.markDirtyCell(rowId, columnId)
       changed = true
     }
-    if (!changed) return
+    if (!changed) {
+      return
+    }
     this.markDirtyRow(rowId)
     this.bumpData(false)
   }
@@ -286,7 +316,9 @@ implements DataTableStoreApi<Row> {
    */
   setCell(rowId: DataTableRowId, columnId: string, value: unknown): void {
     const row = this.rowById.get(rowId)
-    if (!row) return
+    if (!row) {
+      return
+    }
 
     row[columnId as keyof Row] = value as Row[keyof Row]
     this.markDirtyRow(rowId)
@@ -305,7 +337,9 @@ implements DataTableStoreApi<Row> {
    * Удаляет несколько строк по id.
    */
   removeMany(rowIds: Array<DataTableRowId>): void {
-    if (rowIds.length === 0) return
+    if (rowIds.length === 0) {
+      return
+    }
 
     const removeSet = new Set(rowIds)
     const removedIndexes = rowIds
@@ -313,7 +347,9 @@ implements DataTableStoreApi<Row> {
       .filter((index): index is number => index !== undefined)
       .sort((a, b) => a - b)
     if (this.denseRows) {
-      if (removedIndexes.length === 0) return
+      if (removedIndexes.length === 0) {
+        return
+      }
       for (let index = removedIndexes.length - 1; index >= 0; index -= 1) {
         const rowIndex = removedIndexes[index]!
         const row = this.denseRows[rowIndex]
@@ -361,12 +397,18 @@ implements DataTableStoreApi<Row> {
    */
   applyDeltaBatch(deltas: DataTableDelta<Row> | Array<DataTableDelta<Row>>): void {
     const items = Array.isArray(deltas) ? deltas : [deltas]
-    if (items.length === 0) return
+    if (items.length === 0) {
+      return
+    }
 
     const patches = new Map<DataTableRowId, Partial<Row>>()
     const flushPatches = (): void => {
-      if (patches.size === 0) return
-      for (const [rowId, patch] of patches) this.patch(rowId, patch)
+      if (patches.size === 0) {
+        return
+      }
+      for (const [rowId, patch] of patches) {
+        this.patch(rowId, patch)
+      }
       patches.clear()
     }
 
@@ -376,16 +418,26 @@ implements DataTableStoreApi<Row> {
           const patch = patches.get(delta.rowId) ?? {}
           Object.assign(patch, delta.patch)
           patches.set(delta.rowId, patch)
-        } else if (delta.type === 'setCell') {
+        }
+        else if (delta.type === 'setCell') {
           const patch = patches.get(delta.rowId) ?? {}
           ;(patch as Record<string, unknown>)[delta.columnId] = delta.value
           patches.set(delta.rowId, patch)
-        } else {
+        }
+        else {
           flushPatches()
-          if (delta.type === 'insert') this.insertMany(delta.rows, delta.index)
-          else if (delta.type === 'remove') this.removeMany(delta.rowIds)
-          else if (delta.type === 'move') this.move(delta.rowId, delta.toIndex)
-          else if (delta.type === 'replaceRange') this.replaceRange(delta.start, delta.rows)
+          if (delta.type === 'insert') {
+            this.insertMany(delta.rows, delta.index)
+          }
+          else if (delta.type === 'remove') {
+            this.removeMany(delta.rowIds)
+          }
+          else if (delta.type === 'move') {
+            this.move(delta.rowId, delta.toIndex)
+          }
+          else if (delta.type === 'replaceRange') {
+            this.replaceRange(delta.start, delta.rows)
+          }
         }
       }
       flushPatches()
@@ -423,27 +475,41 @@ implements DataTableStoreApi<Row> {
    * Гарантирует загрузку lazy range.
    */
   async ensureRange(range: DataTableRange, query?: DataTableQueryState, context?: DataTableSourceRequestContext): Promise<void> {
-    if (!this.source?.loadRange) return
+    if (!this.source?.loadRange) {
+      return
+    }
 
     const requestedStart = clampInteger(range.start, 0, this.rowCount)
     const requestedEnd = clampInteger(range.end, requestedStart, this.rowCount)
     const { start, end } = this.resolveSourceRange(requestedStart, requestedEnd)
-    if (start === end) return
-    if (this.isRangeLoaded(start, end)) return
+    if (start === end) {
+      return
+    }
+    if (this.isRangeLoaded(start, end)) {
+      return
+    }
 
     const key = `${start}:${end}:${JSON.stringify(query ?? {})}`
     const pending = this.pendingRanges.get(key)
-    if (pending) return pending
-    if (context) this.latestRequestRevision = Math.max(this.latestRequestRevision, context.revision)
+    if (pending) {
+      return pending
+    }
+    if (context) {
+      this.latestRequestRevision = Math.max(this.latestRequestRevision, context.revision)
+    }
 
     const promise = Promise.resolve(
       query === undefined
         ? this.source.loadRange({ start, end }, undefined, context)
         : this.source.loadRange({ start, end }, query, context),
     )
-      .then(rows => {
-        if (context && context.revision < this.latestRequestRevision) return undefined
-        if (Array.isArray(rows)) this.replaceRange(start, rows)
+      .then((rows) => {
+        if (context && context.revision < this.latestRequestRevision) {
+          return undefined
+        }
+        if (Array.isArray(rows)) {
+          this.replaceRange(start, rows)
+        }
         return undefined
       })
       .finally(() => {
@@ -459,7 +525,9 @@ implements DataTableStoreApi<Row> {
    * Это коалесит scroll burst в один запрос страницы вместо exact-range запроса на каждый wheel event.
    */
   private resolveSourceRange(start: number, end: number): DataTableRange {
-    if (this.rowCount <= this.pageSize || end <= start) return { start, end }
+    if (this.rowCount <= this.pageSize || end <= start) {
+      return { start, end }
+    }
 
     const pageStart = Math.floor(start / this.pageSize) * this.pageSize
     const pageEnd = Math.min(this.rowCount, Math.ceil(end / this.pageSize) * this.pageSize)
@@ -473,7 +541,9 @@ implements DataTableStoreApi<Row> {
    * Загружает server-side summary для текущего query.
    */
   async loadSummary(query?: DataTableQueryState): Promise<Record<string, unknown> | undefined> {
-    if (!this.source?.loadSummary) return undefined
+    if (!this.source?.loadSummary) {
+      return undefined
+    }
     const summary = await this.source.loadSummary(query)
     return summary ?? undefined
   }
@@ -485,8 +555,10 @@ implements DataTableStoreApi<Row> {
     columnId: string,
     query?: DataTableQueryState,
     cursor?: string,
-  ): Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined> {
-    if (!this.source?.loadFilterValues) return undefined
+  ): Promise<{ values: Array<unknown>, cursor?: string, hasMore?: boolean } | undefined> {
+    if (!this.source?.loadFilterValues) {
+      return undefined
+    }
     const result = await this.source.loadFilterValues(columnId, query, cursor)
     return result ?? undefined
   }
@@ -500,7 +572,9 @@ implements DataTableStoreApi<Row> {
     cursor?: string,
     direction?: DataTableSearchDirection,
   ): Promise<DataTableSearchResult | undefined> {
-    if (!this.source?.search) return undefined
+    if (!this.source?.search) {
+      return undefined
+    }
     const result = await this.source.search(search, query, cursor, direction)
     return result ?? undefined
   }
@@ -529,9 +603,12 @@ implements DataTableStoreApi<Row> {
     this.batchDepth += 1
     try {
       callback(this)
-    } finally {
+    }
+    finally {
       this.batchDepth -= 1
-      if (this.batchDepth === 0) this.flushBump()
+      if (this.batchDepth === 0) {
+        this.flushBump()
+      }
     }
   }
 
@@ -584,7 +661,9 @@ implements DataTableStoreApi<Row> {
    * Помещает строку в плотный in-memory storage.
    */
   private placeDenseRow(index: number, row: Row): void {
-    if (!this.denseRows) return
+    if (!this.denseRows) {
+      return
+    }
 
     const id = this.resolveRowId(row, index)
     const previous = this.denseRows[index]
@@ -632,7 +711,9 @@ implements DataTableStoreApi<Row> {
       for (let offset = 0; offset < page.rows.length; offset += 1) {
         const row = page.rows[offset]
         const rowId = page.rowIds[offset]
-        if (!row || rowId === undefined) continue
+        if (!row || rowId === undefined) {
+          continue
+        }
         entries.push({ index: pageIndex * this.pageSize + offset, row, rowId })
       }
     }
@@ -663,7 +744,9 @@ implements DataTableStoreApi<Row> {
    * Возвращает cached row.
    */
   private readRowAt(index: number): Row | undefined {
-    if (this.denseRows) return this.denseRows[index]
+    if (this.denseRows) {
+      return this.denseRows[index]
+    }
     const page = this.getPage(Math.floor(index / this.pageSize))
     return page?.rows[index % this.pageSize]
   }
@@ -684,7 +767,9 @@ implements DataTableStoreApi<Row> {
    * Вычисляет стабильный id строки.
    */
   private resolveRowId(row: Row, index: number): DataTableRowId {
-    if (typeof this.rowKey === 'function') return this.rowKey(row, index)
+    if (typeof this.rowKey === 'function') {
+      return this.rowKey(row, index)
+    }
     return row[this.rowKey] as DataTableRowId
   }
 
@@ -692,11 +777,15 @@ implements DataTableStoreApi<Row> {
    * Выполняет внутренний шаг reindexDenseLocations для DataTableStore.
    */
   private reindexDenseLocations(start = 0): void {
-    if (!this.denseRows) return
+    if (!this.denseRows) {
+      return
+    }
 
     for (let index = Math.max(0, start); index < this.denseRows.length; index += 1) {
       const row = this.denseRows[index]
-      if (!row) continue
+      if (!row) {
+        continue
+      }
       this.locationById.set(this.resolveRowId(row, index), index)
     }
   }
@@ -706,9 +795,13 @@ implements DataTableStoreApi<Row> {
    */
   private isRangeLoaded(start: number, end: number): boolean {
     for (let index = start; index < end; index += 1) {
-      if (this.readRowAt(index)) continue
+      if (this.readRowAt(index)) {
+        continue
+      }
       const sourceRow = this.source?.getRow?.(index)
-      if (!sourceRow) return false
+      if (!sourceRow) {
+        return false
+      }
       this.placeRow(index, sourceRow, { markDirty: false })
     }
     return true
@@ -720,7 +813,9 @@ implements DataTableStoreApi<Row> {
   private markDirtyRow(rowId: DataTableRowId): void {
     this.dirtyRows.add(rowId)
     const index = this.locationById.get(rowId)
-    if (index !== undefined) this.dirtyPages.add(Math.floor(index / this.pageSize))
+    if (index !== undefined) {
+      this.dirtyPages.add(Math.floor(index / this.pageSize))
+    }
     this.summaryDirty = true
   }
 
@@ -742,7 +837,9 @@ implements DataTableStoreApi<Row> {
   private resolveDirtyCells(): Array<DataTableDirtyCell> {
     const cells: Array<DataTableDirtyCell> = []
     for (const [rowId, columnIds] of this.dirtyCells) {
-      for (const columnId of columnIds) cells.push({ rowId, columnId })
+      for (const columnId of columnIds) {
+        cells.push({ rowId, columnId })
+      }
     }
     return cells
   }
@@ -760,18 +857,28 @@ implements DataTableStoreApi<Row> {
    */
   private bumpData(structural: boolean): void {
     this.pendingDataBump = true
-    if (structural) this.pendingStructureBump = true
-    if (this.batchDepth === 0) this.flushBump()
+    if (structural) {
+      this.pendingStructureBump = true
+    }
+    if (this.batchDepth === 0) {
+      this.flushBump()
+    }
   }
 
   /**
    * Коммитит накопленные ревизии.
    */
   private flushBump(): void {
-    if (!this.pendingDataBump && !this.pendingStructureBump) return
+    if (!this.pendingDataBump && !this.pendingStructureBump) {
+      return
+    }
     this.revision += 1
-    if (this.pendingDataBump) this.dataRevision += 1
-    if (this.pendingStructureBump) this.structureRevision += 1
+    if (this.pendingDataBump) {
+      this.dataRevision += 1
+    }
+    if (this.pendingStructureBump) {
+      this.structureRevision += 1
+    }
     this.pendingDataBump = false
     this.pendingStructureBump = false
   }
@@ -800,8 +907,10 @@ function countLessThan(sortedValues: Array<number>, value: number): number {
   let right = sortedValues.length
   while (left < right) {
     const middle = (left + right) >> 1
-    if (sortedValues[middle]! < value) left = middle + 1
-    else right = middle
+    if (sortedValues[middle]! < value) {
+      left = middle + 1
+    }
+    else { right = middle }
   }
   return left
 }

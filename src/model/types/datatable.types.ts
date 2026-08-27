@@ -1,5 +1,11 @@
 import type { NovaMotionOptions, NovaSchema, NovaTextRenderMode, RendererType } from '@endge/nova'
 import type {
+  NovaScrollbarAxis,
+  NovaScrollbarGeometry,
+  NovaScrollbarResolvedVisualOptions,
+  NovaScrollbarVisibility,
+  NovaScrollbarVisualOptions,
+  NovaScrollbarVisualState,
   NovaUiCommonProps,
   NovaUiCommonResolvedProps,
   TooltipAnimationOptions,
@@ -7,12 +13,6 @@ import type {
   TooltipContent,
   TooltipModifier,
   TooltipPlacement,
-  NovaScrollbarAxis,
-  NovaScrollbarGeometry,
-  NovaScrollbarResolvedVisualOptions,
-  NovaScrollbarVisibility,
-  NovaScrollbarVisualOptions,
-  NovaScrollbarVisualState,
 } from '@endge/nova-ui-kit'
 
 export const DATATABLE_ROOT_SCHEMA_TYPE = 'NovaDataTable.Root'
@@ -27,20 +27,20 @@ export type DataTableSortHeaderClickMode = 'append' | 'replace'
 export type DataTableGroupFooterPlacement = 'scroll' | 'pinned-bottom' | 'both'
 export type DataTableFilterPreset = 'text' | 'number' | 'date' | 'set' | 'boolean' | 'custom'
 export type DataTableFilterExpressionLogic = 'and' | 'or'
-export type DataTableFilterOperator =
-  | 'contains'
-  | 'equals'
-  | 'startsWith'
-  | 'endsWith'
-  | 'gt'
-  | 'gte'
-  | 'lt'
-  | 'lte'
-  | 'between'
-  | 'in'
-  | 'notIn'
-  | 'is'
-  | 'isNot'
+export type DataTableFilterOperator
+  = | 'contains'
+    | 'equals'
+    | 'startsWith'
+    | 'endsWith'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'between'
+    | 'in'
+    | 'notIn'
+    | 'is'
+    | 'isNot'
 export type DataTableSearchScope = 'rows' | 'cells'
 export type DataTableSearchMatchMode = 'contains' | 'startsWith' | 'equals' | 'regex'
 export type DataTableSearchHighlightMode = 'none' | 'row' | 'cell' | 'text' | 'cell-text' | 'row-cell' | 'row-cell-text'
@@ -327,13 +327,13 @@ export interface DataTablePasteError<Row extends Record<string, any> = Record<st
   result?: DataTablePasteResult<Row>
 }
 
-export type DataTableAggregator<Row extends Record<string, any> = Record<string, any>> =
-  | 'count'
-  | 'sum'
-  | 'avg'
-  | 'min'
-  | 'max'
-  | ((rows: Array<Row>, context: DataTableGroupContext<Row>) => unknown)
+export type DataTableAggregator<Row extends Record<string, any> = Record<string, any>>
+  = | 'count'
+    | 'sum'
+    | 'avg'
+    | 'min'
+    | 'max'
+    | ((rows: Array<Row>, context: DataTableGroupContext<Row>) => unknown)
 
 export interface DataTableGroupRule<Row extends Record<string, any> = Record<string, any>> {
   id: string
@@ -408,13 +408,13 @@ export interface DataTableSourceRequestContext {
 
 export type DataTableRowKey<Row extends Record<string, any>> = keyof Row | ((row: Row, index: number) => DataTableRowId)
 
-export type DataTableDelta<Row extends Record<string, any> = Record<string, any>> =
-  | { type: 'patch'; rowId: DataTableRowId; patch: Partial<Row> }
-  | { type: 'setCell'; rowId: DataTableRowId; columnId: string; value: unknown }
-  | { type: 'insert'; index?: number; rows: Array<Row> }
-  | { type: 'remove'; rowIds: Array<DataTableRowId> }
-  | { type: 'move'; rowId: DataTableRowId; toIndex: number }
-  | { type: 'replaceRange'; start: number; rows: Array<Row> }
+export type DataTableDelta<Row extends Record<string, any> = Record<string, any>>
+  = | { type: 'patch', rowId: DataTableRowId, patch: Partial<Row> }
+    | { type: 'setCell', rowId: DataTableRowId, columnId: string, value: unknown }
+    | { type: 'insert', index?: number, rows: Array<Row> }
+    | { type: 'remove', rowIds: Array<DataTableRowId> }
+    | { type: 'move', rowId: DataTableRowId, toIndex: number }
+    | { type: 'replaceRange', start: number, rows: Array<Row> }
 
 export interface DataTableTransaction<Row extends Record<string, any> = Record<string, any>> {
   id: string
@@ -591,12 +591,12 @@ export interface DataTableColumnGroupInput {
   pinned?: DataTablePinnedColumnSide
 }
 
-export type DataTableStateSlice =
-  | 'columnState'
-  | 'sort'
-  | 'filters'
-  | 'search'
-  | 'grouping'
+export type DataTableStateSlice
+  = | 'columnState'
+    | 'sort'
+    | 'filters'
+    | 'search'
+    | 'grouping'
 
 export interface DataTableStatePersistenceOptions {
   key: string
@@ -693,7 +693,7 @@ export interface DataTableLazySource<Row extends Record<string, any>> {
     columnId: string,
     query?: DataTableQueryState,
     cursor?: string,
-  ) => Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | void> | { values: Array<unknown>; cursor?: string; hasMore?: boolean } | void
+  ) => Promise<{ values: Array<unknown>, cursor?: string, hasMore?: boolean } | void> | { values: Array<unknown>, cursor?: string, hasMore?: boolean } | void
   search?: (
     search: DataTableSearchQuery,
     query?: DataTableQueryState,
@@ -1016,9 +1016,9 @@ export interface DataTableTooltipContext<Row extends Record<string, any> = Recor
   api: DataTableRootApi<Row>
 }
 
-export type DataTableCellTooltip<Row extends Record<string, any> = Record<string, any>> =
-  | TooltipContent
-  | ((context: DataTableCellContext<Row>) => TooltipContent | null | undefined)
+export type DataTableCellTooltip<Row extends Record<string, any> = Record<string, any>>
+  = | TooltipContent
+    | ((context: DataTableCellContext<Row>) => TooltipContent | null | undefined)
 
 export interface DataTableTooltipOptions<Row extends Record<string, any> = Record<string, any>> {
   enabled?: boolean
@@ -1441,14 +1441,14 @@ export interface DataTableDetailViewRow<Row extends Record<string, any> = Record
   height: number
 }
 
-export type DataTableViewRow<Row extends Record<string, any> = Record<string, any>> =
-  | DataTableDataViewRow<Row>
-  | DataTableGroupViewRow<Row>
-  | DataTableGroupFooterViewRow<Row>
-  | DataTableGrandFooterViewRow<Row>
-  | DataTableTreeViewRow<Row>
-  | DataTableMasterViewRow<Row>
-  | DataTableDetailViewRow<Row>
+export type DataTableViewRow<Row extends Record<string, any> = Record<string, any>>
+  = | DataTableDataViewRow<Row>
+    | DataTableGroupViewRow<Row>
+    | DataTableGroupFooterViewRow<Row>
+    | DataTableGrandFooterViewRow<Row>
+    | DataTableTreeViewRow<Row>
+    | DataTableMasterViewRow<Row>
+    | DataTableDetailViewRow<Row>
 
 export interface DataTableRowReorderPayload {
   rowId: DataTableRowId
@@ -1816,7 +1816,7 @@ export interface DataTableStoreApi<Row extends Record<string, any> = Record<stri
     columnId: string,
     query?: DataTableQueryState,
     cursor?: string,
-  ) => Promise<{ values: Array<unknown>; cursor?: string; hasMore?: boolean } | undefined>
+  ) => Promise<{ values: Array<unknown>, cursor?: string, hasMore?: boolean } | undefined>
   searchSource: (
     search: DataTableSearchQuery,
     query?: DataTableQueryState,

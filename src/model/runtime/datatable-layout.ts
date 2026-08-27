@@ -24,8 +24,12 @@ export function createDataTableViewport<Row extends Record<string, any>>(
   let centerColumnCount = 0
   const centerColumnPrefix = [0]
   for (const column of input.columns) {
-    if (column.pinned === 'left') pinnedLeftWidth += column.resolvedWidth
-    else if (column.pinned === 'right') pinnedRightWidth += column.resolvedWidth
+    if (column.pinned === 'left') {
+      pinnedLeftWidth += column.resolvedWidth
+    }
+    else if (column.pinned === 'right') {
+      pinnedRightWidth += column.resolvedWidth
+    }
     else {
       centerColumnCount += 1
       contentWidth += column.resolvedWidth
@@ -98,7 +102,9 @@ export function resolveColumnRange<Row extends Record<string, any>>(
   columns: Array<DataTableResolvedColumn<Row>>,
   overscan: number,
 ): DataTableRange & { offset: number } {
-  if (columns.length === 0) return { start: 0, end: 0, offset: 0 }
+  if (columns.length === 0) {
+    return { start: 0, end: 0, offset: 0 }
+  }
 
   const prefix = new Array<number>(columns.length + 1)
   prefix[0] = 0
@@ -115,7 +121,9 @@ function resolveColumnRangeFromPrefix(
   prefix: Array<number>,
   overscan: number,
 ): DataTableRange & { offset: number } {
-  if (columnCount === 0) return { start: 0, end: 0, offset: 0 }
+  if (columnCount === 0) {
+    return { start: 0, end: 0, offset: 0 }
+  }
   const viewportStart = scrollX
   const viewportEnd = scrollX + viewportWidth
   const rawStart = Math.max(0, lowerBound(prefix, viewportStart) - 1)
@@ -131,8 +139,10 @@ function lowerBound(values: Array<number>, target: number): number {
   let right = values.length
   while (left < right) {
     const middle = (left + right) >> 1
-    if ((values[middle] ?? 0) < target) left = middle + 1
-    else right = middle
+    if ((values[middle] ?? 0) < target) {
+      left = middle + 1
+    }
+    else { right = middle }
   }
   return left
 }
@@ -142,8 +152,10 @@ function upperBound(values: Array<number>, target: number): number {
   let right = values.length
   while (left < right) {
     const middle = (left + right) >> 1
-    if ((values[middle] ?? 0) <= target) left = middle + 1
-    else right = middle
+    if ((values[middle] ?? 0) <= target) {
+      left = middle + 1
+    }
+    else { right = middle }
   }
   return left
 }
