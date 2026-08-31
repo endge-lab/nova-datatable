@@ -2265,7 +2265,7 @@ describe('dataTable Root runtime', () => {
     const root = uiRoot.children[0] as DataTableRootNode<Row>
 
     ;(root as any).__resetRenderLayerDiagnostics()
-    const resolveColumns = vi.spyOn(root as any, 'resolveColumns')
+    const resolveColumns = vi.spyOn(root as any, '_resolveColumns')
     root.getApi().scrollTo(0, 80)
     app.raph.run()
     const verticalScrollDiagnostics = (root as any).__getRenderLayerDiagnostics()

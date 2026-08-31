@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "type": "module",
-  "version": "0.16.12",
+  "version": "0.16.13",
   "private": false,
   "sideEffects": false,
   "exports": {
@@ -19,7 +19,8 @@
     "clean": "rimraf dist tsconfig.tsbuildinfo",
     "dev": "vite build --watch",
     "dev:watch": "vite build --watch",
-    "build": "vue-tsc --noCheck && vite build",
+    "build": "pnpm typecheck && vite build",
+    "typecheck": "vue-tsc --noEmit",
     "test": "vitest run --config vite.config.ts",
     "bench": "vitest bench --run src/test/*.bench.ts --config vite.config.ts",
     "lint-check": "eslint . --cache",
