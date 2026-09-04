@@ -36,8 +36,8 @@ function createHistory(store: DataTableStore<HistoryRow>): DataTableTransactionH
   return new DataTableTransactionHistory(store, normalizeDataTableHistory({ enabled: true, maxEntries: 10 }))
 }
 
-describe('dataTable enterprise transaction history', () => {
-  it('records cell transactions and replays undo/redo inverse deltas', () => {
+describe('история транзакций DataTable Enterprise', () => {
+  it('записывает транзакции ячеек и воспроизводит обратные delta undo/redo', () => {
     const store = createDataTableStore<HistoryRow>({ rowKey: 'id', rows: rows(4) })
     const history = createHistory(store)
     const deltas: Array<DataTableDelta<HistoryRow>> = [
@@ -69,7 +69,7 @@ describe('dataTable enterprise transaction history', () => {
     expect(store.getRow('row-1')).toMatchObject({ name: 'Edited', status: 'done', amount: 999 })
   })
 
-  it('inverts structural insert/remove/move/replaceRange deltas as one transaction', () => {
+  it('инвертирует структурные delta insert/remove/move/replaceRange как одну транзакцию', () => {
     const store = createDataTableStore<HistoryRow>({ rowKey: 'id', rows: rows(5) })
     const before = cloneRows(store.getRows())
     const deltas: Array<DataTableDelta<HistoryRow>> = [
@@ -89,8 +89,8 @@ describe('dataTable enterprise transaction history', () => {
   })
 })
 
-describe('dataTable enterprise commit controller', () => {
-  it('plans optimistic and transactional commit strategies without applying side effects', () => {
+describe('контроллер фиксации DataTable Enterprise', () => {
+  it('планирует оптимистическую и транзакционную стратегии фиксации без применения side effects', () => {
     const transaction: DataTableTransaction<HistoryRow> = {
       id: 'tx-commit',
       source: 'edit',

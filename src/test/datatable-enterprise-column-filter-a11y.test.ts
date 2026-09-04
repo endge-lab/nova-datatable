@@ -90,8 +90,8 @@ function groups(): Array<DataTableColumnGroup<EnterpriseGridRow>> {
   ]
 }
 
-describe('dataTable enterprise filter menu helpers', () => {
-  it('builds set-filter values from store rows and keeps selected flags stable', () => {
+describe('проверка Helpers меню фильтра DataTable Enterprise', () => {
+  it('строит значения set-filter из строк Store и сохраняет флаги выбора стабильными', () => {
     const store = createDataTableStore<EnterpriseGridRow>({ rowKey: 'id', rows: rows() })
     const [statusColumn] = columns().filter(column => column.id === 'status')
 
@@ -109,7 +109,7 @@ describe('dataTable enterprise filter menu helpers', () => {
     ])
   })
 
-  it('supports search and explicit empty values for set filters', () => {
+  it('поддерживает поиск и явные пустые значения для set filters', () => {
     const [regionColumn] = columns().filter(column => column.id === 'region')
 
     const values = resolveDataTableSetFilterValues({
@@ -130,7 +130,7 @@ describe('dataTable enterprise filter menu helpers', () => {
     ])
   })
 
-  it('reduces open toggle apply and clear actions without mutating previous state', () => {
+  it('сводит Actions open, toggle, apply и clear без изменения предыдущего состояния', () => {
     const values = resolveDataTableSetFilterValues({
       column: columns()[1]!,
       rows: rows(),
@@ -168,7 +168,7 @@ describe('dataTable enterprise filter menu helpers', () => {
     expect(cleared.valid).toBe(false)
   })
 
-  it('normalizes scalar and between values when operator changes', () => {
+  it('нормализует скалярные значения и between при изменении оператора', () => {
     const opened = reduceDataTableFilterMenuAction(createDataTableFilterMenuState(), {
       type: 'open',
       columnId: 'delay',
@@ -184,8 +184,8 @@ describe('dataTable enterprise filter menu helpers', () => {
   })
 })
 
-describe('dataTable enterprise column system helpers', () => {
-  it('creates nested header layout with colspans rowspans hidden columns and pinned regions', () => {
+describe('проверка Helpers системы столбцов DataTable Enterprise', () => {
+  it('создаёт вложенный layout заголовка с colspan, rowspan, скрытыми столбцами и закреплёнными областями', () => {
     const layout = createDataTableColumnGroupLayout({
       columns: resolvedColumns(),
       groups: groups(),
@@ -208,7 +208,7 @@ describe('dataTable enterprise column system helpers', () => {
     expect(departure).toMatchObject({ rowSpan: 1, startIndex: 3 })
   })
 
-  it('builds chooser state and toggles nested groups as pure state', () => {
+  it('строит состояние chooser и переключает вложенные группы как чистое состояние', () => {
     const chooser = createDataTableColumnChooserState({
       columns: resolvedColumns(),
       groups: groups(),
@@ -241,8 +241,8 @@ describe('dataTable enterprise column system helpers', () => {
   })
 })
 
-describe('dataTable enterprise accessibility helpers', () => {
-  it('builds aria grid state with active descendant and live search message', () => {
+describe('проверка Helpers доступности DataTable Enterprise', () => {
+  it('строит ARIA-состояние сетки с активным потомком и live-сообщением поиска', () => {
     const search: DataTableSearchState = {
       query: { text: 'NVA', scope: 'cells' },
       matches: [],
@@ -282,7 +282,7 @@ describe('dataTable enterprise accessibility helpers', () => {
     expect(state.summaries.columns).toBe('6 columns visible, 1 hidden')
   })
 
-  it('formats filter sort focus selection and viewport live messages', () => {
+  it('форматирует live-сообщения фильтра, сортировки, фокуса, выбора и viewport', () => {
     const filterExpression: DataTableFilterExpression = {
       logic: 'and',
       rules: [

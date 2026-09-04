@@ -27,7 +27,7 @@ function rows(count: number, start = 0): Array<BenchRow> {
   })
 }
 
-describe('novaDataTable benchmarks', () => {
+describe('бенчмарки NovaDataTable', () => {
   bench('10M lazy store initialization', () => {
     const store = createDataTableStore<BenchRow>({
       rowKey: 'id',

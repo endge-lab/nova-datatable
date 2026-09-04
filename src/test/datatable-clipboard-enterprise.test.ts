@@ -186,8 +186,8 @@ function mountRoot(app: NovaApp<TestEvents>): DataTableRootNode<EnterpriseRow> {
   return uiRoot.children[0] as DataTableRootNode<EnterpriseRow>
 }
 
-describe('dataTable enterprise clipboard paste', () => {
-  it('parses and validates a typed TSV matrix through the public root API', async () => {
+describe('проверка Enterprise-вставка DataTable из буфера обмена', () => {
+  it('разбирает и проверяет типизированную TSV-матрицу через публичный корневой API', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const onPasteCommit = vi.fn()
@@ -229,7 +229,7 @@ describe('dataTable enterprise clipboard paste', () => {
     app.destroy()
   })
 
-  it('rejects invalid typed cells and reports paste errors without committing deltas', async () => {
+  it('отклоняет некорректные типизированные ячейки и сообщает об ошибках вставки без фиксации delta', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const onPasteCommit = vi.fn()
@@ -273,7 +273,7 @@ describe('dataTable enterprise clipboard paste', () => {
     app.destroy()
   })
 
-  it('commits valid cells and keeps invalid cells visible when invalid policy is commit-valid', async () => {
+  it('фиксирует корректные ячейки и оставляет некорректные видимыми при политике commit-valid', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const onPasteCommit = vi.fn()
@@ -314,7 +314,7 @@ describe('dataTable enterprise clipboard paste', () => {
     app.destroy()
   })
 
-  it('applies readonly skip and reject policies for locked cells', async () => {
+  it('применяет политики пропуска и отклонения readonly для заблокированных ячеек', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const onPasteError = vi.fn()
@@ -364,7 +364,7 @@ describe('dataTable enterprise clipboard paste', () => {
     app.destroy()
   })
 
-  it('allows onBeforePaste to replace parsed matrix commits with an explicit delta transaction', async () => {
+  it('позволяет onBeforePaste заменять фиксацию разобранной матрицы явной delta-транзакцией', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const overrideDeltas = [
@@ -404,7 +404,7 @@ describe('dataTable enterprise clipboard paste', () => {
     app.destroy()
   })
 
-  it('allows onBeforePaste to cancel paste without commit callbacks', async () => {
+  it('позволяет onBeforePaste отменять вставку без callbacks фиксации', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const onBeforePaste = vi.fn(() => false)
@@ -434,8 +434,8 @@ describe('dataTable enterprise clipboard paste', () => {
   })
 })
 
-describe('dataTable clipboard feedback contract', () => {
-  it('defines visible feedback state expected from future root API integration', () => {
+describe('контракт обратной связи DataTable для буфера обмена', () => {
+  it('определяет видимое состояние обратной связи для будущей интеграции с корневым API', () => {
     const partialResult: DataTablePasteResult<EnterpriseRow> = {
       committed: 2,
       skipped: 1,
@@ -464,7 +464,7 @@ describe('dataTable clipboard feedback contract', () => {
     })
   })
 
-  it('maps paste errors to visible rejected feedback', () => {
+  it('отображает ошибки вставки в видимую обратную связь об отклонении', () => {
     const result: DataTablePasteResult<EnterpriseRow> = {
       committed: 0,
       skipped: 1,

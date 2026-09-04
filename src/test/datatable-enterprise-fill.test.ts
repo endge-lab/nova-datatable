@@ -7,8 +7,8 @@ import {
   parseDataTableTsv,
 } from '@/model/runtime/DataTableFillMatrix'
 
-describe('dataTable enterprise fill matrix', () => {
-  it('repeats source cells over a larger fill target', () => {
+describe('матрица заполнения DataTable Enterprise', () => {
+  it('повторяет исходные ячейки по большей target заполнения', () => {
     const matrix = createDataTableFillMatrix({
       source: [
         ['A', 'B'],
@@ -26,7 +26,7 @@ describe('dataTable enterprise fill matrix', () => {
     ])
   })
 
-  it('continues numeric series vertically and horizontally', () => {
+  it('продолжает числовые серии по вертикали и горизонтали', () => {
     expect(createDataTableFillMatrix({
       source: [[1], [3]],
       rowCount: 5,
@@ -49,8 +49,8 @@ describe('dataTable enterprise fill matrix', () => {
   })
 })
 
-describe('dataTable enterprise clipboard parsing', () => {
-  it('parses TSV with quoted tabs and CRLF rows', () => {
+describe('разбор буфера обмена DataTable Enterprise', () => {
+  it('разбирает TSV с tab в кавычках и строками CRLF', () => {
     expect(parseDataTableTsv('"A\tB"\t42\r\nC\tD')).toEqual([
       ['A\tB', '42'],
       ['C', 'D'],
@@ -58,7 +58,7 @@ describe('dataTable enterprise clipboard parsing', () => {
     expect(parseDataTableClipboardMatrix('Alpha\tBeta', 'auto')).toEqual([['Alpha', 'Beta']])
   })
 
-  it('parses CSV with quoted commas and quoted newlines', () => {
+  it('разбирает CSV с запятыми и переносами строк в кавычках', () => {
     expect(parseDataTableCsv('name,notes\n"ACME, Inc","Line 1\nLine 2"\n')).toEqual([
       ['name', 'notes'],
       ['ACME, Inc', 'Line 1\nLine 2'],
@@ -66,7 +66,7 @@ describe('dataTable enterprise clipboard parsing', () => {
     expect(parseDataTableClipboardMatrix('A,B', 'auto')).toEqual([['A', 'B']])
   })
 
-  it('parses HTML table clipboard payloads and decodes common entities', () => {
+  it('разбирает payload HTML-таблицы из буфера обмена и декодирует распространённые entities', () => {
     const html = [
       '<table><tbody>',
       '<tr><th>Name</th><th>Amount</th></tr>',
@@ -84,7 +84,7 @@ describe('dataTable enterprise clipboard parsing', () => {
     ])
   })
 
-  it('keeps plain clipboard text as a single-cell matrix', () => {
+  it('сохраняет обычный текст буфера обмена как матрицу из одной ячейки', () => {
     expect(parseDataTableClipboardMatrix('single cell', 'plain')).toEqual([['single cell']])
   })
 })

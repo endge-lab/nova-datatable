@@ -193,8 +193,8 @@ function mountRoot(app: NovaApp<TestEvents>): DataTableRootNode<Row> {
   return uiRoot.children[0] as DataTableRootNode<Row>
 }
 
-describe('dataTableStore', () => {
-  it('keeps id/index maps consistent across mutations', () => {
+describe('хранилище DataTable', () => {
+  it('сохраняет согласованность maps ID и индексов при изменениях', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(3) })
 
     store.insert({ id: 'row-x', name: 'Inserted', status: 'draft', amount: 42 }, 1)
@@ -210,7 +210,7 @@ describe('dataTableStore', () => {
     expect(store.getRowAt(1)?.id).toBe('row-r')
   })
 
-  it('loads lazy ranges without materializing the full row count', async () => {
+  it('загружает ленивые диапазоны без материализации полного числа строк', async () => {
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -228,7 +228,7 @@ describe('dataTableStore', () => {
     expect(loadRange).toHaveBeenCalledWith({ start: 512, end: 1_536 }, undefined, undefined)
   })
 
-  it('coalesces lazy scroll bursts into page-aligned range requests', async () => {
+  it('объединяет всплески ленивой прокрутки в запросы диапазонов по границам страниц', async () => {
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -249,7 +249,7 @@ describe('dataTableStore', () => {
     expect(store.getRowAt(580)?.id).toBe('row-580')
   })
 
-  it('passes query state into lazy range adapters', async () => {
+  it('передаёт состояние запроса в адаптеры ленивых диапазонов', async () => {
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -270,7 +270,7 @@ describe('dataTableStore', () => {
     expect(loadRange).toHaveBeenCalledWith({ start: 0, end: 5 }, query, undefined)
   })
 
-  it('passes server source context into lazy range adapters and ignores stale responses', async () => {
+  it('передаёт контекст server source в адаптеры ленивых диапазонов и игнорирует устаревшие ответы', async () => {
     const loadRange = vi.fn((
       range: { start: number, end: number },
       _query: DataTableQueryState | undefined,
@@ -304,7 +304,7 @@ describe('dataTableStore', () => {
     expect(store.getRowAt(10)).toBeUndefined()
   })
 
-  it('delegates summary search resolve and subscribe through the lazy source contract', async () => {
+  it('делегирует разрешение и подписку summary search через контракт ленивого источника', async () => {
     const query: DataTableQueryState = {
       sort: [{ columnId: 'amount', direction: 'desc' }],
       filters: [{ columnId: 'status', operator: 'equals', value: 'active' }],
@@ -344,7 +344,7 @@ describe('dataTableStore', () => {
     expect(unsubscribe).toHaveBeenCalled()
   })
 
-  it('keeps plain lazy views sparse for huge row counts', () => {
+  it('сохраняет обычные ленивые представления разреженными при огромном числе строк', () => {
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -378,7 +378,7 @@ describe('dataTableStore', () => {
     expect(getRow).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps inactive client sort and filters sparse for lazy views', () => {
+  it('сохраняет неактивные клиентские сортировку и фильтры разреженными для ленивых представлений', () => {
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -421,7 +421,7 @@ describe('dataTableStore', () => {
     expect(getRow).not.toHaveBeenCalled()
   })
 
-  it('coalesces transaction revisions', () => {
+  it('объединяет ревизии транзакций', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(1) })
     const initialRevision = store.takeRevision()
 
@@ -435,7 +435,7 @@ describe('dataTableStore', () => {
     expect(store.getRow('row-10')?.amount).toBe(500)
   })
 
-  it('applies delta batches with dirty pages, rows and cells', () => {
+  it('применяет пакеты delta с изменёнными страницами, строками и ячейками', () => {
     const store = createDataTableStore<Row>({
       rowKey: 'id',
       rows: rows(40),
@@ -465,7 +465,7 @@ describe('dataTableStore', () => {
     expect(dirty.summary).toBe(true)
   })
 
-  it('moves loaded rows without rebuilding through dense array splices', () => {
+  it('перемещает загруженные строки без перестроения через плотные splice массива', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(5) })
 
     store.move('row-1', 3)
@@ -478,7 +478,7 @@ describe('dataTableStore', () => {
     expect(store.getDirtyState().structural).toBe(true)
   })
 
-  it('supports mixed structural deltas and preserves id/index consistency', () => {
+  it('поддерживает смешанные структурные delta и сохраняет согласованность ID и индексов', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(4) })
 
     store.applyDeltaBatch([
@@ -495,8 +495,8 @@ describe('dataTableStore', () => {
   })
 })
 
-describe('dataTableServerRowModel', () => {
-  it('passes the current query into range summary search and subscribe adapters', async () => {
+describe('серверная модель строк DataTable', () => {
+  it('передаёт текущий запрос в адаптеры поиска summary диапазона и подписки', async () => {
     const query: DataTableQueryState = {
       sort: [{ columnId: 'amount', direction: 'asc' }],
       filters: [{ columnId: 'status', operator: 'equals', value: 'active' }],
@@ -565,7 +565,7 @@ describe('dataTableServerRowModel', () => {
     expect(model.snapshot().query).toBeNull()
   })
 
-  it('keeps only the latest server summary response', async () => {
+  it('сохраняет только последний серверный ответ summary', async () => {
     const query: DataTableQueryState = { sort: [], filters: [], rowOrder: [], columnOrder: [] }
     const resolvers: Array<(value: Record<string, unknown>) => void> = []
     const store = createDataTableStore<Row>({
@@ -587,8 +587,8 @@ describe('dataTableServerRowModel', () => {
   })
 })
 
-describe('dataTable layout and columns', () => {
-  it('computes virtual ranges with overscan and pinned zones', () => {
+describe('проверка Layout и столбцы DataTable', () => {
+  it('вычисляет виртуальные диапазоны с overscan и закреплёнными зонами', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(200) })
     const columns = resolveDataTableColumns<Row>([
       { id: 'name', field: 'name', width: 160, pinned: 'left' },
@@ -619,7 +619,7 @@ describe('dataTable layout and columns', () => {
     expect(viewport.centerColumnRange).toEqual({ start: 0, end: 1 })
   })
 
-  it('virtualizes horizontally across wide center columns', () => {
+  it('выполняет горизонтальную виртуализацию широких центральных столбцов', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(200) })
     const centerColumns = Array.from({ length: 20 }, (_item, index) => ({
       id: `metric-${index}`,
@@ -653,7 +653,7 @@ describe('dataTable layout and columns', () => {
     expect(viewport.centerColumnOffset).toBe(viewport.centerColumnRange.start * 100)
   })
 
-  it('autosizes default text columns and respects clamps and manual overrides', () => {
+  it('автоматически подбирает размер стандартных текстовых столбцов и учитывает ограничения и ручные переопределения', () => {
     const store = createDataTableStore<Row>({ rowKey: 'id', rows: rows(4) })
     const column = {
       id: 'name',
@@ -671,8 +671,8 @@ describe('dataTable layout and columns', () => {
   })
 })
 
-describe('dataTable scrollbars', () => {
-  it('normalizes shared and axis scrollbar options', () => {
+describe('полосы прокрутки DataTable', () => {
+  it('нормализует общие и осевые параметры полос прокрутки', () => {
     const options = normalizeDataTableScrollbars({
       visibility: 'hover',
       thickness: 8,
@@ -699,7 +699,7 @@ describe('dataTable scrollbars', () => {
     expect(options.className).toBe('ops-scrollbar')
   })
 
-  it('uses root visual style defaults for scrollbar colors', () => {
+  it('использует стандартные значения корневого визуального стиля для цветов полос прокрутки', () => {
     const options = normalizeDataTableScrollbars({ visibility: 'always' }, {
       trackColor: '#eef2ff',
       thumbColor: '#2563eb',
@@ -715,7 +715,7 @@ describe('dataTable scrollbars', () => {
     expect(options.thumbHoverColor).toBe('#1d4ed8')
   })
 
-  it('calculates horizontal and vertical scrollbar geometry from viewport', () => {
+  it('вычисляет геометрию горизонтальной и вертикальной полос прокрутки из viewport', () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
 
@@ -750,7 +750,7 @@ describe('dataTable scrollbars', () => {
     app.destroy()
   })
 
-  it('maps scrollbar drag using total drag distance', () => {
+  it('преобразует drag полосы прокрутки по полной дистанции перетаскивания', () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
     root.setProps({
@@ -801,8 +801,8 @@ describe('dataTable scrollbars', () => {
   })
 })
 
-describe('dataTable editing', () => {
-  it('normalizes DOM overlay editing defaults and disabled mode', () => {
+describe('редактирование DataTable', () => {
+  it('нормализует стандартные параметры редактирования DOM overlay и отключённый режим', () => {
     const defaults = normalizeDataTableEditing(undefined)
     const disabled = normalizeDataTableEditing(false)
 
@@ -818,7 +818,7 @@ describe('dataTable editing', () => {
     expect(disabled).toBe(false)
   })
 
-  it('starts editing editable cells and commits through the store', async () => {
+  it('начинает редактирование доступных ячеек и фиксирует изменения через Store', async () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
 
@@ -841,7 +841,7 @@ describe('dataTable editing', () => {
     app.destroy()
   })
 
-  it('keeps the editor open on validation failure', async () => {
+  it('оставляет редактор открытым при ошибке проверки', async () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
 
@@ -872,7 +872,7 @@ describe('dataTable editing', () => {
     app.destroy()
   })
 
-  it('does not start editing disabled or non-editable cells', () => {
+  it('не начинает редактирование отключённых или нередактируемых ячеек', () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
 
@@ -892,7 +892,7 @@ describe('dataTable editing', () => {
     app.destroy()
   })
 
-  it('emits async commit errors and leaves the editor active', async () => {
+  it('отправляет ошибки асинхронной фиксации и оставляет редактор активным', async () => {
     const app = createApp(640, 360)
     const root = mountRoot(app)
     const onEditError = vi.fn()
@@ -922,7 +922,7 @@ describe('dataTable editing', () => {
   })
 })
 
-describe('dataTableViewPipeline', () => {
+describe('проверка Pipeline представления DataTable', () => {
   function createPipelineStore(): ReturnType<typeof createDataTableStore<Row>> {
     return createDataTableStore<Row>({
       rowKey: 'id',
@@ -992,14 +992,14 @@ describe('dataTableViewPipeline', () => {
     }
   }
 
-  it('enables append multi-sort by default in view options', () => {
+  it('по умолчанию включает добавочную мультисортировку в параметрах представления', () => {
     const view = normalizeDataTableView({})
 
     expect(view.sorting && view.sorting.multi).toBe(true)
     expect(view.sorting && view.sorting.headerClick).toBe('append')
   })
 
-  it('sorts, filters and applies manual row order over the current view', () => {
+  it('сортирует, фильтрует и применяет ручной порядок строк к текущему представлению', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     syncPipeline(pipeline, store)
@@ -1016,7 +1016,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getViewRows().map(row => row.rowId)).toEqual(['row-a', 'row-b', 'row-c'])
   })
 
-  it('cycles header multi-sort by appending columns and normalizing priorities', () => {
+  it('циклически переключает мультисортировку заголовка, добавляя столбцы и нормализуя приоритеты', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     syncPipeline(pipeline, store)
@@ -1040,7 +1040,7 @@ describe('dataTableViewPipeline', () => {
     ])
   })
 
-  it('filters rows with nested AND/OR expressions', () => {
+  it('фильтрует строки вложенными выражениями AND/OR', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     syncPipeline(pipeline, store)
@@ -1063,7 +1063,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getQuery().filters).toMatchObject({ logic: 'or' })
   })
 
-  it('searches cells, tracks active matches and stays sparse above maxClientRows', () => {
+  it('ищет по ячейкам, отслеживает активные совпадения и остаётся разреженным выше maxClientRows', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     syncPipeline(pipeline, store)
@@ -1121,7 +1121,7 @@ describe('dataTableViewPipeline', () => {
     expect(lazyPipeline.getQuery().search?.text).toBe('Row')
   })
 
-  it('keeps server mode as identity view while preserving query state', () => {
+  it('сохраняет серверный режим как identity-представление с сохранением состояния запроса', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     const columns = resolveDataTableColumns<Row>([
@@ -1150,7 +1150,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.isServerControlled()).toBe(true)
   })
 
-  it('keeps authoritative server row model sparse even when client modes are configured', () => {
+  it('сохраняет авторитетную серверную модель строк разреженной даже при настроенных клиентских режимах', () => {
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -1211,7 +1211,7 @@ describe('dataTableViewPipeline', () => {
     })
   })
 
-  it('appends paged server search matches without rebuilding local rows', () => {
+  it('добавляет постраничные серверные совпадения поиска без перестроения локальных строк', () => {
     const store = createDataTableStore<Row>({
       rowKey: 'id',
       source: { rowCount: 10_000_000 },
@@ -1266,7 +1266,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getViewRowAt(2)?.storeIndex).toBe(2)
   })
 
-  it('prepends previous server search pages and exposes cursor state', () => {
+  it('добавляет предыдущие страницы серверного поиска в начало и предоставляет состояние курсора', () => {
     const store = createDataTableStore<Row>({
       rowKey: 'id',
       source: { rowCount: 10_000_000 },
@@ -1329,7 +1329,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getSearchState().matches.map(match => match.rowId)).toEqual(['row-8', 'row-9', 'row-10'])
   })
 
-  it('preserves filter expression logic when patching a single column filter', () => {
+  it('сохраняет логику выражения фильтра при изменении фильтра одного столбца', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     pipeline.sync({
@@ -1380,7 +1380,7 @@ describe('dataTableViewPipeline', () => {
     })
   })
 
-  it('groups rows after filter and sort and exposes aggregate view rows', () => {
+  it('группирует строки после фильтрации и сортировки и предоставляет агрегированные строки представления', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     const columns = resolveDataTableColumns<Row>([
@@ -1412,7 +1412,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getGroupingState().expandedGroups).toEqual([])
   })
 
-  it('places group footer rows before children when grouping pinned policy requests group-start', () => {
+  it('размещает строки footer группы перед children, когда политика закрепления группировки требует group-start', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     const columns = resolveDataTableColumns<Row>([
@@ -1437,7 +1437,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.getViewRows().map(row => row.kind)).toEqual(['group', 'group-footer', 'data', 'data', 'grand-footer'])
   })
 
-  it('keeps server grouping as query state without local materialization', () => {
+  it('сохраняет серверную группировку как состояние запроса без локальной материализации', () => {
     const store = createPipelineStore()
     const pipeline = new DataTableViewPipeline<Row>(store)
     pipeline.sync({
@@ -1471,7 +1471,7 @@ describe('dataTableViewPipeline', () => {
     expect(pipeline.isServerControlled()).toBe(true)
   })
 
-  it('guards client sort/filter/grouping above maxClientRows and stays sparse', () => {
+  it('защищает клиентские сортировку, фильтрацию и группировку выше maxClientRows и остаётся разреженным', () => {
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -1517,7 +1517,7 @@ describe('dataTableViewPipeline', () => {
     expect(getRow).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps sparse lazy stores sparse below maxClientRows until rows are materialized', () => {
+  it('сохраняет разреженные ленивые Stores разреженными ниже maxClientRows до материализации строк', () => {
     const getRow = vi.fn((index: number) => rows(1, index)[0])
     const store = createDataTableStore<Row>({
       rowKey: 'id',
@@ -1554,8 +1554,8 @@ describe('dataTableViewPipeline', () => {
   })
 })
 
-describe('dataTableSummaryEngine', () => {
-  it('computes numeric summaries and updates them incrementally', () => {
+describe('движок summary DataTable', () => {
+  it('вычисляет числовые summary и обновляет их инкрементально', () => {
     const engine = new DataTableSummaryEngine<Row>()
     const result = engine.compute(rows(4), [
       { id: 'count', aggregate: 'count' },
@@ -1601,8 +1601,8 @@ describe('dataTableSummaryEngine', () => {
   })
 })
 
-describe('dataTable DSL templates', () => {
-  it('compiles column and pinned row marker nodes', () => {
+describe('проверка DSL-шаблоны DataTable', () => {
+  it('компилирует узлы markers столбцов и закреплённых строк', () => {
     const cellSlot = (context: DataTableCellContext<Row>) => [
       h(Surface, { background: '#fff', padding: '0 10' }, () => [
         h(TextBlock, { text: String(context.value), ellipsis: true }),
@@ -1638,7 +1638,7 @@ describe('dataTable DSL templates', () => {
     expect(dsl.columns[0].editorTemplate).toBeTypeOf('function')
   })
 
-  it('turns scoped slots into primitive Nova schemas', () => {
+  it('преобразует scoped slots в схемы примитивов Nova', () => {
     const template = createSlotTemplate<Row>(context => [
       h(Surface, { background: '#f8fafc', padding: '0 8' }, () => [
         h(TextBlock, { text: String(context.value), ellipsis: true }),
@@ -1692,7 +1692,7 @@ describe('dataTable DSL templates', () => {
     expect(schema?.[1].styles?.ellipsis).toBe(true)
   })
 
-  it('compiles interaction layer marker nodes', () => {
+  it('компилирует узлы markers слоя взаимодействия', () => {
     const dsl = compileDataTableDslNodes<Row>([
       h(DataTableInteractionLayer, {}, {
         hover: () => [
@@ -1741,7 +1741,7 @@ describe('dataTable DSL templates', () => {
     })
   })
 
-  it('compiles scrollbar layer marker nodes', () => {
+  it('компилирует узлы markers слоя полос прокрутки', () => {
     const dsl = compileDataTableDslNodes<Row>([
       h(DataTableScrollbarLayer, {}, {
         default: () => [
@@ -1804,7 +1804,7 @@ describe('dataTable DSL templates', () => {
     })
   })
 
-  it('compiles grouping marker templates', () => {
+  it('компилирует шаблоны markers группировки', () => {
     const dsl = compileDataTableDslNodes<Row>([
       h(DataTableGrouping, {
         groups: [{ id: 'status', field: 'status' }],
@@ -1829,8 +1829,8 @@ describe('dataTable DSL templates', () => {
   })
 })
 
-describe('dataTable Root runtime', () => {
-  it('mounts root and exposes the public ref API', () => {
+describe('проверка Runtime корня DataTable', () => {
+  it('монтирует корень и предоставляет публичный API ref', () => {
     const app = createApp()
     const root = mountRoot(app)
     const api = root.getApi()
@@ -1849,7 +1849,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('does not clear an external lazy store when rows prop is empty', () => {
+  it('не очищает внешний ленивый Store при пустом prop rows', () => {
     const app = createApp()
     const root = mountRoot(app)
     const store = createDataTableStore<Row>({
@@ -1868,7 +1868,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('roundtrips persisted column state through the public API', () => {
+  it('обеспечивает round-trip сохранённого состояния столбцов через публичный API', () => {
     const app = createApp()
     const root = mountRoot(app)
     const onColumnStateChange = vi.fn()
@@ -1910,7 +1910,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('saves and restores configured persisted state slices', () => {
+  it('сохраняет и восстанавливает настроенные срезы сохраняемого состояния', () => {
     installStorageMock()
     const key = 'datatable:persistence:test'
     window.localStorage.removeItem(key)
@@ -1993,7 +1993,7 @@ describe('dataTable Root runtime', () => {
     nextApp.destroy()
   })
 
-  it('uses header menu actions before sort and column drag', () => {
+  it('использует Actions меню заголовка раньше сортировки и drag столбца', () => {
     const app = createApp()
     const root = mountRoot(app)
     const onSortChange = vi.fn()
@@ -2022,7 +2022,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('moves active cells through the keyboard navigation API', () => {
+  it('перемещает активные ячейки через API клавиатурной навигации', () => {
     const app = createApp()
     const root = mountRoot(app)
     const onActiveCellChange = vi.fn()
@@ -2068,7 +2068,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('reserves Tab movement when keyboard tab action is commit-edit', () => {
+  it('резервирует перемещение Tab, когда действие клавиши tab равно commit-edit', () => {
     const app = createApp()
     const root = mountRoot(app)
     const tabEvent = new KeyboardEvent('keydown', { key: 'Tab' })
@@ -2097,7 +2097,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('uses column templates before table templates', () => {
+  it('использует шаблоны столбцов раньше шаблонов таблицы', () => {
     const app = createApp()
     const tableCellTemplate = vi.fn(() => [])
     const columnCellTemplate = vi.fn(() => [])
@@ -2131,7 +2131,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('updates hover overlay without rebuilding body templates and emits enter/leave', () => {
+  it('обновляет hover overlay без перестроения шаблонов body и отправляет enter/leave', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
     const onCellEnter = vi.fn()
@@ -2189,7 +2189,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('updates selection overlay without rebuilding visible cell templates', () => {
+  it('обновляет overlay выбора без перестроения шаблонов видимых ячеек', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
     const surface = app.createSurface('datatable-selection-layer-test')
@@ -2235,7 +2235,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('rebuilds grid layers for viewport, data and column changes', () => {
+  it('перестраивает слои сетки при изменении viewport, данных и столбцов', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
     const surface = app.createSurface('datatable-grid-layer-dirty-test')
@@ -2290,7 +2290,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('renders default cell backgrounds as plain rects and draws grid lines as batch-friendly rects', () => {
+  it('отрисовывает стандартный фон ячеек обычными прямоугольниками, а линии сетки — удобными для пакетной обработки прямоугольниками', () => {
     const app = createApp()
     const surface = app.createSurface('datatable-default-background-span-test')
     const uiRoot = app.schema.createNode(surface, {
@@ -2341,7 +2341,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('coalesces wheel scroll bursts into one animation-frame scroll update', () => {
+  it('объединяет всплески wheel-прокрутки в одно обновление прокрутки на кадр анимации', () => {
     const callbacks: Array<FrameRequestCallback> = []
     const originalRequestAnimationFrame = globalThis.requestAnimationFrame
     const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
@@ -2385,7 +2385,7 @@ describe('dataTable Root runtime', () => {
     }
   })
 
-  it('uses reduced overscan during active scroll and restores it after idle', () => {
+  it('использует уменьшенный overscan во время активной прокрутки и восстанавливает его после простоя', () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2421,7 +2421,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('suppresses heavy overlay layers during active scroll LOD', () => {
+  it('отключает тяжёлые слои overlay во время активного LOD прокрутки', () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2459,7 +2459,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('keeps lazy summary sparse during viewport scroll', () => {
+  it('сохраняет ленивый summary разреженным при прокрутке viewport', () => {
     const app = createApp()
     const loadRange = vi.fn(range => rows(range.end - range.start, range.start))
     const store = createDataTableStore<Row>({
@@ -2504,7 +2504,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('keeps hover target synchronized with vertical and horizontal scroll', () => {
+  it('синхронизирует target hover с вертикальной и горизонтальной прокруткой', () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2546,7 +2546,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('does not schedule cell enter fade in sync scheduler mode', () => {
+  it('не планирует fade-in ячейки в синхронном режиме scheduler', () => {
     const app = createApp()
     const root = mountRoot(app)
     const invalidate = vi.spyOn(app, 'invalidate')
@@ -2565,7 +2565,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('acquires a temporary loop lease while animated columns are visible', async () => {
+  it('получает временный lease цикла, пока видны анимированные столбцы', async () => {
     const app = createApp()
     const release = vi.fn()
     const acquireLoop = vi.spyOn(app.raph, 'acquireLoop').mockReturnValue({ owner: 'test', release })
@@ -2594,7 +2594,7 @@ describe('dataTable Root runtime', () => {
     expect(release).toHaveBeenCalledTimes(1)
   })
 
-  it('resizes columns only from header handles and does not hijack body cells', () => {
+  it('изменяет размер столбцов только через handles заголовка и не перехватывает ячейки body', () => {
     const app = createApp()
     const onSelectionChange = vi.fn()
     const onColumnResize = vi.fn()
@@ -2661,7 +2661,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('supports shift ranges, ctrl toggles and drag range preview for cell selection', () => {
+  it('поддерживает диапазоны Shift, переключения Ctrl и preview диапазона drag при выборе ячеек', () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2707,7 +2707,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('updates native cursor only over header resize handles', () => {
+  it('обновляет нативный курсор только над handles изменения размера заголовка', () => {
     const app = createApp()
     const root = mountRoot(app)
 
@@ -2723,7 +2723,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('applies text render mode and can hide text items for diagnostics', () => {
+  it('применяет режим render текста и может скрывать текстовые элементы для диагностики', () => {
     const app = createApp()
     const root = mountRoot(app)
     const collectTextItems = () => {
@@ -2774,7 +2774,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('copies and pastes selected cells through typed column policies', async () => {
+  it('копирует и вставляет выбранные ячейки через типизированные политики столбцов', async () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2809,7 +2809,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('supports row and column selection without expanding selected cells', () => {
+  it('поддерживает выбор строк и столбцов без расширения выбранных ячеек', () => {
     const app = createApp()
     const root = mountRoot(app)
     root.setProps({
@@ -2835,7 +2835,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('renders clipped row-column hover overlay without crossing pinned boundaries', () => {
+  it('отрисовывает обрезанный hover overlay строки и столбца без пересечения закреплённых границ', () => {
     const app = createApp(620, 220)
     const root = mountRoot(app)
     root.setProps({
@@ -2862,7 +2862,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('sorts from header clicks and maps rendered rows through the view pipeline', () => {
+  it('сортирует по кликам заголовка и отображает отрисованные строки через pipeline представления', () => {
     const app = createApp()
     const cellTemplate = vi.fn(() => [])
     const headerTemplate = vi.fn(() => [])
@@ -2913,7 +2913,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('renders group rows and toggles them from pointer input', () => {
+  it('отрисовывает строки групп и переключает их через pointer input', () => {
     const app = createApp()
     const groupRowTemplate = vi.fn(() => [])
     const onGroupingChange = vi.fn()
@@ -2968,7 +2968,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('treats grouped rows as full-row interaction targets', () => {
+  it('считает сгруппированные строки targets взаимодействия со всей строкой', () => {
     const app = createApp()
     const surface = app.createSurface('datatable-group-hover-test')
     const uiRoot = app.schema.createNode(surface, {
@@ -3031,7 +3031,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('filters rows and reorders columns through the public API', () => {
+  it('фильтрует строки и переупорядочивает столбцы через публичный API', () => {
     const app = createApp()
     const root = mountRoot(app)
     const onFilterChange = vi.fn()
@@ -3073,7 +3073,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('drag-reorders columns from the header when column ordering is enabled', () => {
+  it('переупорядочивает столбцы drag из заголовка при включённом упорядочивании', () => {
     const app = createApp()
     const root = mountRoot(app)
     const onColumnOrderChange = vi.fn()
@@ -3136,7 +3136,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('coalesces public delta batches before the next render turn', async () => {
+  it('объединяет публичные пакеты delta до следующего цикла render', async () => {
     const app = createApp()
     const root = mountRoot(app)
     const revision = root.store.takeRevision()
@@ -3158,7 +3158,7 @@ describe('dataTable Root runtime', () => {
     app.destroy()
   })
 
-  it('clips header and pinned rows by horizontal column regions', () => {
+  it('обрезает заголовок и закреплённые строки по горизонтальным областям столбцов', () => {
     const app = createApp(620, 220)
     const surface = app.createSurface('datatable-horizontal-clip-test')
     const uiRoot = app.schema.createNode(surface, {

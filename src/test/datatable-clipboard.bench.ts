@@ -188,7 +188,7 @@ function withBenchRoot(callback: (root: DataTableRootNode<ClipboardBenchRow>) =>
   document.body.innerHTML = ''
 }
 
-describe('novaDataTable clipboard benchmarks', () => {
+describe('бенчмарки буфера обмена NovaDataTable', () => {
   bench('copy 10k typed cells from selected range', () => {
     withBenchRoot((root) => {
       root.getApi().selectRange({

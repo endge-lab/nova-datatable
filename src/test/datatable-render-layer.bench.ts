@@ -195,7 +195,7 @@ function mountLazyBenchRoot(rowCount: number): { app: NovaApp<TestEvents>, root:
   }
 }
 
-describe('novaDataTable render layer benchmarks', () => {
+describe('бенчмарки слоя render NovaDataTable', () => {
   bench('100 rows x 54 columns hover 1000 moves without template rebuilds', () => {
     const { app, root, calls } = mountBenchRoot(100)
     const before = calls()

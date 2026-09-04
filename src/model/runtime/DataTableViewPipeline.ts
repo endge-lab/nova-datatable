@@ -959,7 +959,7 @@ export class DataTableViewPipeline<Row extends Record<string, any> = Record<stri
   }
 
   /**
-   * Rebuilds compact lookup maps for render-time search highlight checks.
+   * Перестраивает компактные lookup-карты для проверки подсветки поиска во время render.
    */
   private _reindexSearchMatches(): void {
     this._searchMatchByCell.clear()

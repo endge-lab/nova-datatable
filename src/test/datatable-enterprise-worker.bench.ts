@@ -42,7 +42,7 @@ const query: DataTableQueryState = {
   columnOrder: [],
 }
 
-describe('novaDataTable enterprise worker/index benchmarks', () => {
+describe('бенчмарки worker/index NovaDataTable Enterprise', () => {
   bench('build 100k worker index', () => {
     createDataTableWorkerIndexPipeline({
       rows: source,

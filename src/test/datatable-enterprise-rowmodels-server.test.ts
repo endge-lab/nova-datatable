@@ -76,8 +76,8 @@ function deferred<T>(): { promise: Promise<T>, resolve: (value: T) => void } {
   return { promise, resolve }
 }
 
-describe('dataTable enterprise tree row model helpers', () => {
-  it('flattens tree rows using explicit expand/collapse state', () => {
+describe('проверка Helpers древовидной модели строк DataTable Enterprise', () => {
+  it('разворачивает строки дерева с явным состоянием expand/collapse', () => {
     const controller = new DataTableTreeExpansionController(['north'])
 
     const first = flattenDataTableTreeRows({
@@ -121,8 +121,8 @@ describe('dataTable enterprise tree row model helpers', () => {
   })
 })
 
-describe('dataTable enterprise detail row helpers', () => {
-  it('inserts detail rows after expanded data rows only', () => {
+describe('проверка Helpers строк детализации DataTable Enterprise', () => {
+  it('вставляет строки детализации только после раскрытых строк данных', () => {
     const controller = new DataTableDetailExpansionController(['row-b', 'row-d'])
     const flattened = flattenDataTableDetailRows({
       rows: dataViewRows(flatRows()),
@@ -152,8 +152,8 @@ describe('dataTable enterprise detail row helpers', () => {
   })
 })
 
-describe('dataTable enterprise worker/index query simulator', () => {
-  it('filters, sorts, searches and pages over indexed rows', async () => {
+describe('симулятор запросов worker/index DataTable Enterprise', () => {
+  it('фильтрует, сортирует, ищет и разбивает индексированные строки на страницы', async () => {
     const pipeline = createDataTableWorkerIndexPipeline({
       rows: flatRows(),
       getRowId: row => row.id,
@@ -195,8 +195,8 @@ describe('dataTable enterprise worker/index query simulator', () => {
   })
 })
 
-describe('dataTable enterprise server datasource hardening', () => {
-  it('marks older latest-only requests as stale and records metrics', async () => {
+describe('защита серверного datasource DataTable Enterprise', () => {
+  it('помечает более старые latest-only запросы устаревшими и записывает метрики', async () => {
     const hardening = new DataTableServerHardening({ delay: () => Promise.resolve() })
     const firstGate = deferred<string>()
 
@@ -223,7 +223,7 @@ describe('dataTable enterprise server datasource hardening', () => {
     })
   })
 
-  it('retries transient failures and serves repeated requests from cache', async () => {
+  it('повторяет временные ошибки и обслуживает повторные запросы из cache', async () => {
     let attempts = 0
     let now = 1000
     const hardening = new DataTableServerHardening({
@@ -275,7 +275,7 @@ describe('dataTable enterprise server datasource hardening', () => {
     expect(hardening.metrics().cacheEvictions).toBeGreaterThanOrEqual(1)
   })
 
-  it('invalidates active request tokens when server revision changes', () => {
+  it('инвалидирует tokens активных запросов при изменении серверной ревизии', () => {
     const hardening = new DataTableServerHardening()
     const token = hardening.begin('search')
 

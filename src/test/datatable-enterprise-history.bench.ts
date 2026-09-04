@@ -29,7 +29,7 @@ function rows(count: number): Array<HistoryBenchRow> {
   }))
 }
 
-describe('novaDataTable enterprise history benchmarks', () => {
+describe('бенчмарки истории NovaDataTable Enterprise', () => {
   bench('build inverse for 10k setCell deltas', () => {
     const store = createDataTableStore<HistoryBenchRow>({ rowKey: 'id', rows: rows(20_000) })
     createInverseDataTableDeltas(store, BENCH_DELTAS)

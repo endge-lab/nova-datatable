@@ -65,7 +65,7 @@ function groupedColumns(groupCount: number, columnsPerGroup: number): Array<Data
   }))
 }
 
-describe('novaDataTable enterprise column filter a11y benchmarks', () => {
+describe('бенчмарки a11y фильтра столбцов NovaDataTable Enterprise', () => {
   bench('set-filter values from 200k sparse store rows', () => {
     const store = createDataTableStore<EnterpriseBenchRow>({ rowKey: 'id', rows: rows(200_000) })
     const column: DataTableColumnInput<EnterpriseBenchRow> = {
