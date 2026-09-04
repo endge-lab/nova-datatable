@@ -1,7 +1,7 @@
 {
   "name": "@endge/nova-datatable",
   "type": "module",
-  "version": "0.16.14",
+  "version": "0.17.0",
   "private": false,
   "sideEffects": false,
   "exports": {
@@ -27,16 +27,16 @@
     "lint-fix": "eslint . --fix --cache"
   },
   "dependencies": {
-    "@endge/nova": "^0.13.6",
-    "@endge/nova-ui-kit": "^0.10.9",
-    "@endge/nova-vue": "^0.3.3",
-    "@endge/utils": "^0.25.0",
+    "@endge/nova": "^0.14.0",
+    "@endge/nova-ui-kit": "^0.11.0",
+    "@endge/nova-vue": "^0.4.0",
+    "@endge/utils": "^0.26.0",
     "reflect-metadata": "^0.2.2",
     "vue": "^3.5.25"
   },
   "devDependencies": {
     "@antfu/eslint-config": "9.3.0",
-    "@endge/nova-compiler": "^0.6.2",
+    "@endge/nova-compiler": "^0.7.0",
     "@vitejs/plugin-vue": "^6.0.0",
     "@vue/language-core": "^3.3.11",
     "@vue/tsconfig": "^0.9.1",
